@@ -3,6 +3,7 @@ import pandas as pd
 import requests
 import numpy as np
 import os
+ODDS_API_KEY = "de66554a17bce1149445b1a883056607"
 
 from modules.montecarlo_mlb import simular_partido_mlb
 from modules.ml_mlb import PredictorMLMLB
@@ -62,52 +63,44 @@ if st.checkbox("Mostrar vista previa de los datos históricos"):
     st.dataframe(df_games.head())
     
 @st.cache_data(ttl=300)
-def obtener_cartelera_espn():
-    url = "https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard"
+def obtener_cartelera_profesional():
+    url = f"https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/?apiKey={ODDS_API_KEY}&regions=us&markets=h2h,totals&oddsFormat=american"
     partidos = {}
     try:
         res = requests.get(url, timeout=5)
         if res.status_code == 200:
             data = res.json()
-            for event in data.get('events', []):
-                comp = event.get('competitions', [{}])[0]
-                estado = comp.get('status', {}).get('type', {}).get('state', '')
+            for game in data:
+                home = game['home_team']
+                away = game['away_team']
                 
-                # Solo tomamos partidos que aún no terminan
-                if estado == 'post': continue
-                
-                local, visita = "", ""
-                for team in comp.get('competitors', []):
-                    nombre = team.get('team', {}).get('displayName', '')
-                    if team.get('homeAway') == 'home': local = nombre
-                    else: visita = nombre
-                    
-                # Extraer Cuotas (Odds) dinámicas de ESPN
-                linea_carreras = 8.5
-                cuota_loc_dec = 1.90
-                cuota_over_dec = 1.90
-                
-                odds = comp.get('odds', [])
-                if odds:
-                    main_odds = odds[0]
-                    linea_carreras = main_odds.get('overUnder', 8.5)
-                    loc_odds = main_odds.get('homeTeamOdds', {}).get('moneyLine', -110)
-                    over_odds = main_odds.get('overOdds', -110)
-                    
-                    cuota_loc_dec = american_to_decimal(loc_odds)
-                    cuota_over_dec = american_to_decimal(over_odds)
-
-                if local and visita:
-                    llave = f"⚾ {visita} @ {local}"
-                    partidos[llave] = {
-                        "local": local, "visita": visita,
-                        "linea_carreras": linea_carreras,
-                        "cuota_loc": cuota_loc_dec, "cuota_over": cuota_over_dec
-                    }
+                # Buscamos cuotas de DraftKings o Caesars (las más comunes)
+                for bookmaker in game['bookmakers']:
+                    if bookmaker['key'] in ['draftkings', 'caesars']:
+                        markets = {m['key']: m['outcomes'] for m in bookmaker['markets']}
+                        
+                        # Extraer Moneyline
+                        h2h = markets.get('h2h', [])
+                        linea_home = next((o['price'] for o in h2h if o['name'] == home), -110)
+                        
+                        # Extraer Totales
+                        totals = markets.get('totals', [])
+                        linea_total = totals[0]['point'] if totals else 8.5
+                        cuota_over = next((o['price'] for o in totals if o['name'] == 'Over'), -110)
+                        
+                        llave = f"⚾ {away} @ {home}"
+                        partidos[llave] = {
+                            "local": home, "visita": away,
+                            "linea_carreras": linea_total,
+                            "cuota_loc": american_to_decimal(linea_home),
+                            "cuota_over": american_to_decimal(cuota_over)
+                        }
+                        break # Tomamos la primera casa disponible
+        else:
+            st.error(f"Error en Odds API: {res.status_code}")
     except Exception as e:
-        st.error(f"Error conectando a ESPN: {e}")
+        st.error(f"Error conectando a Odds API: {e}")
     return partidos
-
 # --- INTERFAZ PRINCIPAL ---
 st.title("⚾ MLB Quant Analytics")
 st.markdown("Motor predictivo basado en Sabermetría avanzada, simulaciones de Montecarlo y Machine Learning.")
