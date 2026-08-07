@@ -247,7 +247,9 @@ else:
                 
                 cuotas_reales = {
                     "Moneyline_Local": cuota_ml_local,
-                    "Cuota_Over": cuota_over
+                    "Moneyline_Visita": cuota_ml_visita, # Agrega esta si la extraes de la API
+                    "Cuota_Over": cuota_over,
+                    "Cuota_Under": cuota_over # O la cuota específica del under si la tienes
                 }
                 df_apuestas = analizar_apuestas_mlb(res_mc, preds_ml, cuotas_reales, linea_carreras)
                 
