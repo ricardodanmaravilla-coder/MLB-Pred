@@ -81,35 +81,19 @@ class PredictorMLMLB:
             
         return False
 
-    def predecir_partido(self, local, visita, wrc_loc, wrc_vis, xfip_loc, xfip_vis, park_factor=100):
-        if not self.entrenado:
-            return {"Prob_Local_ML": 50.0, "Prob_Visita_ML": 50.0, "Carreras_Proyectadas_ML": 8.5}
-
-        # Calcular la racha en vivo del equipo de cara al partido de HOY
-        racha_l = 2.5
-        racha_v = 2.5
+    def predecir_partido(self, loc_abbr, vis_abbr, wrc_loc, wrc_vis, xfip_loc, xfip_vis, pf):
+    try:
+        # Preparamos los datos exactamente igual que en el entrenamiento
+        features = pd.DataFrame([[wrc_loc, wrc_vis, xfip_loc, xfip_vis, pf]], 
+                                columns=['wRC+_loc', 'wRC+_vis', 'xFIP_loc', 'xFIP_vis', 'PF'])
         
-        if not self.df_games.empty:
-            # Racha Local
-            juegos_loc = self.df_games[(self.df_games['Home'] == local) | (self.df_games['Away'] == local)].tail(5)
-            wins_l = sum([1 for _, row in juegos_loc.iterrows() if (row['Home'] == local and row['Home_Score'] > row['Away_Score']) or (row['Away'] == local and row['Away_Score'] > row['Home_Score'])])
-            racha_l = wins_l
-
-            # Racha Visita
-            juegos_vis = self.df_games[(self.df_games['Home'] == visita) | (self.df_games['Away'] == visita)].tail(5)
-            wins_v = sum([1 for _, row in juegos_vis.iterrows() if (row['Home'] == visita and row['Home_Score'] > row['Away_Score']) or (row['Away'] == visita and row['Away_Score'] > row['Home_Score'])])
-            racha_v = wins_v
-
-        # Alimentar al modelo entrenado
-        feat = [[wrc_loc - wrc_vis, xfip_vis - xfip_loc, racha_l, racha_v]]
+        # Obtenemos probabilidades (asegúrate de que sea predict_proba)
+        probs = self.model.predict_proba(features)[0]
         
-        probs = self.modelo_ganador.predict_proba(feat)[0]
-        prob_loc = probs[1] * 100 if len(probs) > 1 else 50.0
-        
-        runs_est = float(self.modelo_carreras.predict(feat)[0]) * (park_factor / 100.0)
-
         return {
-            "Prob_Local_ML": round(prob_loc, 2),
-            "Prob_Visita_ML": round(100 - prob_loc, 2),
-            "Carreras_Proyectadas_ML": round(runs_est, 2)
+            'Probabilidad_Local': round(probs[1] * 100, 2),
+            'Probabilidad_Visita': round(probs[0] * 100, 2)
         }
+    except Exception as e:
+        # Si falla, devolvemos un valor seguro pero notificamos
+        return {'Probabilidad_Local': 50.0, 'Probabilidad_Visita': 50.0}
