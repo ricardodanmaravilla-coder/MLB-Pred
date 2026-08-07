@@ -4,8 +4,6 @@ import requests
 import numpy as np
 import os
 
-ODDS_API_KEY = "de66554a17bce1149445b1a883056607"
-
 from modules.montecarlo_mlb import simular_partido_mlb
 from modules.ml_mlb import PredictorMLMLB
 from modules.odds_mlb import analizar_apuestas_mlb
