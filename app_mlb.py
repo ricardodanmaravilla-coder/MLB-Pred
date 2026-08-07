@@ -34,7 +34,6 @@ def american_to_decimal(am_odds):
 # --- CARGA DE DATOS HISTÓRICOS ---
 @st.cache_data(ttl=3600)
 def cargar_datos_historicos():
-    # Creamos estructuras base vacías por seguridad si faltan archivos
     bateo = pd.DataFrame()
     pitcheo = pd.DataFrame()
     park = pd.DataFrame()
@@ -53,6 +52,14 @@ def cargar_datos_historicos():
         st.warning(f"Aviso de carga de datos: {e}")
         
     return bateo, pitcheo, park, games
+
+# Cargar los datos usando los nombres exactos
+df_bat, df_pit, df_park, df_games = cargar_datos_historicos()
+
+# Verificación de seguridad
+if df_bat.empty or df_pit.empty:
+    st.warning("⚠️ No se encontraron los datos históricos o están vacíos. Asegúrate de que los archivos CSV estén en la carpeta 'data/'.")
+    st.stop()
     
 # Verificación rápida en la UI
 if st.checkbox("Mostrar vista previa de los datos históricos"):
