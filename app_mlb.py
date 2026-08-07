@@ -55,46 +55,51 @@ df_bat, df_pit, df_parks, df_games = cargar_datos_historicos()
 
 @st.cache_data(ttl=600)
 def obtener_clima_estadio(nombre_equipo):
-    if df_parks.empty:
-        return None, None, "CSV Vacío"
-        
-    df_parks.columns = df_parks.columns.str.strip()
-    abbr = EQUIPOS_MAP.get(nombre_equipo, "")
+    """Consulta el clima real en vivo usando el servicio nativo de wttr.in basado en el estadio, sin valores fijos"""
+    ciudades_estadios = {
+        "New York Yankees": "New_York", "Boston Red Sox": "Boston", "Los Angeles Dodgers": "Los_Angeles",
+        "Houston Astros": "Houston", "Atlanta Braves": "Atlanta", "Philadelphia Phillies": "Philadelphia",
+        "Baltimore Orioles": "Baltimore", "Tampa Bay Rays": "St._Petersburg", "Toronto Blue Jays": "Toronto",
+        "Chicago White Sox": "Chicago", "Cleveland Guardians": "Cleveland", "Detroit Tigers": "Detroit",
+        "Kansas City Royals": "Kansas_City", "Minnesota Twins": "Minneapolis", "Los Angeles Angels": "Anaheim",
+        "Oakland Athletics": "Oakland", "Seattle Mariners": "Seattle", "Texas Rangers": "Arlington",
+        "Chicago Cubs": "Chicago", "Cincinnati Reds": "Cincinnati", "Milwaukee Brewers": "Milwaukee",
+        "Pittsburgh Pirates": "Pittsburgh", "St. Louis Cardinals": "St._Louis", "Arizona Diamondbacks": "Phoenix",
+        "Colorado Rockies": "Denver", "San Francisco Giants": "San_Francisco", "San Diego Padres": "San_Diego",
+        "Miami Marlins": "Miami", "New York Mets": "New_York", "Washington Nationals": "Washington_DC"
+    }
     
-    park_data = df_parks[df_parks['Team'] == abbr]
-    if park_data.empty:
-        park_data = df_parks[df_parks.apply(lambda row: row.astype(str).str.contains(nombre_equipo.split()[-1], case=False).any(), axis=1)]
-    
-    if park_data.empty:
+    ciudad = ciudades_estadios.get(nombre_equipo)
+    if not ciudad:
         return None, None, "No disponible"
-    
-    try:
-        lat_col = [c for c in park_data.columns if 'lat' in c.lower()][0]
-        lon_col = [c for c in park_data.columns if 'lon' in c.lower()][0]
         
-        lat = float(park_data[lat_col].values[0])
-        lon = float(park_data[lon_col].values[0])
-    except Exception:
-        return None, None, "Error Lat/Lon"
+    url = f"https://wttr.in/{ciudad}?format=j1"
     
-    url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current=temperature_2m,wind_speed_10m,wind_direction_2m"
     try:
         res = requests.get(url, timeout=5)
         if res.status_code == 200:
-            data = res.json().get('current', {})
-            temp_f = int((data.get('temperature_2m', 22.0) * 9/5) + 32)
-            wind_mph = int(data.get('wind_speed_10m', 8.0) * 0.621371)
-            deg = data.get('wind_direction_2m', 0)
+            data = res.json()
+            current = data.get('current_condition', [{}])[0]
+            
+            temp_f = int(current.get('temp_F'))
+            wind_mph = int(current.get('windspeedMiles'))
+            wind_dir = current.get('winddir16Point', '')
             
             dir_str = "None"
-            if (315 <= deg <= 360) or (0 <= deg < 45): dir_str = "Infield (Hacia Adentro)"
-            elif 135 <= deg < 225: dir_str = "Outfield (Hacia Afuera)"
-            elif 45 <= deg < 135: dir_str = "Lateral (Derecha a Izquierda)"
-            elif 225 <= deg < 315: dir_str = "Lateral (Izquierda a Derecha)"
+            if wind_dir in ['N', 'NNE', 'NNW', 'NE']:
+                dir_str = "Infield (Hacia Adentro)"
+            elif wind_dir in ['S', 'SSW', 'SSE', 'SW']:
+                dir_str = "Outfield (Hacia Afuera)"
+            elif wind_dir in ['E', 'ENE', 'ESE']:
+                dir_str = "Lateral (Derecha a Izquierda)"
+            elif wind_dir in ['W', 'WNW', 'WSW']:
+                dir_str = "Lateral (Izquierda a Derecha)"
+                
             return temp_f, wind_mph, dir_str
-    except:
+    except Exception:
         pass
-    return None, None, "Error API"
+        
+    return None, None, "No disponible"
 
 @st.cache_data(ttl=300)
 def obtener_cartelera_y_cuotas_automaticas():
@@ -187,10 +192,10 @@ else:
             st.metric(f"Cuota ML ({datos_partido['local']})", datos_partido["cuota_loc"] if datos_partido["cuota_loc"] is not None else "No disponible")
             st.metric(f"Cuota ML ({datos_partido['visita']})", datos_partido["cuota_vis"] if datos_partido["cuota_vis"] is not None else "No disponible")
         with c3:
-            viento = st.number_input("Viento (mph)", value=int(viento_auto) if viento_auto is not None else 8, step=1)
+            viento = st.number_input("Viento (mph)", value=int(viento_auto) if viento_auto is not None else 0, step=1)
             dir_viento = st.selectbox("Dirección del Viento", opciones_viento, index=indice_dir)
         with c4:
-            temp = st.slider("Temperatura (°F)", 30, 110, int(temp_auto) if temp_auto is not None else 72)
+            temp = st.slider("Temperatura (°F)", 30, 110, int(temp_auto) if temp_auto is not None else 70)
             
         if st.button("🚀 Ejecutar Simulación Cuántica", type="primary"):
             with st.spinner("Procesando datos en vivo y ejecutando 500,000 escenarios..."):
