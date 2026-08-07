@@ -312,8 +312,8 @@ else:
                             )
 
                             # --- LÓGICA DE FILTRADO EV+ (Valor Esperado) ---
-                            umbral_ml = 54.0
-                            umbral_ou = 58.0
+                            umbral_ml = 60.0
+                            umbral_ou = 60.0
 
                             prob_mc_loc = res_mc['Moneyline']['Gana Local']
                             prob_mc_vis = res_mc['Moneyline']['Gana Visita']
