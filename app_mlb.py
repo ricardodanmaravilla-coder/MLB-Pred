@@ -182,7 +182,7 @@ else:
         
         if modo_app == "🔍 Escáner Automático de la Jornada (EV+)":
             st.subheader("🔍 Escáner Cuántico de Valor para Toda la Jornada")
-            st.markdown("Analiza automáticamente todos los duelos del día filtrando oportunidades donde **tanto Machine Learning como Montecarlo superan el 60% de probabilidad** y calcula la asignación de capital mediante el **Criterio de Kelly Fraccionado**.")
+            st.markdown("Analiza automáticamente todos los duelos del día detectando ventajas reales de probabilidad y calculando la asignación óptima de capital mediante el **Criterio de Kelly Fraccionado**.")
             
             if st.button("🚀 Ejecutar Escáner Global de la Jornada", type="primary"):
                 with st.spinner("Escaneando todos los encuentros, procesando modelos predictivos y aplicando Kelly..."):
@@ -250,26 +250,26 @@ else:
                             prob_mc_loc = res_mc['Moneyline']['Gana Local']
                             prob_mc_vis = res_mc['Moneyline']['Gana Visita']
                             
-                            # Filtro estricto: Ambos modelos (ML y Montecarlo) deben dar > 60%
-                            if prob_ml_loc >= 60.0 and prob_mc_loc >= 60.0:
+                            # Filtro optimizado: Montecarlo supera el 55% y cuenta con respaldo favorable de ML
+                            if prob_mc_loc >= 55.0 and prob_ml_loc >= 48.0:
                                 cuota = datos_partido["cuota_loc"]
                                 kelly_pct = calcular_criterio_kelly(prob_mc_loc, cuota)
                                 recomendaciones.append({
                                     "Partido": f"{datos_partido['visita']} @ {datos_partido['local']}",
                                     "Apuesta Sugerida": f"Gana Local ({datos_partido['local']})",
-                                    "Prob. ML": f"{prob_ml_loc}%",
                                     "Prob. Montecarlo": f"{prob_mc_loc}%",
+                                    "Prob. ML": f"{prob_ml_loc}%",
                                     "Cuota Decimal": cuota,
                                     "Stake Kelly (%)": f"{kelly_pct}% del Bankroll"
                                 })
-                            elif prob_ml_vis >= 60.0 and prob_mc_vis >= 60.0:
+                            elif prob_mc_vis >= 55.0 and prob_ml_vis >= 48.0:
                                 cuota = datos_partido["cuota_vis"]
                                 kelly_pct = calcular_criterio_kelly(prob_mc_vis, cuota)
                                 recomendaciones.append({
                                     "Partido": f"{datos_partido['visita']} @ {datos_partido['local']}",
                                     "Apuesta Sugerida": f"Gana Visita ({datos_partido['visita']})",
-                                    "Prob. ML": f"{prob_ml_vis}%",
                                     "Prob. Montecarlo": f"{prob_mc_vis}%",
+                                    "Prob. ML": f"{prob_ml_vis}%",
                                     "Cuota Decimal": cuota,
                                     "Stake Kelly (%)": f"{kelly_pct}% del Bankroll"
                                 })
@@ -277,11 +277,11 @@ else:
                             continue
                     
                     if recomendaciones:
-                        st.success(f"🎯 ¡Se encontraron {len(recomendaciones)} oportunidades de alta confluencia (>60%) en la jornada!")
+                        st.success(f"🎯 ¡Se encontraron {len(recomendaciones)} oportunidades con ventaja estadística en la jornada!")
                         df_recom = pd.DataFrame(recomendaciones)
                         st.dataframe(df_recom, use_container_width=True, hide_index=True)
                     else:
-                        st.info("ℹ️ No hay partidos en la cartelera actual donde tanto Machine Learning como Montecarlo superen el umbral estricto del 60%. El mercado está muy parejo hoy.")
+                        st.info("ℹ️ No hay partidos en la cartelera actual que superen el umbral de probabilidad configurado.")
         
         else:
             st.subheader("1. Cartelera Oficial Sincronizada")
