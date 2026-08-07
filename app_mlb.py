@@ -182,10 +182,10 @@ else:
         
         if modo_app == "🔍 Escáner Automático de la Jornada (EV+)":
             st.subheader("🔍 Escáner Cuántico de Valor para Toda la Jornada")
-            st.markdown("Analiza automáticamente todos los duelos del día detectando ventajas reales de probabilidad y calculando la asignación óptima de capital mediante el **Criterio de Kelly Fraccionado**.")
+            st.markdown("Analiza automáticamente todos los duelos del día evaluando **Moneyline (Ganador)** y **Totales (Over/Under)** mediante simulación de Montecarlo, filtrando oportunidades con ventaja estadística y calculando el **Criterio de Kelly Fraccionado**.")
             
             if st.button("🚀 Ejecutar Escáner Global de la Jornada", type="primary"):
-                with st.spinner("Escaneando todos los encuentros, procesando modelos predictivos y aplicando Kelly..."):
+                with st.spinner("Escaneando ganadores y totales en toda la cartelera, procesando modelos y aplicando Kelly..."):
                     ml = PredictorMLMLB()
                     ml.entrenar(df_bat, df_pit, df_games)
                     
@@ -245,43 +245,72 @@ else:
                                 linea_carreras_casino=linea_casino, num_simulaciones=100000
                             )
                             
+                            # --- 1. EVALUACIÓN DE GANADOR (MONEYLINE) ---
                             prob_ml_loc = preds_ml.get('Probabilidad_Local', 50.0)
                             prob_ml_vis = preds_ml.get('Probabilidad_Visita', 50.0)
                             prob_mc_loc = res_mc['Moneyline']['Gana Local']
                             prob_mc_vis = res_mc['Moneyline']['Gana Visita']
                             
-                            # Filtro optimizado: Montecarlo supera el 55% y cuenta con respaldo favorable de ML
                             if prob_mc_loc >= 55.0 and prob_ml_loc >= 48.0:
                                 cuota = datos_partido["cuota_loc"]
                                 kelly_pct = calcular_criterio_kelly(prob_mc_loc, cuota)
                                 recomendaciones.append({
                                     "Partido": f"{datos_partido['visita']} @ {datos_partido['local']}",
+                                    "Mercado": "Moneyline",
                                     "Apuesta Sugerida": f"Gana Local ({datos_partido['local']})",
-                                    "Prob. Montecarlo": f"{prob_mc_loc}%",
-                                    "Prob. ML": f"{prob_ml_loc}%",
+                                    "Probabilidad Modelos": f"MC: {prob_mc_loc}% | ML: {prob_ml_loc}%",
                                     "Cuota Decimal": cuota,
-                                    "Stake Kelly (%)": f"{kelly_pct}% del Bankroll"
+                                    "Stake Kelly (%)": f"{kelly_pct}%"
                                 })
                             elif prob_mc_vis >= 55.0 and prob_ml_vis >= 48.0:
                                 cuota = datos_partido["cuota_vis"]
                                 kelly_pct = calcular_criterio_kelly(prob_mc_vis, cuota)
                                 recomendaciones.append({
                                     "Partido": f"{datos_partido['visita']} @ {datos_partido['local']}",
+                                    "Mercado": "Moneyline",
                                     "Apuesta Sugerida": f"Gana Visita ({datos_partido['visita']})",
-                                    "Prob. Montecarlo": f"{prob_mc_vis}%",
-                                    "Prob. ML": f"{prob_ml_vis}%",
+                                    "Probabilidad Modelos": f"MC: {prob_mc_vis}% | ML: {prob_ml_vis}%",
                                     "Cuota Decimal": cuota,
-                                    "Stake Kelly (%)": f"{kelly_pct}% del Bankroll"
+                                    "Stake Kelly (%)": f"{kelly_pct}%"
                                 })
+                                
+                            # --- 2. EVALUACIÓN DE TOTALES (OVER / UNDER) ---
+                            carreras_dict = res_mc.get('Carreras', {})
+                            prob_over = carreras_dict.get(f"Over {linea_casino}", 50.0)
+                            prob_under = carreras_dict.get(f"Under {linea_casino}", 50.0)
+                            
+                            if prob_over >= 56.0:
+                                cuota_ov = datos_partido.get("cuota_over", 1.91)
+                                kelly_ov = calcular_criterio_kelly(prob_over, cuota_ov)
+                                recomendaciones.append({
+                                    "Partido": f"{datos_partido['visita']} @ {datos_partido['local']}",
+                                    "Mercado": f"Totales (O/U {linea_casino})",
+                                    "Apuesta Sugerida": f"Over {linea_casino} Carreras",
+                                    "Probabilidad Modelos": f"MC: {prob_over}%",
+                                    "Cuota Decimal": cuota_ov,
+                                    "Stake Kelly (%)": f"{kelly_ov}%"
+                                })
+                            elif prob_under >= 56.0:
+                                cuota_un = datos_partido.get("cuota_under", 1.91)
+                                kelly_un = calcular_criterio_kelly(prob_under, cuota_un)
+                                recomendaciones.append({
+                                    "Partido": f"{datos_partido['visita']} @ {datos_partido['local']}",
+                                    "Mercado": f"Totales (O/U {linea_casino})",
+                                    "Apuesta Sugerida": f"Under {linea_casino} Carreras",
+                                    "Probabilidad Modelos": f"MC: {prob_under}%",
+                                    "Cuota Decimal": cuota_un,
+                                    "Stake Kelly (%)": f"{kelly_un}%"
+                                })
+                                
                         except Exception:
                             continue
                     
                     if recomendaciones:
-                        st.success(f"🎯 ¡Se encontraron {len(recomendaciones)} oportunidades con ventaja estadística en la jornada!")
+                        st.success(f"🎯 ¡Se encontraron {len(recomendaciones)} oportunidades de valor en Ganadores y Totales para hoy!")
                         df_recom = pd.DataFrame(recomendaciones)
                         st.dataframe(df_recom, use_container_width=True, hide_index=True)
                     else:
-                        st.info("ℹ️ No hay partidos en la cartelera actual que superen el umbral de probabilidad configurado.")
+                        st.info("ℹ️ No hay opciones en la cartelera que superen los umbrales estadísticos de valor para Moneyline ni Totales hoy.")
         
         else:
             st.subheader("1. Cartelera Oficial Sincronizada")
