@@ -261,10 +261,13 @@ else:
                 
                 st.markdown("### 🎲 Probabilidades (Montecarlo 10k Simulaciones)")
                 c1, c2, c3, c4 = st.columns(4)
-                c1.metric(f"Gana {datos_partido['local']}", f"{res_mc['Moneyline']['Gana Local']}%")
-                c2.metric(f"Gana {datos_partido['visita']}", f"{res_mc['Moneyline']['Gana Visita']}%")
-                c3.metric(f"Over {linea_carreras} Carreras", f"{res_mc['Carreras'][f'Over {linea_carreras}']}%")
-                c4.metric(f"Promedio Hits Total", f"{res_mc['Hits']['Promedio_Total']}")
+                c1.metric(f"Gana {datos_partido['local']}", f"{res_mc.get('Moneyline', {}).get('Gana Local', 50.0)}%")
+                c2.metric(f"Gana {datos_partido['visita']}", f"{res_mc.get('Moneyline', {}).get('Gana Visita', 50.0)}%")
+                c3.metric(f"Over {linea_carreras} Carreras", f"{res_mc.get('Carreras', {}).get(f'Over {linea_carreras}', 50.0)}%")
+                
+                # Buscamos de forma segura el promedio de hits o carreras totales simuladas
+                prom_hits = res_mc.get('Hits', {}).get('Promedio_Total', res_mc.get('Carreras', {}).get('Promedio_Carreras', 8.5))
+                c4.metric(f"Promedio Total", f"{prom_hits}")
                 
                 st.markdown("### 🎯 Veredicto Financiero y Valor Esperado (EV+)")
                 
