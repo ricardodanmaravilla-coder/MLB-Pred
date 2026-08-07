@@ -3,23 +3,20 @@ import pandas as pd
 
 def calcular_factor_clima(viento_mph, direccion_viento, temp_f):
     """
-    Ajusta la expectativa de carreras y hits según el clima.
-    - Viento hacia afuera ('outfield'): incrementa batazos largos.
-    - Viento hacia adentro ('infield'): reduce cuadrangulares.
-    - Temp alta (>80°F): la bola viaja más (aire menos denso).
+    Ajusta la expectativa de carreras y hits según el clima real en vivo.
     """
     mult_carreras = 1.0
     mult_hits = 1.0
     
     # Impacto del viento
     if "out" in direccion_viento.lower():
-        mult_carreras += (viento_mph * 0.015)  # +1.5% por cada mph
+        mult_carreras += (viento_mph * 0.015)  # +1.5% por cada mph hacia afuera
         mult_hits += (viento_mph * 0.008)
     elif "in" in direccion_viento.lower():
         mult_carreras -= (viento_mph * 0.012)
         mult_hits -= (viento_mph * 0.006)
         
-    # Impacto de temperatura (Base estándar 72°F)
+    # Impacto de temperatura (Base estándar biológica de 72°F)
     diff_temp = temp_f - 72
     mult_carreras += (diff_temp * 0.003)
     
@@ -30,21 +27,23 @@ def simular_partido_mlb(
     pitcher_loc_xfip, pitcher_vis_xfip,
     wrc_loc, wrc_vis,
     bullpen_loc_era, bullpen_vis_era,
-    park_factor=100, altitud_ft=0,
-    viento_mph=0, direccion_viento="None", temp_f=72,
-    linea_carreras_casino=8.5,  # <--- Agregamos la línea real del casino
+    park_factor, altitud_ft,
+    viento_mph, direccion_viento, temp_f,
+    linea_carreras_casino,
     num_simulaciones=1000000
 ):
     """
     Simulador Montecarlo entrada por entrada para MLB.
-    Retorna probabilidades de: Moneyline, Run Line (-1.5/+1.5), Over/Under Carreras y Hits.
+    Exige todos los parámetros reales del entorno, estadio y casino sin valores fijos ocultos.
     """
-    # 1. Factores de ajuste por Estadio y Clima
+    if linea_carreras_casino is None:
+        raise ValueError("⚠️ Error crítico: Se requiere la línea de carreras real del casino.")
+
+    # 1. Factores de ajuste por Estadio y Clima real
     mult_estadio = (park_factor / 100.0) + (altitud_ft / 10000.0 * 0.05)
     f_clima_carreras, f_clima_hits = calcular_factor_clima(viento_mph, direccion_viento, temp_f)
     
     # 2. Expectativa de carreras por entrada (Lambda de Poisson)
-    # Media de MLB es ~0.5 carreras por entrada por equipo
     base_lambda = 0.50 * mult_estadio * f_clima_carreras
     
     # Entradas 1-6 (Abridor) vs Entradas 7-9 (Bullpen)
@@ -54,7 +53,7 @@ def simular_partido_mlb(
     lambda_loc_bullpen = base_lambda * (wrc_loc / 100.0) * (bullpen_vis_era / 4.10)
     lambda_vis_bullpen = base_lambda * (wrc_vis / 100.0) * (bullpen_loc_era / 4.10)
 
-    # Media de hits por partido (~8.5 por equipo)
+    # Media de hits por partido
     lambda_hits_loc = 8.5 * (wrc_loc / 100.0) * (pitcher_vis_xfip / 4.10) * f_clima_hits
     lambda_hits_vis = 8.5 * (wrc_vis / 100.0) * (pitcher_loc_xfip / 4.10) * f_clima_hits
 
@@ -65,17 +64,14 @@ def simular_partido_mlb(
 
     # 3. Bucle de Simulación Montecarlo
     for i in range(num_simulaciones):
-        # Entradas 1 a 6
         c_loc = np.sum(np.random.poisson(lambda_loc_starter, 6))
         c_vis = np.sum(np.random.poisson(lambda_vis_starter, 6))
         
-        # Entradas 7 a 9
         c_loc += np.sum(np.random.poisson(lambda_loc_bullpen, 3))
         c_vis += np.sum(np.random.poisson(lambda_vis_bullpen, 3))
         
-        # Extra innings si hay empate
         if c_loc == c_vis:
-            if np.random.rand() > 0.48:  # Ventaja de cierre local
+            if np.random.rand() > 0.48:  
                 c_loc += 1
             else:
                 c_vis += 1
@@ -87,10 +83,8 @@ def simular_partido_mlb(
     ganador_local = np.mean(carreras_loc_sim > carreras_vis_sim) * 100
     ganador_visita = np.mean(carreras_vis_sim > carreras_loc_sim) * 100
     
-    # Run Line (Hándicap estándar de béisbol es -1.5)
     cover_runline_loc = np.mean((carreras_loc_sim - carreras_vis_sim) > 1.5) * 100
     
-    # Totales Combinados cruzados contra la línea del casino
     totales_carreras = carreras_loc_sim + carreras_vis_sim
     totales_hits = hits_loc_sim + hits_vis_sim
 
@@ -105,10 +99,10 @@ def simular_partido_mlb(
         },
         "Carreras": {
             "Promedio_Total": round(np.mean(totales_carreras), 2),
-            f"Over {linea_carreras_casino}": round(np.mean(totales_carreras > linea_carreras_casino) * 100, 2), # <--- Dinámico
-            f"Under {linea_carreras_casino}": round(np.mean(totales_carreras < linea_carreras_casino) * 100, 2),
+            "Over": round(np.mean(totales_carreras > linea_carreras_casino) * 100, 2),
+            "Under": round(np.mean(totales_carreras < linea_carreras_casino) * 100, 2),
+        },
+        "Hits": {
+            "Promedio_Total": round(np.mean(totales_hits), 2)
         }
     }
-
-    
-    
