@@ -3,6 +3,7 @@ import pandas as pd
 import requests
 import numpy as np
 import os
+
 ODDS_API_KEY = "de66554a17bce1149445b1a883056607"
 
 from modules.montecarlo_mlb import simular_partido_mlb
@@ -62,7 +63,7 @@ ESTADIOS_COORDS = {
 
 @st.cache_data(ttl=600)
 def obtener_clima_estadio(nombre_equipo):
-    """Consulta el clima actual en vivo mediante Open-Meteo (Gratis y sin Key)"""
+    """Consulta el clima actual en vivo mediante Open-Meteo y calcula dirección de viento"""
     coords = ESTADIOS_COORDS.get(nombre_equipo, {"lat": 40.7128, "lon": -74.0060})
     url = f"https://api.open-meteo.com/v1/forecast?latitude={coords['lat']}&longitude={coords['lon']}&current=temperature_2m,wind_speed_10m,wind_direction_2m"
     try:
@@ -75,10 +76,16 @@ def obtener_clima_estadio(nombre_equipo):
             wind_kmh = data.get('wind_speed_10m', 8.0)
             wind_mph = int(wind_kmh * 0.621371)
             
+            # Grados del viento de Open-Meteo
             deg = data.get('wind_direction_2m', 0)
+            
+            # Lógica mejorada de dirección orientada al béisbol
+            # Viento soplando desde el home hacia el jardín central (aprox 180°-360° o sectores específicos)
             dir_str = "None"
-            if 45 <= deg < 135: dir_str = "Infield (Hacia Adentro)"
-            elif 225 <= deg < 315: dir_str = "Outfield (Hacia Afuera)"
+            if (315 <= deg <= 360) or (0 <= deg < 45):
+                dir_str = "Infield (Hacia Adentro)"  # Viento de frente (prohibido para Home Runs)
+            elif 135 <= deg < 225:
+                dir_str = "Outfield (Hacia Afuera)" # Viento a favor (vuela la bola)
             
             return temp_f, wind_mph, dir_str
     except:
@@ -86,7 +93,7 @@ def obtener_clima_estadio(nombre_equipo):
     return 72, 8, "None"
 
 def american_to_decimal(am_odds):
-    """Convierte cuotas americanas de Las Vegas a formato decimal europeo para la matemática"""
+    """Convierte cuotas americanas de Las Vegas a formato decimal europeo"""
     if am_odds == 0: return 0.0
     if am_odds > 0: return round((am_odds / 100.0) + 1, 2)
     else: return round((100.0 / abs(am_odds)) + 1, 2)
@@ -113,10 +120,8 @@ def cargar_datos_historicos():
         
     return bateo, pitcheo, park, games
 
-# Cargar los datos al inicio correctamente
 df_bat, df_pit, df_parks, df_games = cargar_datos_historicos()
     
-# Verificación rápida en la UI
 if st.checkbox("Mostrar vista previa de los datos históricos"):
     st.write("Primeras 5 filas del historial de juegos:")
     st.dataframe(df_games.head())
@@ -182,6 +187,9 @@ else:
         st.subheader("2. Condiciones del Casino y Clima (Auto-detectado)")
         c1, c2, c3, c4 = st.columns(4)
         
+        opciones_viento = ["None", "Outfield (Hacia Afuera)", "Infield (Hacia Adentro)"]
+        indice_dir = opciones_viento.index(dir_auto) if dir_auto in opciones_viento else 0
+        
         with c1:
             linea_carreras = st.number_input("Línea de Carreras (O/U)", value=float(datos_partido["linea_carreras"]), step=0.5)
             cuota_over = st.number_input("Cuota Casino (Over)", value=float(datos_partido["cuota_over"]), step=0.05)
@@ -189,7 +197,7 @@ else:
             cuota_ml_local = st.number_input(f"Cuota ML ({datos_partido['local']})", value=float(datos_partido["cuota_loc"]), step=0.05)
         with c3:
             viento = st.number_input("Viento (mph)", value=viento_auto, step=1)
-            dir_viento = st.selectbox("Dirección del Viento", ["None", "Outfield (Hacia Afuera)", "Infield (Hacia Adentro)"], index=["None", "Outfield (Hacia Afuera)", "Infield (Hacia Adentro)"].index(dir_auto) if dir_auto in ["None", "Outfield (Hacia Afuera)", "Infield (Hacia Adentro)"] else 0)
+            dir_viento = st.selectbox("Dirección del Viento", opciones_viento, index=indice_dir)
         with c4:
             temp = st.slider("Temperatura (°F)", min_value=30, max_value=110, value=temp_auto)
             
@@ -197,11 +205,9 @@ else:
         if st.button("🚀 Ejecutar Simulación Sniper", type="primary"):
             with st.spinner("Procesando Sabermetría y ejecutando 10,000 universos paralelos..."):
                 
-                # Mapear nombres
                 loc_abbr = EQUIPOS_MAP.get(datos_partido["local"], "")
                 vis_abbr = EQUIPOS_MAP.get(datos_partido["visita"], "")
                 
-                # Extraer estadísticas base (con fallbacks si falta algún dato)
                 try: wrc_loc = float(df_bat[df_bat['Team'] == loc_abbr]['wRC+'].mean())
                 except: wrc_loc = 100.0
                 try: wrc_vis = float(df_bat[df_bat['Team'] == vis_abbr]['wRC+'].mean())
@@ -212,7 +218,6 @@ else:
                 try: xfip_vis = float(df_pit[df_pit['Team'] == vis_abbr]['xFIP'].mean())
                 except: xfip_vis = 4.10
                 
-                # Park Factor
                 park_factor = 100.0
                 altitud = 0.0
                 if not df_parks.empty:
@@ -228,7 +233,7 @@ else:
                 ml.entrenar(df_bat, df_pit, df_games)
                 preds_ml = ml.predecir_partido(loc_abbr, vis_abbr, wrc_loc, wrc_vis, xfip_loc, xfip_vis, park_factor)
                 
-                # MOTOR MONTECARLO (Pasándole la línea real del casino ajustada por el usuario)
+                # MOTOR MONTECARLO
                 res_mc = simular_partido_mlb(
                     local=datos_partido['local'], visita=datos_partido['visita'],
                     pitcher_loc_xfip=xfip_loc, pitcher_vis_xfip=xfip_vis,
@@ -240,7 +245,6 @@ else:
                     num_simulaciones=10000
                 )
                 
-                # EVALUACIÓN DE ODDS
                 cuotas_reales = {
                     "Moneyline_Local": cuota_ml_local,
                     "Cuota_Over": cuota_over
