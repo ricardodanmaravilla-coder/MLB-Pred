@@ -1,48 +1,67 @@
 import pandas as pd
 
-def analizar_apuestas_mlb(res_montecarlo, preds_ml, cuotas_reales, linea_carreras):
+def analizar_apuestas_mlb(res_mc, preds_ml, cuotas_reales, linea_carreras):
     """
-    Evalúa Value Odds (EV+) usando las cuotas reales del casino obtenidas de ESPN.
+    Analiza el valor esperado (EV+) comparando las probabilidades de Montecarlo 
+    contra las cuotas reales del casino para Local, Visita, Over y Under dinámicos.
     """
-    filas = []
+    apuestas = []
     
-    # 1. Mercado Moneyline Local
-    p_mc_loc = res_montecarlo["Moneyline"]["Gana Local"]
-    p_ml_loc = preds_ml.get("Prob_Local_ML", p_mc_loc)
-    cuota_loc = cuotas_reales.get("Moneyline_Local", 0.0)
+    # 1. Probabilidades de Montecarlo
+    prob_loc = res_mc["Moneyline"]["Gana Local"] / 100.0
+    prob_vis = res_mc["Moneyline"]["Gana Visita"] / 100.0
     
-    if cuota_loc > 1.0:
-        p_consenso = (p_mc_loc + p_ml_loc) / 2.0
-        ev = (p_consenso / 100.0 * cuota_loc) - 1.0
-        
-        es_sniper = (p_mc_loc >= 60.0) and (p_ml_loc >= 60.0) and (ev > 0)
-        veredicto = "🔥 APUESTA FRANCOTIRADOR" if es_sniper else ("✅ EV+" if ev > 0.03 else "❌ Sin Valor")
-
-        filas.append({
-            "Mercado": "Gana Local (Moneyline)",
-            "Montecarlo (%)": f"{p_mc_loc}%",
-            "ML (%)": f"{p_ml_loc}%",
-            "Cuota Casino": f"{cuota_loc:.2f}",
-            "EV (%)": f"{ev * 100:.1f}%",
-            "Veredicto": veredicto
-        })
-
-    # 2. Mercado Totales Dinámico (Over)
-    llave_over = f"Over {linea_carreras}"
-    p_mc_over = res_montecarlo["Carreras"].get(llave_over, 0)
-    cuota_over = cuotas_reales.get("Cuota_Over", 0.0)
+    clave_over = f"Over {linea_carreras}"
+    clave_under = f"Under {linea_carreras}"
     
-    if cuota_over > 1.0:
-        ev_over = (p_mc_over / 100.0 * cuota_over) - 1.0
-        veredicto_over = "🔥 APUESTA FRANCOTIRADOR" if (p_mc_over >= 60.0 and ev_over > 0) else ("✅ EV+" if ev_over > 0 else "❌ Sin Valor")
-        
-        filas.append({
-            "Mercado": llave_over,
-            "Montecarlo (%)": f"{p_mc_over}%",
-            "ML (%)": f"{preds_ml.get('Carreras_Proyectadas_ML', 0)} proyectadas",
-            "Cuota Casino": f"{cuota_over:.2f}",
-            "EV (%)": f"{ev_over * 100:.1f}%",
-            "Veredicto": veredicto_over
-        })
+    prob_over = res_mc["Carreras"].get(clave_over, 50.0) / 100.0
+    prob_under = res_mc["Carreras"].get(clave_under, 50.0) / 100.0
+    
+    # Cuotas del casino
+    cuota_loc = cuotas_reales.get("Moneyline_Local", 1.90)
+    cuota_vis = cuotas_reales.get("Moneyline_Visita", 1.90) # Asegúrate de pasarla o calcularla
+    cuota_over = cuotas_reales.get("Cuota_Over", 1.90)
+    cuota_under = cuotas_reales.get("Cuota_Under", 1.90) # Opcional si el casino la provee
+    
+    # --- EVALUACIÓN DE VALOR (EV+) ---
+    # Moneyline Local
+    ev_loc = (prob_loc * cuota_loc) - 1
+    apuestas.append({
+        "Seleccion": "Moneyline Local",
+        "Prob Model": f"{round(prob_loc * 100, 1)}%",
+        "Cuota": cuota_loc,
+        "EV+": f"{round(ev_loc * 100, 2)}%",
+        "Veredicto": "🔥 ¡Apostar!" if ev_loc > 0.03 else ("✅ Valor Justo" if ev_loc > 0 else "❌ Sin Valor")
+    })
 
-    return pd.DataFrame(filas)
+    # Moneyline Visitante (¡Agregado!)
+    ev_vis = (prob_vis * cuota_vis) - 1
+    apuestas.append({
+        "Seleccion": "Moneyline Visitante",
+        "Prob Model": f"{round(prob_vis * 100, 1)}%",
+        "Cuota": cuota_vis,
+        "EV+": f"{round(ev_vis * 100, 2)}%",
+        "Veredicto": "🔥 ¡Apostar!" if ev_vis > 0.03 else ("✅ Valor Justo" if ev_vis > 0 else "❌ Sin Valor")
+    })
+
+    # Over con la línea real del casino (Ej. Over 7.5, 9.0, etc.)
+    ev_over = (prob_over * cuota_over) - 1
+    apuestas.append({
+        "Seleccion": f"Over {linea_carreras} Carreras",
+        "Prob Model": f"{round(prob_over * 100, 1)}%",
+        "Cuota": cuota_over,
+        "EV+": f"{round(ev_over * 100, 2)}%",
+        "Veredicto": "🔥 ¡Apostar!" if ev_over > 0.03 else ("✅ Valor Justo" if ev_over > 0 else "❌ Sin Valor")
+    })
+
+    # Under con la línea real del casino (¡Agregado!)
+    ev_under = (prob_under * cuota_under) - 1
+    apuestas.append({
+        "Seleccion": f"Under {linea_carreras} Carreras",
+        "Prob Model": f"{round(prob_under * 100, 1)}%",
+        "Cuota": cuota_under,
+        "EV+": f"{round(ev_under * 100, 2)}%",
+        "Veredicto": "🔥 ¡Apostار!" if ev_under > 0.03 else ("✅ Valor Justo" if ev_under > 0 else "❌ Sin Valor")
+    })
+
+    return pd.DataFrame(apuestas)
