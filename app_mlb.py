@@ -72,17 +72,30 @@ def american_to_decimal(am_odds):
 
 @st.cache_data(ttl=600)
 def obtener_clima_estadio(nombre_equipo):
-    # Buscamos las coordenadas directamente en tu dataframe de parques cargado
-    park_data = df_parks[df_parks['Team'] == EQUIPOS_MAP.get(nombre_equipo, "")]
+    # 1. Normalizar nombres de columnas eliminando espacios accidentales
+    df_parks.columns = df_parks.columns.str.strip()
+    
+    # 2. Buscar la abreviatura del equipo
+    abbr = EQUIPOS_MAP.get(nombre_equipo, "")
+    
+    # 3. Buscar datos en el CSV
+    park_data = df_parks[df_parks['Team'] == abbr]
     
     if park_data.empty:
         return None, None, "No disponible"
     
-    # Suponiendo que tu CSV tiene columnas de latitud y longitud, 
-    # o si no las tienes, agrégalas a tu csv para que sea 100% preciso
-    lat = float(park_data['Latitud'].values[0])
-    lon = float(park_data['Longitud'].values[0])
+    # 4. Extracción dinámica: busca 'Latitud' o 'Lat' o 'Latitude'
+    # Esto evita el KeyError si el nombre en el CSV es ligeramente diferente
+    try:
+        lat_col = [c for c in park_data.columns if 'lat' in c.lower()][0]
+        lon_col = [c for c in park_data.columns if 'lon' in c.lower()][0]
+        
+        lat = float(park_data[lat_col].values[0])
+        lon = float(park_data[lon_col].values[0])
+    except (IndexError, KeyError, ValueError):
+        return None, None, "Error en columnas de Lat/Lon"
     
+    # 5. Consulta a la API
     url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current=temperature_2m,wind_speed_10m,wind_direction_2m"
     try:
         res = requests.get(url, timeout=5)
@@ -92,15 +105,13 @@ def obtener_clima_estadio(nombre_equipo):
             wind_mph = int(data.get('wind_speed_10m', 8.0) * 0.621371)
             deg = data.get('wind_direction_2m', 0)
             
-            # Lógica de dirección del viento
             dir_str = "None"
             if (315 <= deg <= 360) or (0 <= deg < 45): dir_str = "Infield (Hacia Adentro)"
             elif 135 <= deg < 225: dir_str = "Outfield (Hacia Afuera)"
             return temp_f, wind_mph, dir_str
     except:
-        return None, None, "Error API Clima"
-    return None, None, "Error"
-
+        pass
+    return None, None, "Error API"
 @st.cache_data(ttl=3600)
 def cargar_datos_historicos():
     bateo, pitcheo, park, games = pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
@@ -147,7 +158,7 @@ def obtener_cartelera_y_cuotas_automaticas():
         st.error(f"Error en MLB StatsAPI: {e}")
 
     # 2. Obtener cuotas reales automáticas de The Odds API
-    if ODDS_API_KEY != "TU_API_KEY_AQUI":
+    if ODDS_API_KEY != "de66554a17bce1149445b1a883056607":
         url_odds = f"https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/?apiKey={ODDS_API_KEY}&regions=us&markets=h2h,totals&oddsFormat=american"
         try:
             res_odds = requests.get(url_odds, timeout=5)
