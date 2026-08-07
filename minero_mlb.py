@@ -79,37 +79,49 @@ def generar_park_factors():
 
 def extraer_historico_juegos():
     """
-    Descarga el registro partido a partido de la temporada.
-    Ideal para detectar tendencias Locales/Visitantes y Paternidades (Head-to-Head).
+    Descarga el registro partido a partido.
+    Se hace en bloques de meses para evitar el error 503 (Timeout) del servidor de la MLB.
     """
     print("🗓️ Descargando historial de juegos (Resultados por partido)...")
     juegos_data = []
     
+    # Dividimos el año en 5 bloques para no saturar al servidor
+    bloques_meses = [
+        ("01/01", "03/31"),
+        ("04/01", "05/31"),
+        ("06/01", "07/31"),
+        ("08/01", "09/30"),
+        ("10/01", "12/31")
+    ]
+    
     for year in TEMPORADAS:
-        print(f"  -> Obteniendo calendario {year}...")
-        try:
-            # Pedimos todo el calendario del año desde Enero hasta Diciembre
-            schedule = statsapi.schedule(start_date=f"01/01/{year}", end_date=f"12/31/{year}")
-            
-            for game in schedule:
-                # Solo guardamos los partidos que ya terminaron
-                if game.get('status') in ['Final', 'Completed Early']:
-                    juegos_data.append({
-                        'GameID': game.get('game_id'),
-                        'Date': game.get('game_date'),
-                        'Season': year,
-                        'Away': game.get('away_name'),
-                        'Home': game.get('home_name'),
-                        'Away_Score': game.get('away_score', 0),
-                        'Home_Score': game.get('home_score', 0),
-                        'Innings': game.get('current_inning', 9),
-                        'Venue': game.get('venue_name', 'Unknown')
-                    })
-        except Exception as e:
-            print(f"❌ Error descargando juegos de {year}: {e}")
+        print(f"  -> Obteniendo calendario {year} por bloques...")
+        for inicio, fin in bloques_meses:
+            try:
+                schedule = statsapi.schedule(start_date=f"{inicio}/{year}", end_date=f"{fin}/{year}")
+                
+                for game in schedule:
+                    if game.get('status') in ['Final', 'Completed Early']:
+                        juegos_data.append({
+                            'GameID': game.get('game_id'),
+                            'Date': game.get('game_date'),
+                            'Season': year,
+                            'Away': game.get('away_name'),
+                            'Home': game.get('home_name'),
+                            'Away_Score': game.get('away_score', 0),
+                            'Home_Score': game.get('home_score', 0),
+                            'Innings': game.get('current_inning', 9),
+                            'Venue': game.get('venue_name', 'Unknown')
+                        })
+                # Pequeña pausa para ser amigables con el servidor
+                time.sleep(0.3)
+            except Exception as e:
+                print(f"❌ Error descargando juegos de {inicio} a {fin} en {year}: {e}")
     
     df_juegos = pd.DataFrame(juegos_data)
     if not df_juegos.empty:
+        # Eliminamos posibles duplicados por seguridad
+        df_juegos = df_juegos.drop_duplicates(subset=['GameID'])
         df_juegos.to_csv("data/mlb_games.csv", index=False)
         print(f"✅ Historial guardado: {len(df_juegos)} partidos en data/mlb_games.csv")
     else:
