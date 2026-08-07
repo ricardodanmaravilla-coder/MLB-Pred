@@ -55,21 +55,21 @@ df_bat, df_pit, df_parks, df_games = cargar_datos_historicos()
 
 @st.cache_data(ttl=600)
 def obtener_clima_estadio(nombre_equipo):
-    """Consulta el clima real en vivo usando el servicio nativo de wttr.in basado en el estadio, sin valores fijos"""
-    ciudades_estadios = {
+    """Obtiene el clima real en vivo desde wttr.in sin valores fijos de respaldo"""
+    ciudades = {
         "New York Yankees": "New_York", "Boston Red Sox": "Boston", "Los Angeles Dodgers": "Los_Angeles",
         "Houston Astros": "Houston", "Atlanta Braves": "Atlanta", "Philadelphia Phillies": "Philadelphia",
-        "Baltimore Orioles": "Baltimore", "Tampa Bay Rays": "St._Petersburg", "Toronto Blue Jays": "Toronto",
+        "Baltimore Orioles": "Baltimore", "Tampa Bay Rays": "St_Petersburg", "Toronto Blue Jays": "Toronto",
         "Chicago White Sox": "Chicago", "Cleveland Guardians": "Cleveland", "Detroit Tigers": "Detroit",
         "Kansas City Royals": "Kansas_City", "Minnesota Twins": "Minneapolis", "Los Angeles Angels": "Anaheim",
         "Oakland Athletics": "Oakland", "Seattle Mariners": "Seattle", "Texas Rangers": "Arlington",
         "Chicago Cubs": "Chicago", "Cincinnati Reds": "Cincinnati", "Milwaukee Brewers": "Milwaukee",
-        "Pittsburgh Pirates": "Pittsburgh", "St. Louis Cardinals": "St._Louis", "Arizona Diamondbacks": "Phoenix",
+        "Pittsburgh Pirates": "Pittsburgh", "St. Louis Cardinals": "St_Louis", "Arizona Diamondbacks": "Phoenix",
         "Colorado Rockies": "Denver", "San Francisco Giants": "San_Francisco", "San Diego Padres": "San_Diego",
-        "Miami Marlins": "Miami", "New York Mets": "New_York", "Washington Nationals": "Washington_DC"
+        "Miami Marlins": "Miami", "New York Mets": "New_York", "Washington Nationals": "Washington"
     }
     
-    ciudad = ciudades_estadios.get(nombre_equipo)
+    ciudad = ciudades.get(nombre_equipo)
     if not ciudad:
         return None, None, "No disponible"
         
@@ -79,24 +79,20 @@ def obtener_clima_estadio(nombre_equipo):
         res = requests.get(url, timeout=5)
         if res.status_code == 200:
             data = res.json()
-            current = data.get('current_condition', [{}])[0]
+            curr = data.get('current_condition', [{}])[0]
             
-            temp_f = int(current.get('temp_F'))
-            wind_mph = int(current.get('windspeedMiles'))
-            wind_dir = current.get('winddir16Point', '')
+            temp_f = int(curr.get('temp_F'))
+            wind_mph = int(curr.get('windspeedMiles'))
+            wind_dir = curr.get('winddir16Point', '')
             
             dir_str = "None"
-            if wind_dir in ['N', 'NNE', 'NNW', 'NE']:
-                dir_str = "Infield (Hacia Adentro)"
-            elif wind_dir in ['S', 'SSW', 'SSE', 'SW']:
-                dir_str = "Outfield (Hacia Afuera)"
-            elif wind_dir in ['E', 'ENE', 'ESE']:
-                dir_str = "Lateral (Derecha a Izquierda)"
-            elif wind_dir in ['W', 'WNW', 'WSW']:
-                dir_str = "Lateral (Izquierda a Derecha)"
-                
+            if wind_dir in ['N', 'NNE', 'NNW', 'NE']: dir_str = "Infield (Hacia Adentro)"
+            elif wind_dir in ['S', 'SSW', 'SSE', 'SW']: dir_str = "Outfield (Hacia Afuera)"
+            elif wind_dir in ['E', 'ENE', 'ESE']: dir_str = "Lateral (Derecha a Izquierda)"
+            elif wind_dir in ['W', 'WNW', 'WSW']: dir_str = "Lateral (Izquierda a Derecha)"
+            
             return temp_f, wind_mph, dir_str
-    except Exception:
+    except:
         pass
         
     return None, None, "No disponible"
