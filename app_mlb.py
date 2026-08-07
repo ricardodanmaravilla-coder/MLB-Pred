@@ -12,7 +12,7 @@ from modules.odds_mlb import analizar_apuestas_mlb
 # --- CONFIGURACIÓN ---
 st.set_page_config(page_title="MLB Quant Analytics", layout="wide", page_icon="⚾")
 
-# Mapeo de nombres de ESPN a las abreviaturas de pybaseball
+# Mapeo de nombres de The Odds API / ESPN a las abreviaturas
 EQUIPOS_MAP = {
     "New York Yankees": "NYY", "Boston Red Sox": "BOS", "Los Angeles Dodgers": "LAD",
     "Houston Astros": "HOU", "Atlanta Braves": "ATL", "Philadelphia Phillies": "PHI",
@@ -25,6 +25,65 @@ EQUIPOS_MAP = {
     "Colorado Rockies": "COL", "San Francisco Giants": "SFG", "San Diego Padres": "SDP",
     "Miami Marlins": "MIA", "New York Mets": "NYM", "Washington Nationals": "WSN"
 }
+
+# --- COORDENADAS DE LOS ESTADIOS DE LA MLB (Para el clima automático) ---
+ESTADIOS_COORDS = {
+    "New York Yankees": {"lat": 40.8296, "lon": -73.9262},
+    "Boston Red Sox": {"lat": 42.3467, "lon": -71.0972},
+    "Los Angeles Dodgers": {"lat": 34.0739, "lon": -118.2400},
+    "Houston Astros": {"lat": 29.7573, "lon": -95.3555},
+    "Atlanta Braves": {"lat": 33.8907, "lon": -84.4678},
+    "Philadelphia Phillies": {"lat": 39.9061, "lon": -75.1665},
+    "Baltimore Orioles": {"lat": 39.2839, "lon": -76.6215},
+    "Tampa Bay Rays": {"lat": 27.7682, "lon": -82.6534},
+    "Toronto Blue Jays": {"lat": 43.6414, "lon": -79.3894},
+    "Chicago White Sox": {"lat": 41.8299, "lon": -87.6338},
+    "Cleveland Guardians": {"lat": 41.4962, "lon": -81.6852},
+    "Detroit Tigers": {"lat": 42.3390, "lon": -83.0485},
+    "Kansas City Royals": {"lat": 39.0517, "lon": -94.4803},
+    "Minnesota Twins": {"lat": 44.9817, "lon": -93.2775},
+    "Los Angeles Angels": {"lat": 33.8003, "lon": -117.8827},
+    "Oakland Athletics": {"lat": 37.7516, "lon": -122.2005},
+    "Seattle Mariners": {"lat": 47.5914, "lon": -123.3328},
+    "Texas Rangers": {"lat": 32.7512, "lon": -97.0825},
+    "Chicago Cubs": {"lat": 41.9484, "lon": -87.6553},
+    "Cincinnati Reds": {"lat": 39.0973, "lon": -84.5068},
+    "Milwaukee Brewers": {"lat": 43.0280, "lon": -87.9712},
+    "Pittsburgh Pirates": {"lat": 40.4469, "lon": -80.0057},
+    "St. Louis Cardinals": {"lat": 38.6226, "lon": -90.1928},
+    "Arizona Diamondbacks": {"lat": 33.4455, "lon": -112.0667},
+    "Colorado Rockies": {"lat": 39.7559, "lon": -104.9942},
+    "San Francisco Giants": {"lat": 37.7786, "lon": -122.3893},
+    "San Diego Padres": {"lat": 32.7076, "lon": -117.1570},
+    "Miami Marlins": {"lat": 25.7781, "lon": -80.2196},
+    "New York Mets": {"lat": 40.7571, "lon": -73.8458},
+    "Washington Nationals": {"lat": 38.8730, "lon": -77.0074}
+}
+
+@st.cache_data(ttl=600)
+def obtener_clima_estadio(nombre_equipo):
+    """Consulta el clima actual en vivo mediante Open-Meteo (Gratis y sin Key)"""
+    coords = ESTADIOS_COORDS.get(nombre_equipo, {"lat": 40.7128, "lon": -74.0060})
+    url = f"https://api.open-meteo.com/v1/forecast?latitude={coords['lat']}&longitude={coords['lon']}&current=temperature_2m,wind_speed_10m,wind_direction_2m"
+    try:
+        res = requests.get(url, timeout=5)
+        if res.status_code == 200:
+            data = res.json().get('current', {})
+            _temp_c = data.get('temperature_2m', 22.0)
+            temp_f = int((_temp_c * 9/5) + 32)
+            
+            wind_kmh = data.get('wind_speed_10m', 8.0)
+            wind_mph = int(wind_kmh * 0.621371)
+            
+            deg = data.get('wind_direction_2m', 0)
+            dir_str = "None"
+            if 45 <= deg < 135: dir_str = "Infield (Hacia Adentro)"
+            elif 225 <= deg < 315: dir_str = "Outfield (Hacia Afuera)"
+            
+            return temp_f, wind_mph, dir_str
+    except:
+        pass
+    return 72, 8, "None"
 
 def american_to_decimal(am_odds):
     """Convierte cuotas americanas de Las Vegas a formato decimal europeo para la matemática"""
@@ -74,16 +133,13 @@ def obtener_cartelera_profesional():
                 home = game['home_team']
                 away = game['away_team']
                 
-                # Buscamos cuotas de DraftKings o Caesars (las más comunes)
                 for bookmaker in game['bookmakers']:
-                    if bookmaker['key'] in ['draftkings', 'caesars']:
+                    if bookmaker['key'] in ['draftkings', 'caesars', 'fanduel']:
                         markets = {m['key']: m['outcomes'] for m in bookmaker['markets']}
                         
-                        # Extraer Moneyline
                         h2h = markets.get('h2h', [])
                         linea_home = next((o['price'] for o in h2h if o['name'] == home), -110)
                         
-                        # Extraer Totales
                         totals = markets.get('totals', [])
                         linea_total = totals[0]['point'] if totals else 8.5
                         cuota_over = next((o['price'] for o in totals if o['name'] == 'Over'), -110)
@@ -95,12 +151,13 @@ def obtener_cartelera_profesional():
                             "cuota_loc": american_to_decimal(linea_home),
                             "cuota_over": american_to_decimal(cuota_over)
                         }
-                        break # Tomamos la primera casa disponible
+                        break
         else:
             st.error(f"Error en Odds API: {res.status_code}")
     except Exception as e:
         st.error(f"Error conectando a Odds API: {e}")
     return partidos
+
 # --- INTERFAZ PRINCIPAL ---
 st.title("⚾ MLB Quant Analytics")
 st.markdown("Motor predictivo basado en Sabermetría avanzada, simulaciones de Montecarlo y Machine Learning.")
@@ -111,15 +168,18 @@ else:
     partidos_hoy = obtener_cartelera_profesional()
     
     if not partidos_hoy:
-        st.info("No hay partidos programados o la API de ESPN no retornó datos.")
+        st.info("No hay partidos programados o la API de Odds no retornó datos activos.")
     else:
         # 1. Selección del Partido
-        st.subheader("1. Cartelera del Día (Vía ESPN)")
+        st.subheader("1. Cartelera del Día (Vía The Odds API)")
         seleccion = st.selectbox("Selecciona un partido para analizar:", list(partidos_hoy.keys()))
         datos_partido = partidos_hoy[seleccion]
         
+        # Obtener clima real automático basado en el estadio local
+        temp_auto, viento_auto, dir_auto = obtener_clima_estadio(datos_partido["local"])
+        
         # 2. Ajustes del Casino y Clima
-        st.subheader("2. Condiciones del Casino y Variables del Entorno")
+        st.subheader("2. Condiciones del Casino y Clima (Auto-detectado)")
         c1, c2, c3, c4 = st.columns(4)
         
         with c1:
@@ -128,10 +188,10 @@ else:
         with c2:
             cuota_ml_local = st.number_input(f"Cuota ML ({datos_partido['local']})", value=float(datos_partido["cuota_loc"]), step=0.05)
         with c3:
-            viento = st.number_input("Viento (mph)", value=5, step=1)
-            dir_viento = st.selectbox("Dirección del Viento", ["None", "Outfield (Hacia Afuera)", "Infield (Hacia Adentro)"])
+            viento = st.number_input("Viento (mph)", value=viento_auto, step=1)
+            dir_viento = st.selectbox("Dirección del Viento", ["None", "Outfield (Hacia Afuera)", "Infield (Hacia Adentro)"], index=["None", "Outfield (Hacia Afuera)", "Infield (Hacia Adentro)"].index(dir_auto) if dir_auto in ["None", "Outfield (Hacia Afuera)", "Infield (Hacia Adentro)"] else 0)
         with c4:
-            temp = st.slider("Temperatura (°F)", min_value=30, max_value=110, value=72)
+            temp = st.slider("Temperatura (°F)", min_value=30, max_value=110, value=temp_auto)
             
         # 3. Ejecución del Motor
         if st.button("🚀 Ejecutar Simulación Sniper", type="primary"):
