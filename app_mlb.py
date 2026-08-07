@@ -12,7 +12,6 @@ from modules.odds_mlb import analizar_apuestas_mlb
 # --- CONFIGURACIÓN ---
 st.set_page_config(page_title="MLB Quant Analytics", layout="wide", page_icon="⚾")
 
-# IMPORTANTE: Puedes registrarte gratis en https://the-odds-api.com/ para obtener tu key de 500 requests/mes
 ODDS_API_KEY = "de66554a17bce1149445b1a883056607" 
 
 EQUIPOS_MAP = {
@@ -132,7 +131,6 @@ def obtener_cartelera_y_cuotas_automaticas():
                         partidos[llave] = {
                             "local": home, "visita": away,
                             "pitcher_local": home_pitcher, "pitcher_visita": away_pitcher,
-                            # Se inicializan vacíos (None) para obligar a que la API de Odds los llene o fallen si no hay mercado
                             "linea_carreras": None,
                             "cuota_loc": None, "cuota_vis": None, "cuota_over": None, "cuota_under": None
                         }
@@ -173,41 +171,6 @@ def obtener_cartelera_y_cuotas_automaticas():
             
     return partidos
 
-    # 2. Obtener cuotas reales automáticas de The Odds API
-    if ODDS_API_KEY != "de66554a17bce1149445b1a883056607":
-        url_odds = f"https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/?apiKey={ODDS_API_KEY}&regions=us&markets=h2h,totals&oddsFormat=american"
-        try:
-            res_odds = requests.get(url_odds, timeout=5)
-            if res_odds.status_code == 200:
-                data_odds = res_odds.json()
-                for item in data_odds:
-                    h_team = item.get('home_team')
-                    a_team = item.get('away_team')
-                    # Buscar coincidencia en los partidos cargados
-                    for k, p in partidos.items():
-                        if p['local'].lower() in h_team.lower() or h_team.lower() in p['local'].lower():
-                            bookmakers = item.get('bookmakers', [])
-                            if bookmakers:
-                                markets = bookmakers[0].get('markets', [])
-                                for m in markets:
-                                    if m['key'] == 'h2h':
-                                        for out in m['outcomes']:
-                                            if out['name'] == h_team:
-                                                p['cuota_loc'] = american_to_decimal(out['price'])
-                                            else:
-                                                p['cuota_vis'] = american_to_decimal(out['price'])
-                                    elif m['key'] == 'totals':
-                                        for out in m['outcomes']:
-                                            if out['name'] == 'Over':
-                                                p['linea_carreras'] = float(out['point'])
-                                                p['cuota_over'] = american_to_decimal(out['price'])
-                                            elif out['name'] == 'Under':
-                                                p['cuota_under'] = american_to_decimal(out['price'])
-        except Exception as e:
-            st.warning(f"No se pudieron sincronizar las cuotas automáticas de The Odds API: {e}")
-            
-    return partidos
-
 # --- INTERFAZ ---
 st.title("⚾ MLB Quant Analytics Pro (Automático)")
 st.markdown("Sistema autónomo de Sabermetría, Clima en Vivo, Duelo de Abridores y Cuotas de Mercado Reales.")
@@ -225,7 +188,6 @@ else:
         
         temp_auto, viento_auto, dir_auto = obtener_clima_estadio(datos_partido["local"])
         
-        # Mostrar de forma informativa lo que el sistema detectó automáticamente
         st.subheader("2. Datos del Mercado y Clima (Extraídos Automáticamente)")
         c1, c2, c3, c4 = st.columns(4)
         
@@ -233,11 +195,11 @@ else:
         indice_dir = opciones_viento.index(dir_auto) if dir_auto in opciones_viento else 0
         
         with c1:
-            st.metric("Línea O/U Casino", datos_partido["linea_carreras"])
-            st.metric("Cuota Over", datos_partido["cuota_over"])
+            st.metric("Línea O/U Casino", datos_partido["linea_carreras"] if datos_partido["linea_carreras"] is not None else "No disponible")
+            st.metric("Cuota Over", datos_partido["cuota_over"] if datos_partido["cuota_over"] is not None else "No disponible")
         with c2:
-            st.metric(f"Cuota ML ({datos_partido['local']})", datos_partido["cuota_loc"])
-            st.metric(f"Cuota ML ({datos_partido['visita']})", datos_partido["cuota_vis"])
+            st.metric(f"Cuota ML ({datos_partido['local']})", datos_partido["cuota_loc"] if datos_partido["cuota_loc"] is not None else "No disponible")
+            st.metric(f"Cuota ML ({datos_partido['visita']})", datos_partido["cuota_vis"] if datos_partido["cuota_vis"] is not None else "No disponible")
         with c3:
             viento = st.number_input("Viento (mph)", value=viento_auto, step=1)
             dir_viento = st.selectbox("Dirección del Viento", opciones_viento, index=indice_dir)
@@ -249,12 +211,10 @@ else:
                 loc_abbr = EQUIPOS_MAP.get(datos_partido["local"], "")
                 vis_abbr = EQUIPOS_MAP.get(datos_partido["visita"], "")
                 
-                # Validación de seguridad: Asegurar que los CSVs tengan datos
                 if df_bat.empty or df_pit.empty or df_parks.empty:
                     st.error("❌ Error crítico: Las bases de datos históricas están vacías. Ejecuta 'minero_mlb.py'.")
                     st.stop()
 
-                # 1. Sabermetría de Bateo (wRC+) real del equipo desde el CSV
                 try:
                     wrc_loc = float(df_bat[df_bat['Team'] == loc_abbr]['wRC+'].mean())
                     wrc_vis = float(df_bat[df_bat['Team'] == vis_abbr]['wRC+'].mean())
@@ -262,26 +222,32 @@ else:
                     st.error(f"Error procesando wRC+ de bateo: {e}")
                     st.stop()
                 
-                # 2. Búsqueda Quirúrgica del Abridor Local (Sin valores fijos inventados)
+                # Detección dinámica de columna de nombre de pitcher
+                col_nombre_pitcher = 'Name'
+                for posible_col in ['Name', 'PlayerName', 'jugador', 'pitcher']:
+                    if posible_col in df_pit.columns:
+                        col_nombre_pitcher = posible_col
+                        break
+
+                # Búsqueda Quirúrgica del Abridor Local
                 pitcher_loc_nombre = datos_partido["pitcher_local"]
                 xfip_loc = None
                 
-                if pitcher_loc_nombre != "Por Anunciar":
-                    match_loc = df_pit[df_pit['Name'].str.contains(pitcher_loc_nombre.split()[-1], case=False, na=False)]
+                if pitcher_loc_nombre != "Por Anunciar" and col_nombre_pitcher in df_pit.columns:
+                    match_loc = df_pit[df_pit[col_nombre_pitcher].str.contains(pitcher_loc_nombre.split()[-1], case=False, na=False)]
                     if not match_loc.empty:
                         xfip_loc = float(match_loc['xFIP'].values[0])
                 
-                # Si no se halla al pitcher específico, se calcula el promedio real de la rotación del equipo en el CSV
                 if xfip_loc is None:
                     team_pit_loc = df_pit[df_pit['Team'] == loc_abbr]
                     xfip_loc = float(team_pit_loc['xFIP'].mean())
 
-                # 3. Búsqueda Quirúrgica del Abridor Visitante
+                # Búsqueda Quirúrgica del Abridor Visitante
                 pitcher_vis_nombre = datos_partido["pitcher_visita"]
                 xfip_vis = None
                 
-                if pitcher_vis_nombre != "Por Anunciar":
-                    match_vis = df_pit[df_pit['Name'].str.contains(pitcher_vis_nombre.split()[-1], case=False, na=False)]
+                if pitcher_vis_nombre != "Por Anunciar" and col_nombre_pitcher in df_pit.columns:
+                    match_vis = df_pit[df_pit[col_nombre_pitcher].str.contains(pitcher_vis_nombre.split()[-1], case=False, na=False)]
                     if not match_vis.empty:
                         xfip_vis = float(match_vis['xFIP'].values[0])
                 
@@ -289,11 +255,9 @@ else:
                     team_pit_vis = df_pit[df_pit['Team'] == vis_abbr]
                     xfip_vis = float(team_pit_vis['xFIP'].mean())
 
-                # Bullpen calculado dinámicamente como el diferencial del pitcheo del equipo
                 bullpen_loc_era = float(df_pit[df_pit['Team'] == loc_abbr]['ERA'].mean())
                 bullpen_vis_era = float(df_pit[df_pit['Team'] == vis_abbr]['ERA'].mean())
                 
-                # 4. Factores de Estadio (Park Factors y Altitud reales desde el CSV)
                 park_data = df_parks[df_parks['Team'] == loc_abbr]
                 if park_data.empty:
                     raise ValueError(f"No se encontró el Park Factor para el equipo local: {loc_abbr}")
@@ -301,7 +265,8 @@ else:
                 park_factor = float(park_data['Park_Factor_General'].values[0])
                 altitud = float(park_data['Altitud_pies'].values[0])
                 
-                # Machine Learning y Montecarlo
+                linea_casino = datos_partido["linea_carreras"] if datos_partido["linea_carreras"] is not None else 8.5
+                
                 ml = PredictorMLMLB()
                 ml.entrenar(df_bat, df_pit, df_games)
                 preds_ml = ml.predecir_partido(loc_abbr, vis_abbr, wrc_loc, wrc_vis, xfip_loc, xfip_vis, park_factor)
@@ -313,17 +278,17 @@ else:
                     bullpen_loc_era=bullpen_loc_era, bullpen_vis_era=bullpen_vis_era,
                     park_factor=park_factor, altitud_ft=altitud,
                     viento_mph=viento, direccion_viento=dir_viento, temp_f=temp,
-                    linea_carreras_casino=datos_partido["linea_carreras"],
+                    linea_carreras_casino=linea_casino,
                     num_simulaciones=500000
                 )
                 
                 cuotas_reales = {
-                    "Moneyline_Local": datos_partido["cuota_loc"],
-                    "Moneyline_Visita": datos_partido["cuota_vis"],
-                    "Cuota_Over": datos_partido["cuota_over"],
-                    "Cuota_Under": datos_partido["cuota_under"]
+                    "Moneyline_Local": datos_partido["cuota_loc"] if datos_partido["cuota_loc"] is not None else 1.91,
+                    "Moneyline_Visita": datos_partido["cuota_vis"] if datos_partido["cuota_vis"] is not None else 1.91,
+                    "Cuota_Over": datos_partido["cuota_over"] if datos_partido["cuota_over"] is not None else 1.91,
+                    "Cuota_Under": datos_partido["cuota_under"] if datos_partido["cuota_under"] is not None else 1.91
                 }
-                df_apuestas = analizar_apuestas_mlb(res_mc, preds_ml, cuotas_reales, datos_partido["linea_carreras"])
+                df_apuestas = analizar_apuestas_mlb(res_mc, preds_ml, cuotas_reales, linea_casino)
                 
                 st.markdown("---")
                 st.subheader(f"🏟️ Factores Ambientales en {datos_partido['local']}")
@@ -337,8 +302,8 @@ else:
                 c1.metric(f"Gana {datos_partido['local']}", f"{res_mc['Moneyline']['Gana Local']}%")
                 c2.metric(f"Gana {datos_partido['visita']}", f"{res_mc['Moneyline']['Gana Visita']}%")
                 
-                prob_over = res_mc.get('Carreras', {}).get(f"Over {datos_partido['linea_carreras']}", 50.0)
-                c3.metric(f"Over {datos_partido['linea_carreras']} Carreras", f"{prob_over}%")
+                prob_over = res_mc.get('Carreras', {}).get(f"Over {linea_casino}", 50.0)
+                c3.metric(f"Over {linea_casino} Carreras", f"{prob_over}%")
                 c4.metric("Promedio Carreras Total", f"{res_mc['Carreras']['Promedio_Total']}")
                 
                 st.markdown("### 🎯 Veredicto Financiero y Valor Esperado (EV+)")
