@@ -6,27 +6,24 @@ import statsapi
 TEMPORADAS = [2020, 2021, 2022, 2023, 2024, 2025, 2026]
 
 def extraer_estadisticas_oficiales_mlb():
-    print("⚾ [INICIO] Bypassing Cloudflare... Usando MLB Stats API Oficial")
+    print("⚾ [INICIO] Extrayendo Sabermetría Oficial de MLB...")
     os.makedirs("data", exist_ok=True)
     
     bateo_data = []
     pitcheo_data = []
 
     for year in TEMPORADAS:
-        print(f"📊 Descargando temporada {year} desde servidores de la MLB...")
+        print(f"📊 Descargando estadísticas globales {year}...")
         try:
-            # Obtenemos el ID de todos los equipos de la temporada
             equipos = statsapi.get('teams', {'season': year, 'sportId': 1})['teams']
-            
             for equipo in equipos:
                 team_id = equipo['id']
                 team_abbr = equipo.get('abbreviation', 'UNK')
                 
-                # Ignorar equipos inactivos o All-Stars
                 if team_abbr == 'UNK' or not equipo.get('active', True):
                     continue
                     
-                # 1. Extraer Hitting (Bateo)
+                # Bateo
                 stats_bat = statsapi.get('team_stats', {'teamId': team_id, 'season': year, 'group': 'hitting', 'stats': 'season'})
                 if stats_bat and 'stats' in stats_bat and stats_bat['stats']:
                     splits = stats_bat['stats'][0].get('splits', [])
@@ -34,15 +31,11 @@ def extraer_estadisticas_oficiales_mlb():
                         stat_dict = splits[0].get('stat', {})
                         stat_dict['Team'] = team_abbr
                         stat_dict['Season'] = year
-                        
-                        # TRUCO: Escalar OPS y renombrarlo como wRC+ para que el ML no se rompa
-                        # Un OPS de .750 se convertirá en 75.0, sirviendo perfecto como feature de Machine Learning
                         ops_val = stat_dict.get('ops', '.000')
                         stat_dict['wRC+'] = float(ops_val) * 100 if ops_val else 70.0
-                        
                         bateo_data.append(stat_dict)
                 
-                # 2. Extraer Pitching (Pitcheo)
+                # Pitcheo
                 stats_pit = statsapi.get('team_stats', {'teamId': team_id, 'season': year, 'group': 'pitching', 'stats': 'season'})
                 if stats_pit and 'stats' in stats_pit and stats_pit['stats']:
                     splits = stats_pit['stats'][0].get('splits', [])
@@ -50,37 +43,25 @@ def extraer_estadisticas_oficiales_mlb():
                         stat_dict = splits[0].get('stat', {})
                         stat_dict['Team'] = team_abbr
                         stat_dict['Season'] = year
-                        
-                        # TRUCO: Renombrar ERA como xFIP para mantener compatibilidad con el motor Montecarlo y ML
                         era_val = stat_dict.get('era', '4.00')
                         stat_dict['xFIP'] = float(era_val) if era_val != '-.--' else 4.0
                         stat_dict['ERA'] = float(era_val) if era_val != '-.--' else 4.0
-                        
                         pitcheo_data.append(stat_dict)
                         
-                # Pausa ligera de medio segundo para no saturar la API oficial
                 time.sleep(0.5)
-                
         except Exception as e:
             print(f"❌ Error en temporada {year}: {e}")
 
-    # Convertir a DataFrames y Guardar
     df_bateo = pd.DataFrame(bateo_data)
     df_pitcheo = pd.DataFrame(pitcheo_data)
     
     if not df_bateo.empty:
-        ruta_bateo = "data/mlb_batting.csv"
-        df_bateo.to_csv(ruta_bateo, index=False)
-        print(f"✅ Bateo guardado exitosamente: {len(df_bateo)} registros en {ruta_bateo}")
-    else:
-        print("⚠️ NO se obtuvieron datos de bateo.")
+        df_bateo.to_csv("data/mlb_batting.csv", index=False)
+        print(f"✅ Bateo guardado exitosamente.")
         
     if not df_pitcheo.empty:
-        ruta_pitcheo = "data/mlb_pitching.csv"
-        df_pitcheo.to_csv(ruta_pitcheo, index=False)
-        print(f"✅ Pitcheo guardado exitosamente: {len(df_pitcheo)} registros en {ruta_pitcheo}")
-    else:
-        print("⚠️ NO se obtuvieron datos de pitcheo.")
+        df_pitcheo.to_csv("data/mlb_pitching.csv", index=False)
+        print(f"✅ Pitcheo guardado exitosamente.")
 
 def generar_park_factors():
     print("🏟️ Generando base de datos de Estadios (Park Factors & Altitud)...")
@@ -93,11 +74,49 @@ def generar_park_factors():
         "Park_Factor_HR": [115, 128, 96, 114, 117, 105, 108, 97, 98, 86, 92] 
     }
     df_park = pd.DataFrame(estadios)
-    ruta_park = "data/mlb_park_factors.csv"
-    df_park.to_csv(ruta_park, index=False)
-    print(f"✅ Park Factors guardados en {ruta_park}")
+    df_park.to_csv("data/mlb_park_factors.csv", index=False)
+    print(f"✅ Park Factors guardados en data/mlb_park_factors.csv")
+
+def extraer_historico_juegos():
+    """
+    Descarga el registro partido a partido de la temporada.
+    Ideal para detectar tendencias Locales/Visitantes y Paternidades (Head-to-Head).
+    """
+    print("🗓️ Descargando historial de juegos (Resultados por partido)...")
+    juegos_data = []
+    
+    for year in TEMPORADAS:
+        print(f"  -> Obteniendo calendario {year}...")
+        try:
+            # Pedimos todo el calendario del año desde Enero hasta Diciembre
+            schedule = statsapi.schedule(start_date=f"01/01/{year}", end_date=f"12/31/{year}")
+            
+            for game in schedule:
+                # Solo guardamos los partidos que ya terminaron
+                if game.get('status') in ['Final', 'Completed Early']:
+                    juegos_data.append({
+                        'GameID': game.get('game_id'),
+                        'Date': game.get('game_date'),
+                        'Season': year,
+                        'Away': game.get('away_name'),
+                        'Home': game.get('home_name'),
+                        'Away_Score': game.get('away_score', 0),
+                        'Home_Score': game.get('home_score', 0),
+                        'Innings': game.get('current_inning', 9),
+                        'Venue': game.get('venue_name', 'Unknown')
+                    })
+        except Exception as e:
+            print(f"❌ Error descargando juegos de {year}: {e}")
+    
+    df_juegos = pd.DataFrame(juegos_data)
+    if not df_juegos.empty:
+        df_juegos.to_csv("data/mlb_games.csv", index=False)
+        print(f"✅ Historial guardado: {len(df_juegos)} partidos en data/mlb_games.csv")
+    else:
+        print("⚠️ NO se obtuvieron los juegos históricos.")
 
 if __name__ == "__main__":
     extraer_estadisticas_oficiales_mlb()
     generar_park_factors()
+    extraer_historico_juegos()  # <--- Agregamos la nueva función al flujo principal
     print("🎯 ¡Minería de datos MLB completada con éxito y sin bloqueos!")
