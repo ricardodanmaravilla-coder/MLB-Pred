@@ -53,13 +53,8 @@ def cargar_datos_historicos():
         
     return bateo, pitcheo, park, games
 
-# Cargar los datos usando los nombres exactos
-df_bat, df_pit, df_park, df_games = cargar_datos_historicos()
-
-# Verificación de seguridad
-if df_bat.empty or df_pit.empty:
-    st.warning("⚠️ No se encontraron los datos históricos o están vacíos. Asegúrate de que los archivos CSV estén en la carpeta 'data/'.")
-    st.stop()
+# Cargar los datos al inicio correctamente
+df_bat, df_pit, df_parks, df_games = cargar_datos_historicos()
     
 # Verificación rápida en la UI
 if st.checkbox("Mostrar vista previa de los datos históricos"):
@@ -117,9 +112,7 @@ def obtener_cartelera_espn():
 st.title("⚾ MLB Quant Analytics")
 st.markdown("Motor predictivo basado en Sabermetría avanzada, simulaciones de Montecarlo y Machine Learning.")
 
-df_bat, df_pit, df_park, df_games = cargar_datos_historicos()
-
-if df_batting.empty or df_pitching.empty:
+if df_bat.empty or df_pit.empty:
     st.warning("⚠️ No se encontraron los datos históricos. Ejecuta primero `minero_mlb.py` para descargar la sabermetría.")
 else:
     partidos_hoy = obtener_cartelera_espn()
@@ -156,14 +149,14 @@ else:
                 vis_abbr = EQUIPOS_MAP.get(datos_partido["visita"], "")
                 
                 # Extraer estadísticas base (con fallbacks si falta algún dato)
-                try: wrc_loc = float(df_batting[df_batting['Team'] == loc_abbr]['wRC+'].mean())
+                try: wrc_loc = float(df_bat[df_bat['Team'] == loc_abbr]['wRC+'].mean())
                 except: wrc_loc = 100.0
-                try: wrc_vis = float(df_batting[df_batting['Team'] == vis_abbr]['wRC+'].mean())
+                try: wrc_vis = float(df_bat[df_bat['Team'] == vis_abbr]['wRC+'].mean())
                 except: wrc_vis = 100.0
                 
-                try: xfip_loc = float(df_pitching[df_pitching['Team'] == loc_abbr]['xFIP'].mean())
+                try: xfip_loc = float(df_pit[df_pit['Team'] == loc_abbr]['xFIP'].mean())
                 except: xfip_loc = 4.10
-                try: xfip_vis = float(df_pitching[df_pitching['Team'] == vis_abbr]['xFIP'].mean())
+                try: xfip_vis = float(df_pit[df_pit['Team'] == vis_abbr]['xFIP'].mean())
                 except: xfip_vis = 4.10
                 
                 # Park Factor
@@ -179,8 +172,8 @@ else:
                 
                 # MOTOR MACHINE LEARNING
                 ml = PredictorMLMLB()
-                ml.entrenar(df_bat, df_pit, df_games) # <--- Agregamos df_games
-                preds_ml = ml.predecir_partido(wrc_l, wrc_v, xfip_l, xfip_v, pf)
+                ml.entrenar(df_bat, df_pit, df_games)
+                preds_ml = ml.predecir_partido(loc_abbr, vis_abbr, wrc_loc, wrc_vis, xfip_loc, xfip_vis, park_factor)
                 
                 # MOTOR MONTECARLO (Pasándole la línea real del casino ajustada por el usuario)
                 res_mc = simular_partido_mlb(
