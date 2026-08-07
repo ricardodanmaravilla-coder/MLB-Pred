@@ -109,7 +109,7 @@ df_bat, df_pit, df_parks, df_games = cargar_datos_historicos()
 
 @st.cache_data(ttl=300)
 def obtener_cartelera_y_cuotas_automaticas():
-    """Consulta la API de Odds y la API de MLB en simultáneo para extraer cuotas y abridores reales automáticamente"""
+    """Consulta la API de Odds y la API de MLB para extraer cuotas y abridores reales de forma dinámica"""
     hoy = datetime.date.today().strftime('%Y-%m-%d')
     url_mlb = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={hoy}&hydrate=probablePitcher,team"
     
@@ -132,14 +132,49 @@ def obtener_cartelera_y_cuotas_automaticas():
                         partidos[llave] = {
                             "local": home, "visita": away,
                             "pitcher_local": home_pitcher, "pitcher_visita": away_pitcher,
-                            "linea_carreras": 8.5,
-                            "cuota_loc": 1.91, "cuota_vis": 1.91, "cuota_over": 1.91, "cuota_under": 1.91
+                            # Se inicializan vacíos (None) para obligar a que la API de Odds los llene o fallen si no hay mercado
+                            "linea_carreras": None,
+                            "cuota_loc": None, "cuota_vis": None, "cuota_over": None, "cuota_under": None
                         }
     except Exception as e:
         st.error(f"Error en MLB StatsAPI: {e}")
 
     # 2. Obtener cuotas reales automáticas de The Odds API
     if ODDS_API_KEY != "TU_API_KEY_AQUI":
+        url_odds = f"https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/?apiKey={ODDS_API_KEY}&regions=us&markets=h2h,totals&oddsFormat=american"
+        try:
+            res_odds = requests.get(url_odds, timeout=5)
+            if res_odds.status_code == 200:
+                data_odds = res_odds.json()
+                for item in data_odds:
+                    h_team = item.get('home_team')
+                    a_team = item.get('away_team')
+                    for k, p in partidos.items():
+                        if p['local'].lower() in h_team.lower() or h_team.lower() in p['local'].lower():
+                            bookmakers = item.get('bookmakers', [])
+                            if bookmakers:
+                                markets = bookmakers[0].get('markets', [])
+                                for m in markets:
+                                    if m['key'] == 'h2h':
+                                        for out in m['outcomes']:
+                                            if out['name'] == h_team:
+                                                p['cuota_loc'] = american_to_decimal(out['price'])
+                                            else:
+                                                p['cuota_vis'] = american_to_decimal(out['price'])
+                                    elif m['key'] == 'totals':
+                                        for out in m['outcomes']:
+                                            if out['name'] == 'Over':
+                                                p['linea_carreras'] = float(out['point'])
+                                                p['cuota_over'] = american_to_decimal(out['price'])
+                                            elif out['name'] == 'Under':
+                                                p['cuota_under'] = american_to_decimal(out['price'])
+        except Exception as e:
+            st.warning(f"Aviso de sincronización de cuotas: {e}")
+            
+    return partidos
+
+    # 2. Obtener cuotas reales automáticas de The Odds API
+    if ODDS_API_KEY != "de66554a17bce1149445b1a883056607":
         url_odds = f"https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/?apiKey={ODDS_API_KEY}&regions=us&markets=h2h,totals&oddsFormat=american"
         try:
             res_odds = requests.get(url_odds, timeout=5)
@@ -241,7 +276,7 @@ else:
                     team_pit_loc = df_pit[df_pit['Team'] == loc_abbr]
                     xfip_loc = float(team_pit_loc['xFIP'].mean())
 
-                # 3. Búsqueda Quirúrgica del Abridor Visitante (Sin valores fijos inventados)
+                # 3. Búsqueda Quirúrgica del Abridor Visitante
                 pitcher_vis_nombre = datos_partido["pitcher_visita"]
                 xfip_vis = None
                 
@@ -251,8 +286,8 @@ else:
                         xfip_vis = float(match_vis['xFIP'].values[0])
                 
                 if xfip_vis is None:
-                    team_pit_vis = df_pit[df_pit['Team'] == vis_vis := vis_abbr] # corregido vis_abbr
-                    xfip_vis = float(df_pit[df_pit['Team'] == vis_abbr]['xFIP'].mean())
+                    team_pit_vis = df_pit[df_pit['Team'] == vis_abbr]
+                    xfip_vis = float(team_pit_vis['xFIP'].mean())
 
                 # Bullpen calculado dinámicamente como el diferencial del pitcheo del equipo
                 bullpen_loc_era = float(df_pit[df_pit['Team'] == loc_abbr]['ERA'].mean())
