@@ -31,7 +31,7 @@ def simular_partido_mlb(
     num_simulaciones=500000
 ):
     """
-    Simulador Montecarlo realista basado en Duelo de Abridores y Sabermetría.
+    Simulador Montecarlo realista basado en Duelo de Abridores y Sabermetría con factor de amortiguación.
     """
     if linea_carreras_casino is None or linea_carreras_casino <= 0:
         raise ValueError("⚠️ Se requiere una línea de carreras válida del casino.")
@@ -41,14 +41,24 @@ def simular_partido_mlb(
     
     base_lambda_inning = 0.50 * mult_estadio * f_clima_carreras
     
-    lambda_loc_starter = max(0.10, base_lambda_inning * (wrc_loc / 100.0) * (pitcher_vis_xfip / 4.10))
-    lambda_vis_starter = max(0.10, base_lambda_inning * (wrc_vis / 100.0) * (pitcher_loc_xfip / 4.10))
+    # Amortiguación sabermétrica (evita desproporciones extremas en las divisiones de xFIP y wRC+)
+    wrc_loc_adj = 1.0 + ((wrc_loc - 100.0) / 100.0) * 0.75
+    wrc_vis_adj = 1.0 + ((wrc_vis - 100.0) / 100.0) * 0.75
     
-    lambda_loc_bullpen = max(0.10, base_lambda_inning * (wrc_loc / 100.0) * (bullpen_vis_era / 4.10))
-    lambda_vis_bullpen = max(0.10, base_lambda_inning * (wrc_vis / 100.0) * (bullpen_loc_era / 4.10))
+    xfip_vis_adj = 4.10 + ((pitcher_vis_xfip - 4.10) * 0.75)
+    xfip_loc_adj = 4.10 + ((pitcher_loc_xfip - 4.10) * 0.75)
+    
+    bullpen_vis_adj = 4.10 + ((bullpen_vis_era - 4.10) * 0.75)
+    bullpen_loc_adj = 4.10 + ((bullpen_loc_era - 4.10) * 0.75)
 
-    lambda_hits_loc = max(3.0, 8.5 * (wrc_loc / 100.0) * (pitcher_vis_xfip / 4.10) * f_clima_hits)
-    lambda_hits_vis = max(3.0, 8.5 * (wrc_vis / 100.0) * (pitcher_loc_xfip / 4.10) * f_clima_hits)
+    lambda_loc_starter = max(0.15, base_lambda_inning * wrc_loc_adj * (xfip_vis_adj / 4.10))
+    lambda_vis_starter = max(0.15, base_lambda_inning * wrc_vis_adj * (xfip_loc_adj / 4.10))
+    
+    lambda_loc_bullpen = max(0.15, base_lambda_inning * wrc_loc_adj * (bullpen_vis_adj / 4.10))
+    lambda_vis_bullpen = max(0.15, base_lambda_inning * wrc_vis_adj * (bullpen_loc_adj / 4.10))
+
+    lambda_hits_loc = max(3.0, 8.5 * wrc_loc_adj * (xfip_vis_adj / 4.10) * f_clima_hits)
+    lambda_hits_vis = max(3.0, 8.5 * wrc_vis_adj * (xfip_loc_adj / 4.10) * f_clima_hits)
 
     carreras_loc_sim = np.zeros(num_simulaciones)
     carreras_vis_sim = np.zeros(num_simulaciones)
