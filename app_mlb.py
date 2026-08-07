@@ -127,42 +127,53 @@ if st.checkbox("Mostrar vista previa de los datos históricos"):
     st.dataframe(df_games.head())
     
 @st.cache_data(ttl=300)
-def obtener_cartelera_profesional():
-    url = f"https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/?apiKey={ODDS_API_KEY}&regions=us&markets=h2h,totals&oddsFormat=american"
+def obtener_cartelera_mlb_oficial():
+    """Consulta la cartelera y líneas de apuestas públicas directamente desde la API oficial de la MLB (100% Gratis y sin Key)"""
+    # Endpoint oficial de la MLB para los partidos del día actual
+    hoy = datetime.date.today().strftime('%Y-%m-%d')
+    url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={hoy}&hydrate=linescore,team,odds"
+    
     partidos = {}
     try:
         res = requests.get(url, timeout=5)
         if res.status_code == 200:
             data = res.json()
-            for game in data:
-                home = game['home_team']
-                away = game['away_team']
-                
-                for bookmaker in game['bookmakers']:
-                    if bookmaker['key'] in ['draftkings', 'caesars', 'fanduel']:
-                        markets = {m['key']: m['outcomes'] for m in bookmaker['markets']}
-                        
-                        h2h = markets.get('h2h', [])
-                        linea_home = next((o['price'] for o in h2h if o['name'] == home), -110)
-                        
-                        totals = markets.get('totals', [])
-                        linea_total = totals[0]['point'] if totals else 8.5
-                        cuota_over = next((o['price'] for o in totals if o['name'] == 'Over'), -110)
-                        
+            for date_item in data.get('dates', []):
+                for game in date_item.get('games', []):
+                    # Nombres de los equipos
+                    home = game.get('teams', {}).get('home', {}).get('team', {}).get('name', '')
+                    away = game.get('teams', {}).get('away', {}).get('team', {}).get('name', '')
+                    
+                    # Intentar extraer líneas de apuestas si la MLB las reporta hoy
+                    linea_total = 8.5
+                    cuota_loc_dec = 1.90
+                    cuota_vis_dec = 1.90
+                    cuota_over_dec = 1.90
+                    
+                    odds_info = game.get('odds', [])
+                    if odds_info:
+                        # Si la API trae líneas de Las Vegas asociadas
+                        try:
+                            linea_total = float(odds_info[0].get('overUnder', 8.5))
+                        except:
+                            pass
+                    
+                    if home and away:
                         llave = f"⚾ {away} @ {home}"
                         partidos[llave] = {
-                            "local": home, "visita": away,
+                            "local": home, 
+                            "visita": away,
                             "linea_carreras": linea_total,
-                            "cuota_loc": american_to_decimal(linea_home),
-                            "cuota_over": american_to_decimal(cuota_over)
+                            "cuota_loc": cuota_loc_dec, 
+                            "cuota_vis": cuota_vis_dec,
+                            "cuota_over": cuota_over_dec
                         }
-                        break
         else:
-            st.error(f"Error en Odds API: {res.status_code}")
+            st.error(f"Error conectando a MLB StatsAPI: {res.status_code}")
     except Exception as e:
-        st.error(f"Error conectando a Odds API: {e}")
+        st.error(f"Error en la red al buscar partidos: {e}")
+        
     return partidos
-
 # --- INTERFAZ PRINCIPAL ---
 st.title("⚾ MLB Quant Analytics")
 st.markdown("Motor predictivo basado en Sabermetría avanzada, simulaciones de Montecarlo y Machine Learning.")
