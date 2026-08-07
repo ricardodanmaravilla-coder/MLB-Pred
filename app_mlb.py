@@ -30,16 +30,16 @@ def american_to_decimal(am_odds):
     if am_odds > 0: return round((am_odds / 100.0) + 1, 2)
     else: return round((100.0 / abs(am_odds)) + 1, 2)
 
-@st.cache_data
+# --- CARGA DE DATOS HISTÓRICOS ---
+@st.cache_data(ttl=3600)
 def cargar_datos_historicos():
-    try:
-        batting = pd.read_csv("data/mlb_batting.csv")
-        pitching = pd.read_csv("data/mlb_pitching.csv")
-        parks = pd.read_csv("data/mlb_park_factors.csv")
-        return batting, pitching, parks
-    except Exception as e:
-        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
-
+    bateo, pitcheo, park, games = pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+    if os.path.exists("data/mlb_batting.csv"): bateo = pd.read_csv("data/mlb_batting.csv")
+    if os.path.exists("data/mlb_pitching.csv"): pitcheo = pd.read_csv("data/mlb_pitching.csv")
+    if os.path.exists("data/mlb_park_factors.csv"): park = pd.read_csv("data/mlb_park_factors.csv")
+    if os.path.exists("data/mlb_games.csv"): games = pd.read_csv("data/mlb_games.csv")
+    return bateo, pitcheo, park, games
+    
 @st.cache_data(ttl=300)
 def obtener_cartelera_espn():
     url = "https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard"
