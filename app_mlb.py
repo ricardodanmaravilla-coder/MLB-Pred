@@ -33,12 +33,26 @@ def american_to_decimal(am_odds):
 # --- CARGA DE DATOS HISTÓRICOS ---
 @st.cache_data(ttl=3600)
 def cargar_datos_historicos():
-    bateo = pd.read_csv("data/mlb_batting.csv") if os.path.exists("data/mlb_batting.csv") else pd.DataFrame()
-    pitcheo = pd.read_csv("data/mlb_pitching.csv") if os.path.exists("data/mlb_pitching.csv") else pd.DataFrame()
-    park = pd.read_csv("data/mlb_park_factors.csv") if os.path.exists("data/mlb_park_factors.csv") else pd.DataFrame()
-    games = pd.read_csv("data/mlb_games.csv") if os.path.exists("data/mlb_games.csv") else pd.DataFrame()
-    return bateo, pitcheo, park, games  # <--- Debe retornar los 4 obligatoriamente
-
+    # Creamos estructuras base vacías por seguridad si faltan archivos
+    bateo = pd.DataFrame()
+    pitcheo = pd.DataFrame()
+    park = pd.DataFrame()
+    games = pd.DataFrame()
+    
+    try:
+        if os.path.exists("data/mlb_batting.csv"): 
+            bateo = pd.read_csv("data/mlb_batting.csv")
+        if os.path.exists("data/mlb_pitching.csv"): 
+            pitcheo = pd.read_csv("data/mlb_pitching.csv")
+        if os.path.exists("data/mlb_park_factors.csv"): 
+            park = pd.read_csv("data/mlb_park_factors.csv")
+        if os.path.exists("data/mlb_games.csv"): 
+            games = pd.read_csv("data/mlb_games.csv")
+    except Exception as e:
+        st.warning(f"Aviso de carga de datos: {e}")
+        
+    return bateo, pitcheo, park, games
+    
 # Verificación rápida en la UI
 if st.checkbox("Mostrar vista previa de los datos históricos"):
     st.write("Primeras 5 filas del historial de juegos:")
