@@ -33,12 +33,11 @@ def american_to_decimal(am_odds):
 # --- CARGA DE DATOS HISTÓRICOS ---
 @st.cache_data(ttl=3600)
 def cargar_datos_historicos():
-    bateo, pitcheo, park, games = pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
-    if os.path.exists("data/mlb_batting.csv"): bateo = pd.read_csv("data/mlb_batting.csv")
-    if os.path.exists("data/mlb_pitching.csv"): pitcheo = pd.read_csv("data/mlb_pitching.csv")
-    if os.path.exists("data/mlb_park_factors.csv"): park = pd.read_csv("data/mlb_park_factors.csv")
-    if os.path.exists("data/mlb_games.csv"): games = pd.read_csv("data/mlb_games.csv")
-    return bateo, pitcheo, park, games
+    bateo = pd.read_csv("data/mlb_batting.csv") if os.path.exists("data/mlb_batting.csv") else pd.DataFrame()
+    pitcheo = pd.read_csv("data/mlb_pitching.csv") if os.path.exists("data/mlb_pitching.csv") else pd.DataFrame()
+    park = pd.read_csv("data/mlb_park_factors.csv") if os.path.exists("data/mlb_park_factors.csv") else pd.DataFrame()
+    games = pd.read_csv("data/mlb_games.csv") if os.path.exists("data/mlb_games.csv") else pd.DataFrame()
+    return bateo, pitcheo, park, games  # <--- Debe retornar los 4 obligatoriamente
 
 # Verificación rápida en la UI
 if st.checkbox("Mostrar vista previa de los datos históricos"):
