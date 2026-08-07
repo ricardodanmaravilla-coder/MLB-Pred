@@ -312,10 +312,10 @@ else:
                 )
                 
                 cuotas_reales = {
-                    "Moneyline_Local": datos_partido["cuota_loc"] if datos_partido["cuota_loc"],
-                    "Moneyline_Visita": datos_partido["cuota_vis"] if datos_partido["cuota_vis"],
-                    "Cuota_Over": datos_partido["cuota_over"] if datos_partido["cuota_over"],
-                    "Cuota_Under": datos_partido["cuota_under"] if datos_partido["cuota_under"]
+                    "Moneyline_Local": datos_partido["cuota_loc"] if datos_partido["cuota_loc"] is not None else 1.91,
+                    "Moneyline_Visita": datos_partido["cuota_vis"] if datos_partido["cuota_vis"] is not None else 1.91,
+                    "Cuota_Over": datos_partido["cuota_over"] if datos_partido["cuota_over"] is not None else 1.91,
+                    "Cuota_Under": datos_partido["cuota_under"] if datos_partido["cuota_under"] is not None else 1.91
                 }
                 df_apuestas = analizar_apuestas_mlb(res_mc, preds_ml, cuotas_reales, linea_casino)
                 
