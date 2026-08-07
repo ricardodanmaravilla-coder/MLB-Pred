@@ -99,8 +99,9 @@ def simular_partido_mlb(
         },
         "Carreras": {
             "Promedio_Total": round(np.mean(totales_carreras), 2),
-            "Over": round(np.mean(totales_carreras > linea_carreras_casino) * 100, 2),
-            "Under": round(np.mean(totales_carreras < linea_carreras_casino) * 100, 2),
+            f"Over {linea_carreras_casino}": round(np.mean(totales_carreras > linea_carreras_casino) * 100, 2),
+            f"Under {linea_carreras_casino}": round(np.mean(totales_carreras < linea_carreras_casino) * 100, 2),
+        },
         },
         "Hits": {
             "Promedio_Total": round(np.mean(totales_hits), 2)
