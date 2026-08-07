@@ -258,12 +258,30 @@ else:
                 bullpen_loc_era = float(df_pit[df_pit['Team'] == loc_abbr]['ERA'].mean())
                 bullpen_vis_era = float(df_pit[df_pit['Team'] == vis_abbr]['ERA'].mean())
                 
-                park_data = df_parks[df_parks['Team'] == loc_abbr]
-                if park_data.empty:
-                    raise ValueError(f"No se encontró el Park Factor para el equipo local: {loc_abbr}")
+                # 4. Factores de Estadio (Búsqueda estricta en el CSV sin valores fijos inventados)
+                if df_parks.empty:
+                    st.error("❌ Error crítico: El archivo de factores de estadios (mlb_park_factors.csv) está vacío.")
+                    st.stop()
+
+                # Detectar automáticamente las columnas del CSV de parques
+                col_team_park = 'Team'
+                for posible_col in ['Team', 'team', 'Equipo', 'franchise']:
+                    if posible_col in df_parks.columns:
+                        col_team_park = posible_col
+                        break
+
+                park_data = df_parks[df_parks[col_team_park] == loc_abbr]
                 
-                park_factor = float(park_data['Park_Factor_General'].values[0])
-                altitud = float(park_data['Altitud_pies'].values[0])
+                if park_data.empty:
+                    st.error(f"❌ No se encontró el registro para el equipo '{loc_abbr}' en el archivo de factores de estadios. Revisa las abreviaturas en tu CSV.")
+                    st.stop()
+
+                # Detectar columnas de métricas de parque de forma dinámica
+                col_pf = 'Park_Factor_General' if 'Park_Factor_General' in park_data.columns else park_data.columns[1]
+                col_alt = 'Altitud_pies' if 'Altitud_pies' in park_data.columns else park_data.columns[2]
+
+                park_factor = float(park_data[col_pf].values[0])
+                altitud = float(park_data[col_alt].values[0])
                 
                 linea_casino = datos_partido["linea_carreras"] if datos_partido["linea_carreras"] is not None else 8.5
                 
