@@ -34,7 +34,6 @@ def simular_partido_mlb(
 ):
     """
     Simulador Montecarlo entrada por entrada para MLB.
-    Exige todos los parámetros reales del entorno, estadio y casino sin valores fijos ocultos.
     """
     if linea_carreras_casino is None:
         raise ValueError("⚠️ Error crítico: Se requiere la línea de carreras real del casino.")
@@ -43,19 +42,19 @@ def simular_partido_mlb(
     mult_estadio = (park_factor / 100.0) + (altitud_ft / 10000.0 * 0.05)
     f_clima_carreras, f_clima_hits = calcular_factor_clima(viento_mph, direccion_viento, temp_f)
     
-    # 2. Expectativa de carreras por entrada (Lambda de Poisson)
-    base_lambda = 0.50 * mult_estadio * f_clima_carreras
+    # 2. Expectativa de carreras por entrada (Lambda de Poisson protegida con max(0.1, ...))
+    base_lambda = max(0.1, 0.50 * mult_estadio * f_clima_carreras)
     
     # Entradas 1-6 (Abridor) vs Entradas 7-9 (Bullpen)
-    lambda_loc_starter = base_lambda * (wrc_loc / 100.0) * (pitcher_vis_xfip / 4.10)
-    lambda_vis_starter = base_lambda * (wrc_vis / 100.0) * (pitcher_loc_xfip / 4.10)
+    lambda_loc_starter = max(0.05, base_lambda * (wrc_loc / 100.0) * (pitcher_vis_xfip / 4.10))
+    lambda_vis_starter = max(0.05, base_lambda * (wrc_vis / 100.0) * (pitcher_loc_xfip / 4.10))
     
-    lambda_loc_bullpen = base_lambda * (wrc_loc / 100.0) * (bullpen_vis_era / 4.10)
-    lambda_vis_bullpen = base_lambda * (wrc_vis / 100.0) * (bullpen_loc_era / 4.10)
+    lambda_loc_bullpen = max(0.05, base_lambda * (wrc_loc / 100.0) * (bullpen_loc_era / 4.10))
+    lambda_vis_bullpen = max(0.05, base_lambda * (wrc_vis / 100.0) * (bullpen_loc_era / 4.10))
 
-    # Media de hits por partido
-    lambda_hits_loc = 8.5 * (wrc_loc / 100.0) * (pitcher_vis_xfip / 4.10) * f_clima_hits
-    lambda_hits_vis = 8.5 * (wrc_vis / 100.0) * (pitcher_loc_xfip / 4.10) * f_clima_hits
+    # Media de hits por partido protegida
+    lambda_hits_loc = max(0.5, 8.5 * (wrc_loc / 100.0) * (pitcher_vis_xfip / 4.10) * f_clima_hits)
+    lambda_hits_vis = max(0.5, 8.5 * (wrc_vis / 100.0) * (pitcher_loc_xfip / 4.10) * f_clima_hits)
 
     carreras_loc_sim = np.zeros(num_simulaciones)
     carreras_vis_sim = np.zeros(num_simulaciones)
