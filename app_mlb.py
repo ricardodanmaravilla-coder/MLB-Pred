@@ -264,8 +264,8 @@ else:
                 c1.metric(f"Gana {datos_partido['local']}", f"{res_mc['Moneyline']['Gana Local']}%")
                 c2.metric(f"Gana {datos_partido['visita']}", f"{res_mc['Moneyline']['Gana Visita']}%")
                 
-                # Usamos la clave exacta con la línea flotante actual (ej. Over 8.5, Over 7.5, etc.)
-                prob_over = res_mc.get('Carreras', {}).get(f"Over {linea_carreras}", 0.0)
+                # Búsqueda dinámica con la línea real del casino (ej. Over 8.5)
+                prob_over = res_mc.get('Carreras', {}).get(f"Over {linea_carreras}", 50.0)
                 c3.metric(f"Over {linea_carreras} Carreras", f"{prob_over}%")
                 
                 c4.metric(f"Promedio Total", f"{res_mc['Carreras']['Promedio_Total']}")
