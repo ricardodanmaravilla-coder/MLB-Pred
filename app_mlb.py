@@ -55,17 +55,33 @@ def calcular_criterio_kelly(probabilidad_real, cuota_decimal, fraccion=0.25):
 def cargar_datos_historicos():
     bateo, pitcheo, park, games = pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
     try:
-        if os.path.exists("data/mlb_batting.csv"): bateo = pd.read_csv("data/mlb_batting.csv")
-        if os.path.exists("data/mlb_pitching.csv"): pitcheo = pd.read_csv("data/mlb_pitching.csv")
-        if os.path.exists("data/mlb_park_factors.csv"): 
-            park = pd.read_csv("data/mlb_park_factors.csv")
-            park.columns = park.columns.str.strip()
-        if os.path.exists("data/mlb_games.csv"): games = pd.read_csv("data/mlb_games.csv")
-    except Exception as e:
-        st.warning(f"Aviso de carga: {e}")
-    return bateo, pitcheo, park, games
+        if os.path.exists("data/mlb_batting.csv"):
+            bateo = pd.read_csv("data/mlb_batting.csv", on_bad_lines='skip')
+            bateo.columns = bateo.columns.str.strip()
+            # Asegurar que Team y wRC+ existan y sean limpios
+            if 'Team' in bateo.columns and 'wRC+' in bateo.columns:
+                bateo['wRC+'] = pd.to_numeric(bateo['wRC+'], errors='coerce')
 
-df_bat, df_pit, df_parks, df_games = cargar_datos_historicos()
+        if os.path.exists("data/mlb_pitching.csv"):
+            pitcheo = pd.read_csv("data/mlb_pitching.csv", on_bad_lines='skip')
+            pitcheo.columns = pitcheo.columns.str.strip()
+            # Asegurar conversiones numéricas limpias para xFIP y ERA
+            for col in ['xFIP', 'ERA']:
+                if col in pitcheo.columns:
+                    pitcheo[col] = pd.to_numeric(pitcheo[col], errors='coerce')
+
+        if os.path.exists("data/mlb_park_factors.csv"): 
+            park = pd.read_csv("data/mlb_park_factors.csv", on_bad_lines='skip')
+            park.columns = park.columns.str.strip()
+            
+        if os.path.exists("data/mlb_games.csv"): 
+            games = pd.read_csv("data/mlb_games.csv", on_bad_lines='skip')
+            games.columns = games.columns.str.strip()
+            
+    except Exception as e:
+        st.warning(f"Aviso de carga en archivos históricos: {e}")
+        
+    return bateo, pitcheo, park, games
 
 @st.cache_data(ttl=600)
 def obtener_clima_estadio(nombre_equipo):
