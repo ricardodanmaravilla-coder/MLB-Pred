@@ -39,6 +39,11 @@ def cargar_datos_historicos():
     if os.path.exists("data/mlb_park_factors.csv"): park = pd.read_csv("data/mlb_park_factors.csv")
     if os.path.exists("data/mlb_games.csv"): games = pd.read_csv("data/mlb_games.csv")
     return bateo, pitcheo, park, games
+
+# Verificación rápida en la UI
+if st.checkbox("Mostrar vista previa de los datos históricos"):
+    st.write("Primeras 5 filas del historial de juegos:")
+    st.dataframe(df_games.head())
     
 @st.cache_data(ttl=300)
 def obtener_cartelera_espn():
