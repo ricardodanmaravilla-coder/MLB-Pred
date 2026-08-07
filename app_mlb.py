@@ -175,7 +175,7 @@ def obtener_cartelera_y_cuotas_automaticas():
     except Exception as e:
         st.error(f"Error en MLB StatsAPI: {e}")
 
-    if ODDS_API_KEY != "TU_API_KEY_AQUI":
+    if ODDS_API_KEY != "de66554a17bce1149445b1a883056607":
         url_odds = f"https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/?apiKey={ODDS_API_KEY}&regions=us&markets=h2h,totals&oddsFormat=american"
         try:
             res_odds = requests.get(url_odds, timeout=5)
@@ -291,7 +291,8 @@ else:
                                 park_factor=park_factor, altitud_ft=altitud,
                                 viento_mph=8, direccion_viento="None", temp_f=72,
                                 linea_carreras_casino=linea_casino,
-                                num_simulaciones=200000
+                                df_games=df_games,
+                                num_simulaciones=1000000
                             )
 
                             prob_mc_loc = res_mc['Moneyline']['Gana Local']
