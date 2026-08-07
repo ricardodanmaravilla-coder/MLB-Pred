@@ -108,7 +108,7 @@ st.markdown("Motor predictivo basado en Sabermetría avanzada, simulaciones de M
 if df_bat.empty or df_pit.empty:
     st.warning("⚠️ No se encontraron los datos históricos. Ejecuta primero `minero_mlb.py` para descargar la sabermetría.")
 else:
-    partidos_hoy = obtener_cartelera_espn()
+    partidos_hoy = obtener_cartelera_profesional()
     
     if not partidos_hoy:
         st.info("No hay partidos programados o la API de ESPN no retornó datos.")
