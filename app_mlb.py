@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import requests
 import numpy as np
+import os
 
 from modules.montecarlo_mlb import simular_partido_mlb
 from modules.ml_mlb import PredictorMLMLB
