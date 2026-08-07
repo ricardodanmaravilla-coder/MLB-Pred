@@ -72,8 +72,18 @@ def american_to_decimal(am_odds):
 
 @st.cache_data(ttl=600)
 def obtener_clima_estadio(nombre_equipo):
-    coords = ESTADIOS_COORDS.get(nombre_equipo, {"lat": 40.7128, "lon": -74.0060})
-    url = f"https://api.open-meteo.com/v1/forecast?latitude={coords['lat']}&longitude={coords['lon']}&current=temperature_2m,wind_speed_10m,wind_direction_2m"
+    # Buscamos las coordenadas directamente en tu dataframe de parques cargado
+    park_data = df_parks[df_parks['Team'] == EQUIPOS_MAP.get(nombre_equipo, "")]
+    
+    if park_data.empty:
+        return None, None, "No disponible"
+    
+    # Suponiendo que tu CSV tiene columnas de latitud y longitud, 
+    # o si no las tienes, agrégalas a tu csv para que sea 100% preciso
+    lat = float(park_data['Latitud'].values[0])
+    lon = float(park_data['Longitud'].values[0])
+    
+    url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current=temperature_2m,wind_speed_10m,wind_direction_2m"
     try:
         res = requests.get(url, timeout=5)
         if res.status_code == 200:
@@ -82,15 +92,14 @@ def obtener_clima_estadio(nombre_equipo):
             wind_mph = int(data.get('wind_speed_10m', 8.0) * 0.621371)
             deg = data.get('wind_direction_2m', 0)
             
+            # Lógica de dirección del viento
             dir_str = "None"
-            if (315 <= deg <= 360) or (0 <= deg < 45):
-                dir_str = "Infield (Hacia Adentro)"
-            elif 135 <= deg < 225:
-                dir_str = "Outfield (Hacia Afuera)"
+            if (315 <= deg <= 360) or (0 <= deg < 45): dir_str = "Infield (Hacia Adentro)"
+            elif 135 <= deg < 225: dir_str = "Outfield (Hacia Afuera)"
             return temp_f, wind_mph, dir_str
     except:
-        pass
-    return 72, 8, "None"
+        return None, None, "Error API Clima"
+    return None, None, "Error"
 
 @st.cache_data(ttl=3600)
 def cargar_datos_historicos():
@@ -186,12 +195,14 @@ else:
         seleccion = st.selectbox("Selecciona un duelo:", list(partidos_hoy.keys()))
         datos_partido = partidos_hoy[seleccion]
         
+        # 1. Obtenemos los valores desde la API
         temp_auto, viento_auto, dir_auto = obtener_clima_estadio(datos_partido["local"])
         
-        st.subheader("2. Datos del Mercado y Clima (Extraídos Automáticamente)")
+        # 2. AQUI ES DONDE VA EL BLOQUE QUE ME MOSTRASTE
+        st.subheader("2. Datos del Mercado y Clima (En Vivo)")
         c1, c2, c3, c4 = st.columns(4)
         
-        opciones_viento = ["None", "Outfield (Hacia Afuera)", "Infield (Hacia Adentro)"]
+        opciones_viento = ["None", "Outfield (Hacia Afuera)", "Infield (Hacia Adentro)", "Lateral (Derecha a Izquierda)", "Lateral (Izquierda a Derecha)"]
         indice_dir = opciones_viento.index(dir_auto) if dir_auto in opciones_viento else 0
         
         with c1:
@@ -201,10 +212,10 @@ else:
             st.metric(f"Cuota ML ({datos_partido['local']})", datos_partido["cuota_loc"] if datos_partido["cuota_loc"] is not None else "No disponible")
             st.metric(f"Cuota ML ({datos_partido['visita']})", datos_partido["cuota_vis"] if datos_partido["cuota_vis"] is not None else "No disponible")
         with c3:
-            viento = st.number_input("Viento (mph)", value=viento_auto, step=1)
+            viento = st.number_input("Viento (mph)", value=int(viento_auto) if viento_auto is not None else 8, step=1)
             dir_viento = st.selectbox("Dirección del Viento", opciones_viento, index=indice_dir)
         with c4:
-            temp = st.slider("Temperatura (°F)", 30, 110, temp_auto)
+            temp = st.slider("Temperatura (°F)", 30, 110, int(temp_auto) if temp_auto is not None else 72)
             
         if st.button("🚀 Ejecutar Simulación Cuántica", type="primary"):
             with st.spinner("Procesando datos en vivo y ejecutando 500,000 escenarios..."):
@@ -301,10 +312,10 @@ else:
                 )
                 
                 cuotas_reales = {
-                    "Moneyline_Local": datos_partido["cuota_loc"] if datos_partido["cuota_loc"] is not None else 1.91,
-                    "Moneyline_Visita": datos_partido["cuota_vis"] if datos_partido["cuota_vis"] is not None else 1.91,
-                    "Cuota_Over": datos_partido["cuota_over"] if datos_partido["cuota_over"] is not None else 1.91,
-                    "Cuota_Under": datos_partido["cuota_under"] if datos_partido["cuota_under"] is not None else 1.91
+                    "Moneyline_Local": datos_partido["cuota_loc"] if datos_partido["cuota_loc"],
+                    "Moneyline_Visita": datos_partido["cuota_vis"] if datos_partido["cuota_vis"],
+                    "Cuota_Over": datos_partido["cuota_over"] if datos_partido["cuota_over"],
+                    "Cuota_Under": datos_partido["cuota_under"] if datos_partido["cuota_under"]
                 }
                 df_apuestas = analizar_apuestas_mlb(res_mc, preds_ml, cuotas_reales, linea_casino)
                 
