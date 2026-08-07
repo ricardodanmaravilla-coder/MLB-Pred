@@ -91,7 +91,7 @@ def obtener_cartelera_espn():
 st.title("⚾ MLB Quant Analytics")
 st.markdown("Motor predictivo basado en Sabermetría avanzada, simulaciones de Montecarlo y Machine Learning.")
 
-df_batting, df_pitching, df_parks = cargar_datos_historicos()
+df_bat, df_pit, df_park, df_games = cargar_datos_historicos()
 
 if df_batting.empty or df_pitching.empty:
     st.warning("⚠️ No se encontraron los datos históricos. Ejecuta primero `minero_mlb.py` para descargar la sabermetría.")
@@ -152,9 +152,9 @@ else:
                     except: pass
                 
                 # MOTOR MACHINE LEARNING
-                ml_engine = PredictorMLMLB()
-                ml_engine.entrenar(df_batting, df_pitching)
-                preds_ml = ml_engine.predecir_partido(wrc_loc, wrc_vis, xfip_loc, xfip_vis, park_factor)
+                ml = PredictorMLMLB()
+                ml.entrenar(df_bat, df_pit, df_games) # <--- Agregamos df_games
+                preds_ml = ml.predecir_partido(wrc_l, wrc_v, xfip_l, xfip_v, pf)
                 
                 # MOTOR MONTECARLO (Pasándole la línea real del casino ajustada por el usuario)
                 res_mc = simular_partido_mlb(
