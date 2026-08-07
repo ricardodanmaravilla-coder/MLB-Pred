@@ -489,7 +489,7 @@ else:
                         viento_mph=viento, direccion_viento=dir_viento, temp_f=temp,
                         linea_carreras_casino=linea_casino,
                         df_games=df_games,
-                        num_simulaciones=500000
+                        num_simulaciones=1000000
                     )
                     
                     cuotas_reales = {
