@@ -12,7 +12,7 @@ from modules.odds_mlb import analizar_apuestas_mlb
 # --- CONFIGURACIÓN ---
 st.set_page_config(page_title="MLB Quant Analytics", layout="wide", page_icon="⚾")
 
-# Mapeo de nombres de The Odds API / ESPN a las abreviaturas
+# Mapeo de nombres de la API oficial a las abreviaturas
 EQUIPOS_MAP = {
     "New York Yankees": "NYY", "Boston Red Sox": "BOS", "Los Angeles Dodgers": "LAD",
     "Houston Astros": "HOU", "Atlanta Braves": "ATL", "Philadelphia Phillies": "PHI",
@@ -75,16 +75,12 @@ def obtener_clima_estadio(nombre_equipo):
             wind_kmh = data.get('wind_speed_10m', 8.0)
             wind_mph = int(wind_kmh * 0.621371)
             
-            # Grados del viento de Open-Meteo
             deg = data.get('wind_direction_2m', 0)
-            
-            # Lógica mejorada de dirección orientada al béisbol
-            # Viento soplando desde el home hacia el jardín central (aprox 180°-360° o sectores específicos)
             dir_str = "None"
             if (315 <= deg <= 360) or (0 <= deg < 45):
-                dir_str = "Infield (Hacia Adentro)"  # Viento de frente (prohibido para Home Runs)
+                dir_str = "Infield (Hacia Adentro)"
             elif 135 <= deg < 225:
-                dir_str = "Outfield (Hacia Afuera)" # Viento a favor (vuela la bola)
+                dir_str = "Outfield (Hacia Afuera)"
             
             return temp_f, wind_mph, dir_str
     except:
@@ -127,8 +123,7 @@ if st.checkbox("Mostrar vista previa de los datos históricos"):
     
 @st.cache_data(ttl=300)
 def obtener_cartelera_mlb_oficial():
-    """Consulta la cartelera y líneas de apuestas públicas directamente desde la API oficial de la MLB (100% Gratis y sin Key)"""
-    # Endpoint oficial de la MLB para los partidos del día actual
+    """Consulta la cartelera y líneas de apuestas públicas directamente desde la API oficial de la MLB"""
     hoy = datetime.date.today().strftime('%Y-%m-%d')
     url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={hoy}&hydrate=linescore,team,odds"
     
@@ -139,11 +134,9 @@ def obtener_cartelera_mlb_oficial():
             data = res.json()
             for date_item in data.get('dates', []):
                 for game in date_item.get('games', []):
-                    # Nombres de los equipos
                     home = game.get('teams', {}).get('home', {}).get('team', {}).get('name', '')
                     away = game.get('teams', {}).get('away', {}).get('team', {}).get('name', '')
                     
-                    # Intentar extraer líneas de apuestas si la MLB las reporta hoy
                     linea_total = 8.5
                     cuota_loc_dec = 1.90
                     cuota_vis_dec = 1.90
@@ -151,7 +144,6 @@ def obtener_cartelera_mlb_oficial():
                     
                     odds_info = game.get('odds', [])
                     if odds_info:
-                        # Si la API trae líneas de Las Vegas asociadas
                         try:
                             linea_total = float(odds_info[0].get('overUnder', 8.5))
                         except:
@@ -173,6 +165,7 @@ def obtener_cartelera_mlb_oficial():
         st.error(f"Error en la red al buscar partidos: {e}")
         
     return partidos
+
 # --- INTERFAZ PRINCIPAL ---
 st.title("⚾ MLB Quant Analytics")
 st.markdown("Motor predictivo basado en Sabermetría avanzada, simulaciones de Montecarlo y Machine Learning.")
@@ -183,10 +176,10 @@ else:
     partidos_hoy = obtener_cartelera_mlb_oficial()
     
     if not partidos_hoy:
-        st.info("No hay partidos programados o la API de Odds no retornó datos activos.")
+        st.info("No hay partidos programados o la API oficial no retornó datos activos.")
     else:
         # 1. Selección del Partido
-        st.subheader("1. Cartelera del Día (Vía The Odds API)")
+        st.subheader("1. Cartelera del Día (Vía MLB StatsAPI)")
         seleccion = st.selectbox("Selecciona un partido para analizar:", list(partidos_hoy.keys()))
         datos_partido = partidos_hoy[seleccion]
         
@@ -213,7 +206,7 @@ else:
             
         # 3. Ejecución del Motor
         if st.button("🚀 Ejecutar Simulación Sniper", type="primary"):
-            with st.spinner("Procesando Sabermetría y ejecutando 10,000 universos paralelos..."):
+            with st.spinner("Procesando Sabermetría y ejecutando 1,000,000 universos paralelos..."):
                 
                 loc_abbr = EQUIPOS_MAP.get(datos_partido["local"], "")
                 vis_abbr = EQUIPOS_MAP.get(datos_partido["visita"], "")
@@ -243,7 +236,7 @@ else:
                 ml.entrenar(df_bat, df_pit, df_games)
                 preds_ml = ml.predecir_partido(loc_abbr, vis_abbr, wrc_loc, wrc_vis, xfip_loc, xfip_vis, park_factor)
                 
-                # MOTOR MONTECARLO
+                # MOTOR MONTECARLO (Pasando las variables explícitas y la línea real)
                 res_mc = simular_partido_mlb(
                     local=datos_partido['local'], visita=datos_partido['visita'],
                     pitcher_loc_xfip=xfip_loc, pitcher_vis_xfip=xfip_vis,
@@ -252,14 +245,18 @@ else:
                     park_factor=park_factor, altitud_ft=altitud,
                     viento_mph=viento, direccion_viento=dir_viento, temp_f=temp,
                     linea_carreras_casino=linea_carreras,
-                    num_simulaciones=10000
+                    num_simulaciones=1000000
                 )
+                
+                # Definición segura de las cuotas locales y de visita extraídas del diccionario de partido
+                cuota_ml_local = datos_partido.get("cuota_loc", 1.90)
+                cuota_ml_visita = datos_partido.get("cuota_vis", 1.90)
                 
                 cuotas_reales = {
                     "Moneyline_Local": cuota_ml_local,
-                    "Moneyline_Visita": cuota_ml_visita, # Agrega esta si la extraes de la API
+                    "Moneyline_Visita": cuota_ml_visita, 
                     "Cuota_Over": cuota_over,
-                    "Cuota_Under": cuota_over # O la cuota específica del under si la tienes
+                    "Cuota_Under": cuota_over 
                 }
                 df_apuestas = analizar_apuestas_mlb(res_mc, preds_ml, cuotas_reales, linea_carreras)
                 
@@ -271,7 +268,7 @@ else:
                 m2.metric("Park Factor", park_factor, delta="Favorece Bateo" if park_factor > 100 else "Favorece Pitcheo")
                 m3.metric("Clima", f"{temp}°F | Viento: {viento}mph {dir_viento.split()[0]}")
                 
-                st.markdown("### 🎲 Probabilidades (Montecarlo 10k Simulaciones)")
+                st.markdown("### 🎲 Probabilidades (Montecarlo 1M Simulaciones)")
                 c1, c2, c3, c4 = st.columns(4)
                 c1.metric(f"Gana {datos_partido['local']}", f"{res_mc['Moneyline']['Gana Local']}%")
                 c2.metric(f"Gana {datos_partido['visita']}", f"{res_mc['Moneyline']['Gana Visita']}%")
