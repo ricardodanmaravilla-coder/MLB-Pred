@@ -177,7 +177,7 @@ else:
                 # Búsqueda específica del pitcher o estimación basada en la rotación del equipo
                 pitcher_loc_data = df_pit[df_pit['Team'] == loc_abbr]
                 xfip_loc = float(pitcher_loc_data['xFIP'].mean()) if not pitcher_loc_data.empty else 4.10
-                 bullpen_loc_era = xfip_loc * 1.05
+                bullpen_loc_era = xfip_loc * 1.05
                 
                 pitcher_vis_data = df_pit[df_pit['Team'] == vis_abbr]
                 xfip_vis = float(pitcher_vis_data['xFIP'].mean()) if not pitcher_vis_data.empty else 4.10
