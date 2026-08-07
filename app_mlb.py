@@ -175,7 +175,7 @@ def obtener_cartelera_y_cuotas_automaticas():
     except Exception as e:
         st.error(f"Error en MLB StatsAPI: {e}")
 
-    if ODDS_API_KEY != "de66554a17bce1149445b1a883056607":
+    if ODDS_API_KEY != "TU_API_KEY_AQUI":
         url_odds = f"https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/?apiKey={ODDS_API_KEY}&regions=us&markets=h2h,totals&oddsFormat=american"
         try:
             res_odds = requests.get(url_odds, timeout=5)
@@ -184,29 +184,46 @@ def obtener_cartelera_y_cuotas_automaticas():
                 for item in data_odds:
                     h_team = item.get('home_team')
                     for k, p in partidos.items():
-                        if p['local'].lower() in h_team.lower() or h_team.lower() in p['local'].lower():
+                        if h_team and p['local'] and (p['local'].lower() in h_team.lower() or h_team.lower() in p['local'].lower()):
                             bookmakers = item.get('bookmakers', [])
-                            if bookmakers:
-                                markets = bookmakers[0].get('markets', [])
+                            
+                            h2h_encontrado = False
+                            totals_encontrado = False
+                            
+                            # Iteramos por TODAS las casas de apuestas hasta encontrar los datos
+                            for bookmaker in bookmakers:
+                                markets = bookmaker.get('markets', [])
                                 for m in markets:
-                                    if m['key'] == 'h2h':
+                                    if m['key'] == 'h2h' and not h2h_encontrado:
                                         for out in m['outcomes']:
                                             if out['name'] == h_team:
                                                 p['cuota_loc'] = american_to_decimal(out['price'])
                                             else:
                                                 p['cuota_vis'] = american_to_decimal(out['price'])
-                                    elif m['key'] == 'totals':
+                                        h2h_encontrado = True
+                                        
+                                    elif m['key'] == 'totals' and not totals_encontrado:
                                         for out in m['outcomes']:
                                             if out['name'] == 'Over':
                                                 p['linea_carreras'] = float(out['point'])
                                                 p['cuota_over'] = american_to_decimal(out['price'])
                                             elif out['name'] == 'Under':
                                                 p['cuota_under'] = american_to_decimal(out['price'])
+                                        totals_encontrado = True
+                                
+                                # Si ya obtuvimos el ganador y los totales, saltamos al siguiente partido
+                                if h2h_encontrado and totals_encontrado:
+                                    break
+            elif res_odds.status_code == 429:
+                st.warning("⚠️ Límite de tu API Key de cuotas agotado (The-Odds-API). Pasando a modo matemático sin cuotas reales.")
+            elif res_odds.status_code == 401:
+                st.warning("⚠️ API Key de The-Odds-API rechazada. Revisa que sea correcta.")
+            else:
+                st.warning(f"⚠️ Error de servidor de cuotas: {res_odds.status_code}")
         except Exception as e:
             st.warning(f"Aviso de sincronización de cuotas: {e}")
             
     return partidos
-
 # --- INTERFAZ ---
 st.title("⚾ MLB Quant Analytics Pro (Montecarlo + Kelly)")
 st.markdown("Sistema autónomo de Sabermetría, Clima en Vivo, Simulación Cuántica de Duelos, Escáner Global y Criterio de Kelly.")
