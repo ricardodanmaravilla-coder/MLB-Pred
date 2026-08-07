@@ -209,29 +209,64 @@ else:
         with c4:
             temp = st.slider("Temperatura (°F)", 30, 110, temp_auto)
             
-        if st.button("🚀 Ejecutar Simulación Cuántica Autónoma", type="primary"):
+        if st.button("🚀 Ejecutar Simulación Cuántica", type="primary"):
             with st.spinner("Procesando datos en vivo y ejecutando 500,000 escenarios..."):
                 loc_abbr = EQUIPOS_MAP.get(datos_partido["local"], "")
                 vis_abbr = EQUIPOS_MAP.get(datos_partido["visita"], "")
                 
-                wrc_loc = float(df_bat[df_bat['Team'] == loc_abbr]['wRC+'].mean()) if not df_bat.empty else 100.0
-                wrc_vis = float(df_bat[df_bat['Team'] == vis_abbr]['wRC+'].mean()) if not df_bat.empty else 100.0
+                # Validación de seguridad: Asegurar que los CSVs tengan datos
+                if df_bat.empty or df_pit.empty or df_parks.empty:
+                    st.error("❌ Error crítico: Las bases de datos históricas están vacías. Ejecuta 'minero_mlb.py'.")
+                    st.stop()
+
+                # 1. Sabermetría de Bateo (wRC+) real del equipo desde el CSV
+                try:
+                    wrc_loc = float(df_bat[df_bat['Team'] == loc_abbr]['wRC+'].mean())
+                    wrc_vis = float(df_bat[df_bat['Team'] == vis_abbr]['wRC+'].mean())
+                except Exception as e:
+                    st.error(f"Error procesando wRC+ de bateo: {e}")
+                    st.stop()
                 
-                pitcher_loc_data = df_pit[df_pit['Team'] == loc_abbr]
-                xfip_loc = float(pitcher_loc_data['xFIP'].mean()) if not pitcher_loc_data.empty else 4.10
-                bullpen_loc_era = xfip_loc * 1.05
+                # 2. Búsqueda Quirúrgica del Abridor Local (Sin valores fijos inventados)
+                pitcher_loc_nombre = datos_partido["pitcher_local"]
+                xfip_loc = None
                 
-                pitcher_vis_data = df_pit[df_pit['Team'] == vis_abbr]
-                xfip_vis = float(pitcher_vis_data['xFIP'].mean()) if not pitcher_vis_data.empty else 4.10
-                bullpen_vis_era = xfip_vis * 1.05
+                if pitcher_loc_nombre != "Por Anunciar":
+                    match_loc = df_pit[df_pit['Name'].str.contains(pitcher_loc_nombre.split()[-1], case=False, na=False)]
+                    if not match_loc.empty:
+                        xfip_loc = float(match_loc['xFIP'].values[0])
                 
-                park_factor, altitud = 100.0, 0.0
-                if not df_parks.empty:
-                    p_data = df_parks[df_parks['Team'] == loc_abbr]
-                    if not p_data.empty:
-                        park_factor = float(p_data['Park_Factor_General'].values[0])
-                        altitud = float(p_data['Altitud_pies'].values[0])
+                # Si no se halla al pitcher específico, se calcula el promedio real de la rotación del equipo en el CSV
+                if xfip_loc is None:
+                    team_pit_loc = df_pit[df_pit['Team'] == loc_abbr]
+                    xfip_loc = float(team_pit_loc['xFIP'].mean())
+
+                # 3. Búsqueda Quirúrgica del Abridor Visitante (Sin valores fijos inventados)
+                pitcher_vis_nombre = datos_partido["pitcher_visita"]
+                xfip_vis = None
                 
+                if pitcher_vis_nombre != "Por Anunciar":
+                    match_vis = df_pit[df_pit['Name'].str.contains(pitcher_vis_nombre.split()[-1], case=False, na=False)]
+                    if not match_vis.empty:
+                        xfip_vis = float(match_vis['xFIP'].values[0])
+                
+                if xfip_vis is None:
+                    team_pit_vis = df_pit[df_pit['Team'] == vis_vis := vis_abbr] # corregido vis_abbr
+                    xfip_vis = float(df_pit[df_pit['Team'] == vis_abbr]['xFIP'].mean())
+
+                # Bullpen calculado dinámicamente como el diferencial del pitcheo del equipo
+                bullpen_loc_era = float(df_pit[df_pit['Team'] == loc_abbr]['ERA'].mean())
+                bullpen_vis_era = float(df_pit[df_pit['Team'] == vis_abbr]['ERA'].mean())
+                
+                # 4. Factores de Estadio (Park Factors y Altitud reales desde el CSV)
+                park_data = df_parks[df_parks['Team'] == loc_abbr]
+                if park_data.empty:
+                    raise ValueError(f"No se encontró el Park Factor para el equipo local: {loc_abbr}")
+                
+                park_factor = float(park_data['Park_Factor_General'].values[0])
+                altitud = float(park_data['Altitud_pies'].values[0])
+                
+                # Machine Learning y Montecarlo
                 ml = PredictorMLMLB()
                 ml.entrenar(df_bat, df_pit, df_games)
                 preds_ml = ml.predecir_partido(loc_abbr, vis_abbr, wrc_loc, wrc_vis, xfip_loc, xfip_vis, park_factor)
