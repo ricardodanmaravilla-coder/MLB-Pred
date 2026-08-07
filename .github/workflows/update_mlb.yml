@@ -26,8 +26,9 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install pandas requests lxml
-        # Descargamos la versión de desarrollador más reciente para evitar bloqueos
-        pip install git+https://github.com/jldbc/pybaseball.git
+        pip install git+https://github.com/jldbc/pybaseball.git |
+        python -m pip install --upgrade pip
+        pip install pandas requests MLB-StatsAPI
 
     - name: ⛏️ Ejecutar Minero MLB
       run: |
