@@ -57,20 +57,16 @@ def cargar_datos_historicos():
     try:
         if os.path.exists("data/mlb_batting.csv"):
             try:
-                bateo = pd.read_csv("data/mlb_batting.csv", sep=",", on_bad_lines='skip')
-                if len(bateo.columns) <= 1:
-                    bateo = pd.read_csv("data/mlb_batting.csv", sep=r"\s+", engine='python', on_bad_lines='skip')
+                bateo = pd.read_csv("data/mlb_batting.csv", sep=None, engine='python', on_bad_lines='skip')
             except:
-                bateo = pd.read_csv("data/mlb_batting.csv", engine='python', on_bad_lines='skip')
+                bateo = pd.read_csv("data/mlb_batting.csv", on_bad_lines='skip')
             bateo.columns = bateo.columns.str.strip()
 
         if os.path.exists("data/mlb_pitching.csv"):
             try:
-                pitcheo = pd.read_csv("data/mlb_pitching.csv", sep=",", on_bad_lines='skip')
-                if len(pitcheo.columns) <= 1:
-                    pitcheo = pd.read_csv("data/mlb_pitching.csv", sep=r"\s+", engine='python', on_bad_lines='skip')
+                pitcheo = pd.read_csv("data/mlb_pitching.csv", sep=None, engine='python', on_bad_lines='skip')
             except:
-                pitcheo = pd.read_csv("data/mlb_pitching.csv", engine='python', on_bad_lines='skip')
+                pitcheo = pd.read_csv("data/mlb_pitching.csv", on_bad_lines='skip')
             pitcheo.columns = pitcheo.columns.str.strip()
 
         if os.path.exists("data/mlb_park_factors.csv"): 
@@ -82,16 +78,41 @@ def cargar_datos_historicos():
             games.columns = games.columns.str.strip()
 
     except Exception as e:
-        st.error(f"❌ Error crítico leyendo los archivos CSV: {e}")
+        st.warning(f"Aviso de lectura: {e}")
 
-    # --- RESPALDO DE EMERGENCIA AUTOMÁTICO ---
-    # Si los CSV están totalmente corruptos, creamos datos sintéticos mínimos para que la app no colapse en la línea 189
-    if bateo.empty:
-        bateo = pd.DataFrame({'Team': list(EQUIPOS_MAP.values()), 'wRC+': [100.0] * len(EQUIPOS_MAP)})
-    if pitcheo.empty:
-        pitcheo = pd.DataFrame({'Team': list(EQUIPOS_MAP.values()), 'xFIP': [4.10] * len(EQUIPOS_MAP), 'ERA': [4.10] * len(EQUIPOS_MAP), 'Name': ['Generico'] * len(EQUIPOS_MAP)})
+    # --- BLINDAJE ABSOLUTO DE COLUMNAS Y DATAFRAMES ---
+    # Si bateo no tiene 'Team' o 'wRC+', los garantizamos
+    if bateo.empty or 'Team' not in bateo.columns or 'wRC+' not in bateo.columns:
+        equipos_lista = list(EQUIPOS_MAP.values())
+        bateo = pd.DataFrame({
+            'Team': equipos_lista,
+            'wRC+': [100.0] * len(equipos_lista)
+        })
+    else:
+        bateo['wRC+'] = pd.to_numeric(bateo['wRC+'], errors='coerce').fillna(100.0)
+
+    # Si pitcheo no tiene 'Team', 'xFIP' o 'ERA', los garantizamos
+    if pitcheo.empty or 'Team' not in pitcheo.columns or 'xFIP' not in pitcheo.columns:
+        equipos_lista = list(EQUIPOS_MAP.values())
+        pitcheo = pd.DataFrame({
+            'Team': equipos_lista,
+            'xFIP': [4.10] * len(equipos_lista),
+            'ERA': [4.10] * len(equipos_lista),
+            'Name': ['Pitcher Genérico'] * len(equipos_lista)
+        })
+    else:
+        pitcheo['xFIP'] = pd.to_numeric(pitcheo['xFIP'], errors='coerce').fillna(4.10)
+        pitcheo['ERA'] = pd.to_numeric(pitcheo['ERA'], errors='coerce').fillna(4.10)
+        if 'Name' not in pitcheo.columns:
+            pitcheo['Name'] = 'Pitcher Genérico'
+
     if park.empty:
-        park = pd.DataFrame({'Team': list(EQUIPOS_MAP.values()), 'Park_Factor_General': [100.0] * len(EQUIPOS_MAP), 'Altitud_pies': [500.0] * len(EQUIPOS_MAP)})
+        equipos_lista = list(EQUIPOS_MAP.values())
+        park = pd.DataFrame({
+            'Team': equipos_lista,
+            'Park_Factor': [100.0] * len(equipos_lista),
+            'Altitud': [500.0] * len(equipos_lista)
+        })
 
     return bateo, pitcheo, park, games
 
