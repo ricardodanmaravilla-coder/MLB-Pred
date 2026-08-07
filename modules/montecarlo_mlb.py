@@ -47,8 +47,16 @@ def simular_partido_mlb(
     if linea_carreras_casino is None or linea_carreras_casino <= 0:
         linea_carreras_casino = 8.5 
 
-    # 1. NORMALIZACIÓN ESTADÍSTICA (Límites reales para evitar sesgos locos)
-    # 100 es la media en wRC+, 4.10 en pitcheo
+    # --- BLINDAJE CONTRA DATOS NULOS (Evita el error de Poisson) ---
+    wrc_loc = 100.0 if pd.isna(wrc_loc) else float(wrc_loc)
+    wrc_vis = 100.0 if pd.isna(wrc_vis) else float(wrc_vis)
+    pitcher_loc_xfip = 4.10 if pd.isna(pitcher_loc_xfip) else float(pitcher_loc_xfip)
+    pitcher_vis_xfip = 4.10 if pd.isna(pitcher_vis_xfip) else float(pitcher_vis_xfip)
+    bullpen_loc_era = 4.10 if pd.isna(bullpen_loc_era) else float(bullpen_loc_era)
+    bullpen_vis_era = 4.10 if pd.isna(bullpen_vis_era) else float(bullpen_vis_era)
+    park_factor = 100.0 if pd.isna(park_factor) else float(park_factor)
+
+    # 1. NORMALIZACIÓN ESTADÍSTICA
     w_loc_f = np.clip(wrc_loc / 100.0, 0.75, 1.25)
     w_vis_f = np.clip(wrc_vis / 100.0, 0.75, 1.25)
     
@@ -62,17 +70,19 @@ def simular_partido_mlb(
     pf_loc = np.clip(park_factor / 100.0, 0.85, 1.15)
 
     # 2. PROYECCIÓN DE CARRERAS (BaseRuns adaptado)
-    # Ponderación: 65% del juego es el abridor, 35% es el bullpen
     carreras_exp_loc = 4.3 * w_loc_f * ((p_vis_f * 0.65) + (bp_vis_f * 0.35)) * pf_loc * factor_clima
     carreras_exp_vis = 4.3 * w_vis_f * ((p_loc_f * 0.65) + (bp_loc_f * 0.35)) * (1.0 / pf_loc) * factor_clima
 
-    # 3. MODELO 1: PYTHAGENPAT (Teorema de Pitágoras del Béisbol)
+    # Seguro final por si alguna variable matemática se corrompe a NaN o negativo
+    if np.isnan(carreras_exp_loc) or carreras_exp_loc <= 0: carreras_exp_loc = 4.3
+    if np.isnan(carreras_exp_vis) or carreras_exp_vis <= 0: carreras_exp_vis = 4.3
+
+    # 3. MODELO 1: PYTHAGENPAT
     exponente = (carreras_exp_loc + carreras_exp_vis) ** 0.285
     prob_pyth_loc = (carreras_exp_loc ** exponente) / ((carreras_exp_loc ** exponente) + (carreras_exp_vis ** exponente)) * 100
 
     # 4. MODELO 2: H2H HISTÓRICO
-    # Obtenemos quién ha dominado el enfrentamiento directo históricamente
-    loc_abbr = local if len(local) <= 3 else local[:3].upper() # Fallback
+    loc_abbr = local if len(local) <= 3 else local[:3].upper()
     vis_abbr = visita if len(visita) <= 3 else visita[:3].upper()
     prob_h2h_loc = obtener_h2h(df_games, loc_abbr, vis_abbr)
 
@@ -81,14 +91,13 @@ def simular_partido_mlb(
     c_vis_sim = np.random.poisson(carreras_exp_vis, num_simulaciones)
     
     empates = (c_loc_sim == c_vis_sim)
-    desempate = np.random.rand(np.sum(empates)) > 0.47 # Ventaja local en extra innings
+    desempate = np.random.rand(np.sum(empates)) > 0.47 
     c_loc_sim[empates] += desempate.astype(int)
     c_vis_sim[empates] += (~desempate).astype(int)
 
     prob_mc_loc = np.mean(c_loc_sim > c_vis_sim) * 100
     
-    # --- ENSAMBLE FINAL (BLENDING) ---
-    # 45% Pitágoras, 45% Montecarlo, 10% H2H
+    # --- ENSAMBLE FINAL ---
     prob_final_loc = (prob_pyth_loc * 0.45) + (prob_mc_loc * 0.45) + (prob_h2h_loc * 0.10)
     prob_final_vis = 100.0 - prob_final_loc
 
