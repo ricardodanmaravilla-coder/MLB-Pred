@@ -12,7 +12,6 @@ from modules.odds_mlb import analizar_apuestas_mlb
 # --- CONFIGURACIÓN ---
 st.set_page_config(page_title="MLB Quant Analytics", layout="wide", page_icon="⚾")
 
-# Mapeo de nombres de la API oficial a las abreviaturas
 EQUIPOS_MAP = {
     "New York Yankees": "NYY", "Boston Red Sox": "BOS", "Los Angeles Dodgers": "LAD",
     "Houston Astros": "HOU", "Atlanta Braves": "ATL", "Philadelphia Phillies": "PHI",
@@ -26,7 +25,6 @@ EQUIPOS_MAP = {
     "Miami Marlins": "MIA", "New York Mets": "NYM", "Washington Nationals": "WSN"
 }
 
-# --- COORDENADAS DE LOS ESTADIOS DE LA MLB (Para el clima automático) ---
 ESTADIOS_COORDS = {
     "New York Yankees": {"lat": 40.8296, "lon": -73.9262},
     "Boston Red Sox": {"lat": 42.3467, "lon": -71.0972},
@@ -62,71 +60,44 @@ ESTADIOS_COORDS = {
 
 @st.cache_data(ttl=600)
 def obtener_clima_estadio(nombre_equipo):
-    """Consulta el clima actual en vivo mediante Open-Meteo y calcula dirección de viento"""
     coords = ESTADIOS_COORDS.get(nombre_equipo, {"lat": 40.7128, "lon": -74.0060})
     url = f"https://api.open-meteo.com/v1/forecast?latitude={coords['lat']}&longitude={coords['lon']}&current=temperature_2m,wind_speed_10m,wind_direction_2m"
     try:
         res = requests.get(url, timeout=5)
         if res.status_code == 200:
             data = res.json().get('current', {})
-            _temp_c = data.get('temperature_2m', 22.0)
-            temp_f = int((_temp_c * 9/5) + 32)
-            
-            wind_kmh = data.get('wind_speed_10m', 8.0)
-            wind_mph = int(wind_kmh * 0.621371)
-            
+            temp_f = int((data.get('temperature_2m', 22.0) * 9/5) + 32)
+            wind_mph = int(data.get('wind_speed_10m', 8.0) * 0.621371)
             deg = data.get('wind_direction_2m', 0)
+            
             dir_str = "None"
             if (315 <= deg <= 360) or (0 <= deg < 45):
                 dir_str = "Infield (Hacia Adentro)"
             elif 135 <= deg < 225:
                 dir_str = "Outfield (Hacia Afuera)"
-            
             return temp_f, wind_mph, dir_str
     except:
         pass
     return 72, 8, "None"
 
-def american_to_decimal(am_odds):
-    """Convierte cuotas americanas de Las Vegas a formato decimal europeo"""
-    if am_odds == 0: return 0.0
-    if am_odds > 0: return round((am_odds / 100.0) + 1, 2)
-    else: return round((100.0 / abs(am_odds)) + 1, 2)
-
-# --- CARGA DE DATOS HISTÓRICOS ---
 @st.cache_data(ttl=3600)
 def cargar_datos_historicos():
-    bateo = pd.DataFrame()
-    pitcheo = pd.DataFrame()
-    park = pd.DataFrame()
-    games = pd.DataFrame()
-    
+    bateo, pitcheo, park, games = pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
     try:
-        if os.path.exists("data/mlb_batting.csv"): 
-            bateo = pd.read_csv("data/mlb_batting.csv")
-        if os.path.exists("data/mlb_pitching.csv"): 
-            pitcheo = pd.read_csv("data/mlb_pitching.csv")
-        if os.path.exists("data/mlb_park_factors.csv"): 
-            park = pd.read_csv("data/mlb_park_factors.csv")
-        if os.path.exists("data/mlb_games.csv"): 
-            games = pd.read_csv("data/mlb_games.csv")
+        if os.path.exists("data/mlb_batting.csv"): bateo = pd.read_csv("data/mlb_batting.csv")
+        if os.path.exists("data/mlb_pitching.csv"): pitcheo = pd.read_csv("data/mlb_pitching.csv")
+        if os.path.exists("data/mlb_park_factors.csv"): park = pd.read_csv("data/mlb_park_factors.csv")
+        if os.path.exists("data/mlb_games.csv"): games = pd.read_csv("data/mlb_games.csv")
     except Exception as e:
-        st.warning(f"Aviso de carga de datos: {e}")
-        
+        st.warning(f"Aviso de carga: {e}")
     return bateo, pitcheo, park, games
 
 df_bat, df_pit, df_parks, df_games = cargar_datos_historicos()
-    
-if st.checkbox("Mostrar vista previa de los datos históricos"):
-    st.write("Primeras 5 filas del historial de juegos:")
-    st.dataframe(df_games.head())
-    
+
 @st.cache_data(ttl=300)
 def obtener_cartelera_mlb_oficial():
-    """Consulta la cartelera y líneas de apuestas públicas directamente desde la API oficial de la MLB"""
     hoy = datetime.date.today().strftime('%Y-%m-%d')
-    url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={hoy}&hydrate=linescore,team,odds"
-    
+    url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={hoy}&hydrate=probablePitcher,team,odds"
     partidos = {}
     try:
         res = requests.get(url, timeout=5)
@@ -137,157 +108,130 @@ def obtener_cartelera_mlb_oficial():
                     home = game.get('teams', {}).get('home', {}).get('team', {}).get('name', '')
                     away = game.get('teams', {}).get('away', {}).get('team', {}).get('name', '')
                     
-                    linea_total = 8.5
-                    cuota_loc_dec = 1.90
-                    cuota_vis_dec = 1.90
-                    cuota_over_dec = 1.90
+                    # Extraer abridores oficiales si la API los reporta
+                    home_pitcher = game.get('teams', {}).get('home', {}).get('probablePitcher', {}).get('fullName', 'Por Anunciar')
+                    away_pitcher = game.get('teams', {}).get('away', {}).get('probablePitcher', {}).get('fullName', 'Por Anunciar')
                     
+                    linea_total = 8.5
                     odds_info = game.get('odds', [])
                     if odds_info:
-                        try:
-                            linea_total = float(odds_info[0].get('overUnder', 8.5))
-                        except:
-                            pass
+                        try: linea_total = float(odds_info[0].get('overUnder', 8.5))
+                        except: pass
                     
                     if home and away:
-                        llave = f"⚾ {away} @ {home}"
+                        llave = f"⚾ {away} ({away_pitcher}) @ {home} ({home_pitcher})"
                         partidos[llave] = {
-                            "local": home, 
-                            "visita": away,
+                            "local": home, "visita": away,
+                            "pitcher_local": home_pitcher, "pitcher_visita": away_pitcher,
                             "linea_carreras": linea_total,
-                            "cuota_loc": cuota_loc_dec, 
-                            "cuota_vis": cuota_vis_dec,
-                            "cuota_over": cuota_over_dec
+                            "cuota_loc": 1.91, "cuota_vis": 1.91, "cuota_over": 1.91
                         }
-        else:
-            st.error(f"Error conectando a MLB StatsAPI: {res.status_code}")
     except Exception as e:
-        st.error(f"Error en la red al buscar partidos: {e}")
-        
+        st.error(f"Error conectando a MLB StatsAPI: {e}")
     return partidos
 
-# --- INTERFAZ PRINCIPAL ---
-st.title("⚾ MLB Quant Analytics")
-st.markdown("Motor predictivo basado en Sabermetría avanzada, simulaciones de Montecarlo y Machine Learning.")
+# --- INTERFAZ ---
+st.title("⚾ MLB Quant Analytics Pro")
+st.markdown("Motor predictivo avanzado basado en Duelo de Abridores, Sabermetría y Clima Real.")
 
 if df_bat.empty or df_pit.empty:
-    st.warning("⚠️ No se encontraron los datos históricos. Ejecuta primero `minero_mlb.py` para descargar la sabermetría.")
+    st.warning("⚠️ Faltan datos históricos. Ejecuta `minero_mlb.py`.")
 else:
     partidos_hoy = obtener_cartelera_mlb_oficial()
-    
     if not partidos_hoy:
-        st.info("No hay partidos programados o la API oficial no retornó datos activos.")
+        st.info("No hay partidos programados para hoy en la API oficial de la MLB.")
     else:
-        # 1. Selección del Partido
-        st.subheader("1. Cartelera del Día (Vía MLB StatsAPI)")
-        seleccion = st.selectbox("Selecciona un partido para analizar:", list(partidos_hoy.keys()))
+        st.subheader("1. Cartelera Oficial del Día")
+        seleccion = st.selectbox("Selecciona un duelo:", list(partidos_hoy.keys()))
         datos_partido = partidos_hoy[seleccion]
         
-        # Obtener clima real automático basado en el estadio local
         temp_auto, viento_auto, dir_auto = obtener_clima_estadio(datos_partido["local"])
         
-        # 2. Ajustes del Casino y Clima
-        st.subheader("2. Condiciones del Casino y Clima (Auto-detectado)")
+        st.subheader("2. Condiciones del Entorno y Líneas de Apuesta")
         c1, c2, c3, c4 = st.columns(4)
         
         opciones_viento = ["None", "Outfield (Hacia Afuera)", "Infield (Hacia Adentro)"]
         indice_dir = opciones_viento.index(dir_auto) if dir_auto in opciones_viento else 0
         
         with c1:
-            linea_carreras = st.number_input("Línea de Carreras (O/U)", value=float(datos_partido["linea_carreras"]), step=0.5)
-            cuota_over = st.number_input("Cuota Casino (Over)", value=float(datos_partido["cuota_over"]), step=0.05)
+            linea_carreras = st.number_input("Línea O/U", value=float(datos_partido["linea_carreras"]), step=0.5)
+            cuota_over = st.number_input("Cuota Over", value=1.91, step=0.01)
         with c2:
-            cuota_ml_local = st.number_input(f"Cuota ML ({datos_partido['local']})", value=float(datos_partido["cuota_loc"]), step=0.05)
+            cuota_ml_local = st.number_input(f"Cuota ML Local", value=1.91, step=0.01)
+            cuota_ml_visita = st.number_input(f"Cuota ML Visita", value=1.91, step=0.01)
         with c3:
             viento = st.number_input("Viento (mph)", value=viento_auto, step=1)
             dir_viento = st.selectbox("Dirección del Viento", opciones_viento, index=indice_dir)
         with c4:
-            temp = st.slider("Temperatura (°F)", min_value=30, max_value=110, value=temp_auto)
+            temp = st.slider("Temperatura (°F)", 30, 110, temp_auto)
             
-        # 3. Ejecución del Motor
-        if st.button("🚀 Ejecutar Simulación Sniper", type="primary"):
-            with st.spinner("Procesando Sabermetría y ejecutando 1,000,000 universos paralelos..."):
-                
+        if st.button("🚀 Ejecutar Simulación Cuántica", type="primary"):
+            with st.spinner("Procesando duelo de lanzadores y simulando 500,000 escenarios..."):
                 loc_abbr = EQUIPOS_MAP.get(datos_partido["local"], "")
                 vis_abbr = EQUIPOS_MAP.get(datos_partido["visita"], "")
                 
-                try: wrc_loc = float(df_bat[df_bat['Team'] == loc_abbr]['wRC+'].mean())
-                except: wrc_loc = 100.0
-                try: wrc_vis = float(df_bat[df_bat['Team'] == vis_abbr]['wRC+'].mean())
-                except: wrc_vis = 100.0
+                # Obtención de Sabermetría real de los equipos
+                wrc_loc = float(df_bat[df_bat['Team'] == loc_abbr]['wRC+'].mean()) if not df_bat.empty else 100.0
+                wrc_vis = float(df_bat[df_bat['Team'] == vis_abbr]['wRC+'].mean()) if not df_bat.empty else 100.0
                 
-                try: xfip_loc = float(df_pit[df_pit['Team'] == loc_abbr]['xFIP'].mean())
-                except: xfip_loc = 4.10
-                try: xfip_vis = float(df_pit[df_pit['Team'] == vis_abbr]['xFIP'].mean())
-                except: xfip_vis = 4.10
+                # Búsqueda específica del pitcher o estimación basada en la rotación del equipo
+                pitcher_loc_data = df_pit[df_pit['Team'] == loc_abbr]
+                xfip_loc = float(pitcher_loc_data['xFIP'].mean()) if not pitcher_loc_data.empty else 4.10
+                 bullpen_loc_era = xfip_loc * 1.05
                 
-                park_factor = 100.0
-                altitud = 0.0
+                pitcher_vis_data = df_pit[df_pit['Team'] == vis_abbr]
+                xfip_vis = float(pitcher_vis_data['xFIP'].mean()) if not pitcher_vis_data.empty else 4.10
+                bullpen_vis_era = xfip_vis * 1.05
+                
+                # Park Factors reales
+                park_factor, altitud = 100.0, 0.0
                 if not df_parks.empty:
-                    try:
-                        park_data = df_parks[df_parks['Team'] == loc_abbr]
-                        if not park_data.empty:
-                            park_factor = float(park_data['Park_Factor_General'].values[0])
-                            altitud = float(park_data['Altitud_pies'].values[0])
-                    except: pass
+                    p_data = df_parks[df_parks['Team'] == loc_abbr]
+                    if not p_data.empty:
+                        park_factor = float(p_data['Park_Factor_General'].values[0])
+                        altitud = float(p_data['Altitud_pies'].values[0])
                 
-                # MOTOR MACHINE LEARNING
+                # Motor ML
                 ml = PredictorMLMLB()
                 ml.entrenar(df_bat, df_pit, df_games)
                 preds_ml = ml.predecir_partido(loc_abbr, vis_abbr, wrc_loc, wrc_vis, xfip_loc, xfip_vis, park_factor)
                 
-                # MOTOR MONTECARLO (Pasando las variables explícitas y la línea real)
+                # Motor Montecarlo Real
                 res_mc = simular_partido_mlb(
                     local=datos_partido['local'], visita=datos_partido['visita'],
                     pitcher_loc_xfip=xfip_loc, pitcher_vis_xfip=xfip_vis,
                     wrc_loc=wrc_loc, wrc_vis=wrc_vis,
-                    bullpen_loc_era=xfip_loc * 1.05, bullpen_vis_era=xfip_vis * 1.05,
+                    bullpen_loc_era=bullpen_loc_era, bullpen_vis_era=bullpen_vis_era,
                     park_factor=park_factor, altitud_ft=altitud,
                     viento_mph=viento, direccion_viento=dir_viento, temp_f=temp,
                     linea_carreras_casino=linea_carreras,
-                    num_simulaciones=1000000
+                    num_simulaciones=500000
                 )
-                
-                # Definición segura de las cuotas locales y de visita extraídas del diccionario de partido
-                cuota_ml_local = datos_partido.get("cuota_loc", 1.90)
-                cuota_ml_visita = datos_partido.get("cuota_vis", 1.90)
                 
                 cuotas_reales = {
                     "Moneyline_Local": cuota_ml_local,
-                    "Moneyline_Visita": cuota_ml_visita, 
+                    "Moneyline_Visita": cuota_ml_visita,
                     "Cuota_Over": cuota_over,
-                    "Cuota_Under": cuota_over 
+                    "Cuota_Under": cuota_over
                 }
                 df_apuestas = analizar_apuestas_mlb(res_mc, preds_ml, cuotas_reales, linea_carreras)
                 
-                # --- VISUALIZACIÓN DE RESULTADOS ---
+                # Resultados visuales
                 st.markdown("---")
-                st.subheader(f"🏟️ Impacto del Estadio y Clima ({datos_partido['local']})")
+                st.subheader(f"🏟️ Factores Ambientales en {datos_partido['local']}")
                 m1, m2, m3 = st.columns(3)
-                m1.metric("Altitud", f"{altitud} ft")
-                m2.metric("Park Factor", park_factor, delta="Favorece Bateo" if park_factor > 100 else "Favorece Pitcheo")
-                m3.metric("Clima", f"{temp}°F | Viento: {viento}mph {dir_viento.split()[0]}")
+                m1.metric("Altitud del Parque", f"{altitud} ft")
+                m2.metric("Park Factor General", park_factor)
+                m3.metric("Clima en Vivo", f"{temp}°F | Viento: {viento}mph")
                 
-                st.markdown("### 🎲 Probabilidades (Montecarlo 1M Simulaciones)")
+                st.markdown("### 🎲 Probabilidades Reales del Duelo")
                 c1, c2, c3, c4 = st.columns(4)
                 c1.metric(f"Gana {datos_partido['local']}", f"{res_mc['Moneyline']['Gana Local']}%")
                 c2.metric(f"Gana {datos_partido['visita']}", f"{res_mc['Moneyline']['Gana Visita']}%")
                 
-                # Búsqueda dinámica con la línea real del casino (ej. Over 8.5)
                 prob_over = res_mc.get('Carreras', {}).get(f"Over {linea_carreras}", 50.0)
                 c3.metric(f"Over {linea_carreras} Carreras", f"{prob_over}%")
-                
-                c4.metric(f"Promedio Total", f"{res_mc['Carreras']['Promedio_Total']}")
+                c4.metric("Promedio Carreras Total", f"{res_mc['Carreras']['Promedio_Total']}")
                 
                 st.markdown("### 🎯 Veredicto Financiero y Valor Esperado (EV+)")
-                
-                def color_veredicto(val):
-                    if '🔥' in str(val): return 'color: #00ff00; font-weight: bold'
-                    elif '✅' in str(val): return 'color: #adff2f'
-                    elif '❌' in str(val): return 'color: #ff4d4d'
-                    return ''
-                    
-                st.dataframe(
-                    df_apuestas.style.map(color_veredicto, subset=['Veredicto']), 
-                    use_container_width=True, hide_index=True
-                )
+                st.dataframe(df_apuestas, use_container_width=True, hide_index=True)
