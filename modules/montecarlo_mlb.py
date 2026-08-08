@@ -42,7 +42,7 @@ def simular_partido_mlb(
     local, visita, pitcher_loc_xfip, pitcher_vis_xfip, wrc_loc, wrc_vis,
     bullpen_loc_era, bullpen_vis_era, park_factor, altitud_ft,
     viento_mph, direccion_viento, temp_f, linea_carreras_casino,
-    df_games=None, num_simulaciones=100000
+    df_games=None, num_simulaciones=1000000
 ):
     if linea_carreras_casino is None or linea_carreras_casino <= 0:
         linea_carreras_casino = 8.5 
@@ -97,8 +97,8 @@ def simular_partido_mlb(
 
     prob_mc_loc = np.mean(c_loc_sim > c_vis_sim) * 100
     
-    # --- ENSAMBLE FINAL ---
-    prob_final_loc = (prob_pyth_loc * 0.45) + (prob_mc_loc * 0.45) + (prob_h2h_loc * 0.10)
+# LIMITADOR CLAVE: Ningún equipo en MLB tiene más de 65% o menos de 35% antes del juego
+    prob_final_loc = np.clip(prob_final_loc, 35.0, 65.0)
     prob_final_vis = 100.0 - prob_final_loc
 
     totales = c_loc_sim + c_vis_sim
