@@ -284,34 +284,34 @@ else:
                             bullpen_loc_era = float(df_pit[df_pit['Team'] == loc_abbr]['ERA'].mean())
                             bullpen_vis_era = float(df_pit[df_pit['Team'] == vis_abbr]['ERA'].mean())
                             
-                                                # --- EXTRACCIÓN 100% REAL DE FACTORES DE ESTADIO ---
-                    df_parks.columns = df_parks.columns.str.strip()
-                    park_data = pd.DataFrame()
+                            # --- EXTRACCIÓN 100% REAL DE FACTORES DE ESTADIO ---
+                            df_parks.columns = df_parks.columns.str.strip()
+                            park_data = pd.DataFrame()
 
-                    # Identificar dinámicamente las columnas clave del archivo de parques
-                    col_equipo_park = next((c for c in ['Team', 'TeamCode', 'Abbr', 'Franchise', 'Equipo', 'franchise'] if c in df_parks.columns), df_parks.columns[0])
-                    col_pf = next((c for c in df_parks.columns if 'park_factor' in c.lower() or 'factor' in c.lower() or 'pf' in c.lower()), None)
-                    col_alt = next((c for c in df_parks.columns if 'altitud' in c.lower() or 'alt' in c.lower() or 'elevation' in c.lower() or 'pie' in c.lower()), None)
+                            # Identificar dinámicamente las columnas clave del archivo de parques
+                            col_equipo_park = next((c for c in ['Team', 'TeamCode', 'Abbr', 'Franchise', 'Equipo', 'franchise'] if c in df_parks.columns), df_parks.columns[0])
+                            col_pf = next((c for c in df_parks.columns if 'park_factor' in c.lower() or 'factor' in c.lower() or 'pf' in c.lower()), None)
+                            col_alt = next((c for c in df_parks.columns if 'altitud' in c.lower() or 'alt' in c.lower() or 'elevation' in c.lower() or 'pie' in c.lower()), None)
 
-                    if not col_pf or not col_alt:
-                        st.error("❌ El archivo `mlb_park_factors.csv` no contiene columnas reconocibles de Park Factor o Altitud.")
-                        st.stop()
+                            if not col_pf or not col_alt:
+                                st.error("❌ El archivo `mlb_park_factors.csv` no contiene columnas reconocibles de Park Factor o Altitud.")
+                                continue # En lugar de st.stop() para no detener todo el escáner
 
-                    # Búsqueda estricta basada en los datos reales del DataFrame
-                    park_data = df_parks[df_parks[col_equipo_park].astype(str).str.upper() == loc_abbr.upper()]
+                            # Búsqueda estricta basada en los datos reales del DataFrame
+                            park_data = df_parks[df_parks[col_equipo_park].astype(str).str.upper() == loc_abbr.upper()]
 
-                    if park_data.empty:
-                        # Búsqueda secundaria por nombre de la ciudad o equipo si la abreviatura difiere
-                        nombre_ciudad = datos_partido["local"].split()[-1]
-                        park_data = df_parks[df_parks.astype(str).str.contains(nombre_ciudad, case=False).any(axis=1)]
+                            if park_data.empty:
+                                # Búsqueda secundaria por nombre de la ciudad o equipo si la abreviatura difiere
+                                nombre_ciudad = datos_partido["local"].split()[-1]
+                                park_data = df_parks[df_parks.astype(str).str.contains(nombre_ciudad, case=False).any(axis=1)]
 
-                    if park_data.empty:
-                        st.error(f"❌ Error de integridad: No se encontró ningún registro real para el equipo '{datos_partido['local']}' ({loc_abbr}) en 'mlb_park_factors.csv'. Verifica tu archivo de estadios.")
-                        st.stop()
+                            if park_data.empty:
+                                st.warning(f"❌ Error de integridad: No se encontró ningún registro real para el equipo '{datos_partido['local']}' ({loc_abbr}) en 'mlb_park_factors.csv'. Omitiendo partido.")
+                                continue # En lugar de st.stop()
 
-                    # Asignación de valores reales extraídos directamente de la fuente
-                    park_factor = float(park_data[col_pf].values[0])
-                    altitud = float(park_data[col_alt].values[0])
+                            # Asignación de valores reales extraídos directamente de la fuente
+                            park_factor = float(park_data[col_pf].values[0])
+                            altitud = float(park_data[col_alt].values[0])
 
                             
                             linea_casino = datos_partido["linea_carreras"] if datos_partido["linea_carreras"] is not None else 8.5
@@ -329,8 +329,8 @@ else:
                             )
 
                             # --- LÓGICA DE FILTRADO EV+ (Valor Esperado) ---
-                            umbral_ml = 60.0
-                            umbral_ou = 60.0
+                            umbral_ml = 54.0 # Umbral realista
+                            umbral_ou = 58.0 # Umbral realista
 
                             prob_mc_loc = res_mc['Moneyline']['Gana Local']
                             prob_mc_vis = res_mc['Moneyline']['Gana Visita']
@@ -480,18 +480,32 @@ else:
                     bullpen_loc_era = float(df_pit[df_pit['Team'] == loc_abbr]['ERA'].mean())
                     bullpen_vis_era = float(df_pit[df_pit['Team'] == vis_abbr]['ERA'].mean())
                     
+                    # --- EXTRACCIÓN 100% REAL DE FACTORES DE ESTADIO ---
                     df_parks.columns = df_parks.columns.str.strip()
-                    park_data = df_parks[df_parks['Team'] == loc_abbr]
-                    if park_data.empty:
-                        park_data = df_parks[df_parks.apply(lambda row: row.astype(str).str.contains(datos_partido["local"].split()[-1], case=False).any(), axis=1)]
-                    
-                    if park_data.empty:
-                        st.error(f"❌ No se encontró el registro para el equipo '{loc_abbr}' en el archivo de factores de estadios.")
+                    park_data = pd.DataFrame()
+
+                    # Identificar dinámicamente las columnas clave del archivo de parques
+                    col_equipo_park = next((c for c in ['Team', 'TeamCode', 'Abbr', 'Franchise', 'Equipo', 'franchise'] if c in df_parks.columns), df_parks.columns[0])
+                    col_pf = next((c for c in df_parks.columns if 'park_factor' in c.lower() or 'factor' in c.lower() or 'pf' in c.lower()), None)
+                    col_alt = next((c for c in df_parks.columns if 'altitud' in c.lower() or 'alt' in c.lower() or 'elevation' in c.lower() or 'pie' in c.lower()), None)
+
+                    if not col_pf or not col_alt:
+                        st.error("❌ El archivo `mlb_park_factors.csv` no contiene columnas reconocibles de Park Factor o Altitud.")
                         st.stop()
 
-                    col_pf = [c for c in park_data.columns if 'park_factor' in c.lower() or 'factor' in c.lower()][0]
-                    col_alt = [c for c in park_data.columns if 'altitud' in c.lower() or 'alt' in c.lower()][0]
+                    # Búsqueda estricta basada en los datos reales del DataFrame
+                    park_data = df_parks[df_parks[col_equipo_park].astype(str).str.upper() == loc_abbr.upper()]
 
+                    if park_data.empty:
+                        # Búsqueda secundaria por nombre de la ciudad o equipo si la abreviatura difiere
+                        nombre_ciudad = datos_partido["local"].split()[-1]
+                        park_data = df_parks[df_parks.astype(str).str.contains(nombre_ciudad, case=False).any(axis=1)]
+
+                    if park_data.empty:
+                        st.error(f"❌ Error de integridad: No se encontró ningún registro real para el equipo '{datos_partido['local']}' ({loc_abbr}) en 'mlb_park_factors.csv'. Verifica tu archivo de estadios.")
+                        st.stop()
+
+                    # Asignación de valores reales extraídos directamente de la fuente
                     park_factor = float(park_data[col_pf].values[0])
                     altitud = float(park_data[col_alt].values[0])
                     
@@ -506,7 +520,7 @@ else:
                         viento_mph=viento, direccion_viento=dir_viento, temp_f=temp,
                         linea_carreras_casino=linea_casino,
                         df_games=df_games,
-                        num_simulaciones=1000000
+                        num_simulaciones=500000
                     )
                     
                     cuotas_reales = {
