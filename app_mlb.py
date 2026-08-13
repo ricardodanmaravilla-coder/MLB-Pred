@@ -27,14 +27,15 @@ EQUIPOS_MAP = {
 }
 
 def american_to_decimal(am_odds):
-    """Convierte cuotas americanas de Las Vegas a formato decimal europeo automáticamente"""
+    """Convierte cuotas americanas a decimales. Retorna None si no hay dato real."""
     try:
+        if am_odds is None: return None
         am_odds = float(am_odds)
-        if am_odds == 0: return 1.91
+        if am_odds == 0: return None
         if am_odds > 0: return round((am_odds / 100.0) + 1, 2)
         else: return round((100.0 / abs(am_odds)) + 1, 2)
     except:
-        return 1.91
+        return None
 
 def calcular_criterio_kelly(probabilidad_real, cuota_decimal, fraccion=0.25):
     """Calcula el porcentaje óptimo de bankroll a apostar usando el Criterio de Kelly Fraccionado"""
