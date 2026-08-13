@@ -27,7 +27,7 @@ EQUIPOS_MAP = {
 }
 
 def american_to_decimal(am_odds):
-    """Convierte cuotas americanas a decimales. Retorna None si no hay dato real."""
+    """Convierte cuotas americanas de Las Vegas a formato decimal europeo automáticamente"""
     try:
         if am_odds is None: return None
         am_odds = float(am_odds)
@@ -40,6 +40,7 @@ def american_to_decimal(am_odds):
 def calcular_criterio_kelly(probabilidad_real, cuota_decimal, fraccion=0.25):
     """Calcula el porcentaje óptimo de bankroll a apostar usando el Criterio de Kelly Fraccionado"""
     try:
+        if cuota_decimal is None or probabilidad_real is None: return 0.0
         p = float(probabilidad_real) / 100.0
         q = 1.0 - p
         b = float(cuota_decimal) - 1.0
@@ -52,7 +53,6 @@ def calcular_criterio_kelly(probabilidad_real, cuota_decimal, fraccion=0.25):
 
 @st.cache_data(ttl=3600)
 def cargar_datos_historicos():
-    # Inicializar DataFrames vacíos, NO con datos falsos
     bateo = pd.DataFrame()
     pitcheo = pd.DataFrame()
     park = pd.DataFrame()
@@ -62,17 +62,17 @@ def cargar_datos_historicos():
         if os.path.exists("data/mlb_batting.csv"):
             df_temp = pd.read_csv("data/mlb_batting.csv", sep=None, engine='python', on_bad_lines='skip')
             df_temp.columns = df_temp.columns.str.strip()
-            # Eliminar el .fillna(100.0)
-            df_temp['wRC+'] = pd.to_numeric(df_temp['wRC+'], errors='coerce') 
-            bateo = df_temp.dropna(subset=['wRC+']) # Exigir dato real
+            if not df_temp.empty and 'Team' in df_temp.columns and 'wRC+' in df_temp.columns:
+                df_temp['wRC+'] = pd.to_numeric(df_temp['wRC+'], errors='coerce')
+                bateo = df_temp.dropna(subset=['wRC+'])
 
         if os.path.exists("data/mlb_pitching.csv"):
             df_temp = pd.read_csv("data/mlb_pitching.csv", sep=None, engine='python', on_bad_lines='skip')
             df_temp.columns = df_temp.columns.str.strip()
-            # Eliminar el .fillna(4.10)
-            df_temp['xFIP'] = pd.to_numeric(df_temp['xFIP'], errors='coerce')
-            df_temp['ERA'] = pd.to_numeric(df_temp['ERA'], errors='coerce')
-            pitcheo = df_temp.dropna(subset=['xFIP', 'ERA']) # Exigir dato real
+            if not df_temp.empty and 'Team' in df_temp.columns and 'xFIP' in df_temp.columns:
+                df_temp['xFIP'] = pd.to_numeric(df_temp['xFIP'], errors='coerce')
+                df_temp['ERA'] = pd.to_numeric(df_temp['ERA'], errors='coerce')
+                pitcheo = df_temp.dropna(subset=['xFIP', 'ERA'])
 
         if os.path.exists("data/mlb_park_factors.csv"): 
             df_temp = pd.read_csv("data/mlb_park_factors.csv", sep=None, engine='python', on_bad_lines='skip')
@@ -155,8 +155,8 @@ def obtener_cartelera_y_cuotas_automaticas():
                         partidos[llave] = {
                             "local": home, "visita": away,
                             "pitcher_local": home_pitcher, "pitcher_visita": away_pitcher,
-                            "linea_carreras": 8.5,
-                            "cuota_loc": 1.91, "cuota_vis": 1.91, "cuota_over": 1.91, "cuota_under": 1.91
+                            "linea_carreras": None,
+                            "cuota_loc": None, "cuota_vis": None, "cuota_over": None, "cuota_under": None
                         }
     except Exception as e:
         st.error(f"Error en MLB StatsAPI: {e}")
@@ -235,6 +235,14 @@ else:
                         vis_abbr = EQUIPOS_MAP.get(datos_partido["visita"], "")
                         if not loc_abbr or not vis_abbr: continue
                         
+                        cuota_loc = datos_partido.get("cuota_loc")
+                        cuota_vis = datos_partido.get("cuota_vis")
+                        linea_casino = datos_partido.get("linea_carreras")
+                        
+                        # Si no hay mercado real, ignorar este partido para no afectar las métricas
+                        if cuota_loc is None or cuota_vis is None or linea_casino is None:
+                            continue
+                        
                         try:
                             wrc_loc = float(df_bat[df_bat['Team'] == loc_abbr]['wRC+'].mean())
                             wrc_vis = float(df_bat[df_bat['Team'] == vis_abbr]['wRC+'].mean())
@@ -254,6 +262,7 @@ else:
                             
                             if xfip_loc is None:
                                 team_pit_loc = df_pit[df_pit['Team'] == loc_abbr]
+                                if team_pit_loc.empty: continue
                                 xfip_loc = float(team_pit_loc['xFIP'].mean())
 
                             pitcher_vis_nombre = datos_partido["pitcher_visita"]
@@ -265,42 +274,31 @@ else:
                             
                             if xfip_vis is None:
                                 team_pit_vis = df_pit[df_pit['Team'] == vis_abbr]
+                                if team_pit_vis.empty: continue
                                 xfip_vis = float(team_pit_vis['xFIP'].mean())
 
                             bullpen_loc_era = float(df_pit[df_pit['Team'] == loc_abbr]['ERA'].mean())
                             bullpen_vis_era = float(df_pit[df_pit['Team'] == vis_abbr]['ERA'].mean())
                             
-                            # --- EXTRACCIÓN 100% REAL DE FACTORES DE ESTADIO ---
                             df_parks.columns = df_parks.columns.str.strip()
                             park_data = pd.DataFrame()
 
-                            # Identificar dinámicamente las columnas clave del archivo de parques
                             col_equipo_park = next((c for c in ['Team', 'TeamCode', 'Abbr', 'Franchise', 'Equipo', 'franchise'] if c in df_parks.columns), df_parks.columns[0])
                             col_pf = next((c for c in df_parks.columns if 'park_factor' in c.lower() or 'factor' in c.lower() or 'pf' in c.lower()), None)
                             col_alt = next((c for c in df_parks.columns if 'altitud' in c.lower() or 'alt' in c.lower() or 'elevation' in c.lower() or 'pie' in c.lower()), None)
 
-                            if not col_pf or not col_alt:
-                                st.error("❌ El archivo `mlb_park_factors.csv` no contiene columnas reconocibles de Park Factor o Altitud.")
-                                continue # En lugar de st.stop() para no detener todo el escáner
+                            if not col_pf or not col_alt: continue
 
-                            # Búsqueda estricta basada en los datos reales del DataFrame
                             park_data = df_parks[df_parks[col_equipo_park].astype(str).str.upper() == loc_abbr.upper()]
 
                             if park_data.empty:
-                                # Búsqueda secundaria por nombre de la ciudad o equipo si la abreviatura difiere
                                 nombre_ciudad = datos_partido["local"].split()[-1]
                                 park_data = df_parks[df_parks.astype(str).str.contains(nombre_ciudad, case=False).any(axis=1)]
 
-                            if park_data.empty:
-                                st.warning(f"❌ Error de integridad: No se encontró ningún registro real para el equipo '{datos_partido['local']}' ({loc_abbr}) en 'mlb_park_factors.csv'. Omitiendo partido.")
-                                continue # En lugar de st.stop()
+                            if park_data.empty: continue
 
-                            # Asignación de valores reales extraídos directamente de la fuente
                             park_factor = float(park_data[col_pf].values[0])
                             altitud = float(park_data[col_alt].values[0])
-
-                            
-                            linea_casino = datos_partido["linea_carreras"] if datos_partido["linea_carreras"] is not None else 8.5
                             
                             res_mc = simular_partido_mlb(
                                 local=datos_partido['local'], visita=datos_partido['visita'],
@@ -314,17 +312,13 @@ else:
                                 num_simulaciones=1000000
                             )
 
-                            # --- LÓGICA DE FILTRADO EV+ (Valor Esperado) ---
-                            umbral_ml = 54.0 # Umbral realista
-                            umbral_ou = 58.0 # Umbral realista
+                            umbral_ml = 54.0 
+                            umbral_ou = 58.0 
 
                             prob_mc_loc = res_mc['Moneyline']['Gana Local']
                             prob_mc_vis = res_mc['Moneyline']['Gana Visita']
                             
-                            # 1. Evaluamos Moneyline: Gana Local
-                            cuota_loc = datos_partido["cuota_loc"] if datos_partido["cuota_loc"] else 1.91
                             ev_loc = (prob_mc_loc / 100.0) * cuota_loc - 1.0
-                            
                             if prob_mc_loc >= umbral_ml and ev_loc > 0:
                                 kelly_pct = calcular_criterio_kelly(prob_mc_loc, cuota_loc)
                                 recomendaciones.append({
@@ -337,10 +331,7 @@ else:
                                     "Stake Kelly": f"{kelly_pct}%"
                                 })
                                 
-                            # 2. Evaluamos Moneyline: Gana Visita
-                            cuota_vis = datos_partido["cuota_vis"] if datos_partido["cuota_vis"] else 1.91
                             ev_vis = (prob_mc_vis / 100.0) * cuota_vis - 1.0
-                            
                             if prob_mc_vis >= umbral_ml and ev_vis > 0:
                                 kelly_pct = calcular_criterio_kelly(prob_mc_vis, cuota_vis)
                                 recomendaciones.append({
@@ -353,38 +344,37 @@ else:
                                     "Stake Kelly": f"{kelly_pct}%"
                                 })
                             
-                            # 3. Evaluamos Totales (Over)
                             carreras_dict = res_mc.get('Carreras', {})
                             prob_over = carreras_dict.get(f"Over {linea_casino}", 50.0)
-                            cuota_ov = datos_partido.get("cuota_over") or 1.91
-                            ev_over = (prob_over / 100.0) * cuota_ov - 1.0
+                            cuota_ov = datos_partido.get("cuota_over")
                             
-                            if prob_over >= umbral_ou and ev_over > 0:
-                                recomendaciones.append({
-                                    "Partido": f"{datos_partido['visita']} @ {datos_partido['local']}",
-                                    "Mercado": "Totales",
-                                    "Apuesta": f"Over {linea_casino}",
-                                    "Prob. Real": f"{prob_over}%",
-                                    "Cuota": cuota_ov,
-                                    "EV+": f"{round(ev_over*100, 2)}%",
-                                    "Stake Kelly": f"{calcular_criterio_kelly(prob_over, cuota_ov)}%"
-                                })
+                            if cuota_ov:
+                                ev_over = (prob_over / 100.0) * cuota_ov - 1.0
+                                if prob_over >= umbral_ou and ev_over > 0:
+                                    recomendaciones.append({
+                                        "Partido": f"{datos_partido['visita']} @ {datos_partido['local']}",
+                                        "Mercado": "Totales",
+                                        "Apuesta": f"Over {linea_casino}",
+                                        "Prob. Real": f"{prob_over}%",
+                                        "Cuota": cuota_ov,
+                                        "EV+": f"{round(ev_over*100, 2)}%",
+                                        "Stake Kelly": f"{calcular_criterio_kelly(prob_over, cuota_ov)}%"
+                                    })
                             
-                            # 4. Evaluamos Totales (Under)
                             prob_under = carreras_dict.get(f"Under {linea_casino}", 50.0)
-                            cuota_un = datos_partido.get("cuota_under") or 1.91
-                            ev_under = (prob_under / 100.0) * cuota_un - 1.0
-                            
-                            if prob_under >= umbral_ou and ev_under > 0:
-                                recomendaciones.append({
-                                    "Partido": f"{datos_partido['visita']} @ {datos_partido['local']}",
-                                    "Mercado": "Totales",
-                                    "Apuesta": f"Under {linea_casino}",
-                                    "Prob. Real": f"{prob_under}%",
-                                    "Cuota": cuota_un,
-                                    "EV+": f"{round(ev_under*100, 2)}%",
-                                    "Stake Kelly": f"{calcular_criterio_kelly(prob_under, cuota_un)}%"
-                                })
+                            cuota_un = datos_partido.get("cuota_under")
+                            if cuota_un:
+                                ev_under = (prob_under / 100.0) * cuota_un - 1.0
+                                if prob_under >= umbral_ou and ev_under > 0:
+                                    recomendaciones.append({
+                                        "Partido": f"{datos_partido['visita']} @ {datos_partido['local']}",
+                                        "Mercado": "Totales",
+                                        "Apuesta": f"Under {linea_casino}",
+                                        "Prob. Real": f"{prob_under}%",
+                                        "Cuota": cuota_un,
+                                        "EV+": f"{round(ev_under*100, 2)}%",
+                                        "Stake Kelly": f"{calcular_criterio_kelly(prob_under, cuota_un)}%"
+                                    })
 
                         except Exception as e:
                             continue
@@ -450,6 +440,9 @@ else:
                     
                     if xfip_loc is None:
                         team_pit_loc = df_pit[df_pit['Team'] == loc_abbr]
+                        if team_pit_loc.empty:
+                            st.error("❌ No hay datos de pitcheo reales para el local.")
+                            st.stop()
                         xfip_loc = float(team_pit_loc['xFIP'].mean())
 
                     pitcher_vis_nombre = datos_partido["pitcher_visita"]
@@ -461,16 +454,17 @@ else:
                     
                     if xfip_vis is None:
                         team_pit_vis = df_pit[df_pit['Team'] == vis_abbr]
+                        if team_pit_vis.empty:
+                            st.error("❌ No hay datos de pitcheo reales para el visitante.")
+                            st.stop()
                         xfip_vis = float(team_pit_vis['xFIP'].mean())
 
                     bullpen_loc_era = float(df_pit[df_pit['Team'] == loc_abbr]['ERA'].mean())
                     bullpen_vis_era = float(df_pit[df_pit['Team'] == vis_abbr]['ERA'].mean())
                     
-                    # --- EXTRACCIÓN 100% REAL DE FACTORES DE ESTADIO ---
                     df_parks.columns = df_parks.columns.str.strip()
                     park_data = pd.DataFrame()
 
-                    # Identificar dinámicamente las columnas clave del archivo de parques
                     col_equipo_park = next((c for c in ['Team', 'TeamCode', 'Abbr', 'Franchise', 'Equipo', 'franchise'] if c in df_parks.columns), df_parks.columns[0])
                     col_pf = next((c for c in df_parks.columns if 'park_factor' in c.lower() or 'factor' in c.lower() or 'pf' in c.lower()), None)
                     col_alt = next((c for c in df_parks.columns if 'altitud' in c.lower() or 'alt' in c.lower() or 'elevation' in c.lower() or 'pie' in c.lower()), None)
@@ -479,11 +473,9 @@ else:
                         st.error("❌ El archivo `mlb_park_factors.csv` no contiene columnas reconocibles de Park Factor o Altitud.")
                         st.stop()
 
-                    # Búsqueda estricta basada en los datos reales del DataFrame
                     park_data = df_parks[df_parks[col_equipo_park].astype(str).str.upper() == loc_abbr.upper()]
 
                     if park_data.empty:
-                        # Búsqueda secundaria por nombre de la ciudad o equipo si la abreviatura difiere
                         nombre_ciudad = datos_partido["local"].split()[-1]
                         park_data = df_parks[df_parks.astype(str).str.contains(nombre_ciudad, case=False).any(axis=1)]
 
@@ -491,12 +483,15 @@ else:
                         st.error(f"❌ Error de integridad: No se encontró ningún registro real para el equipo '{datos_partido['local']}' ({loc_abbr}) en 'mlb_park_factors.csv'. Verifica tu archivo de estadios.")
                         st.stop()
 
-                    # Asignación de valores reales extraídos directamente de la fuente
                     park_factor = float(park_data[col_pf].values[0])
                     altitud = float(park_data[col_alt].values[0])
                     
-                    linea_casino = datos_partido["linea_carreras"] if datos_partido["linea_carreras"] is not None else 8.5
+                    linea_casino = datos_partido["linea_carreras"]
                     
+                    if linea_casino is None or datos_partido["cuota_loc"] is None or datos_partido["cuota_vis"] is None:
+                         st.error("❌ Faltan cuotas reales del casino. Simulación cancelada para no inyectar datos falsos.")
+                         st.stop()
+
                     res_mc = simular_partido_mlb(
                         local=datos_partido['local'], visita=datos_partido['visita'],
                         pitcher_loc_xfip=xfip_loc, pitcher_vis_xfip=xfip_vis,
@@ -510,20 +505,18 @@ else:
                     )
                     
                     cuotas_reales = {
-                        "Moneyline_Local": datos_partido["cuota_loc"] if datos_partido["cuota_loc"] is not None else 1.91,
-                        "Moneyline_Visita": datos_partido["cuota_vis"] if datos_partido["cuota_vis"] is not None else 1.91,
-                        "Cuota_Over": datos_partido["cuota_over"] if datos_partido["cuota_over"] is not None else 1.91,
-                        "Cuota_Under": datos_partido["cuota_under"] if datos_partido["cuota_under"] is not None else 1.91
+                        "Moneyline_Local": datos_partido["cuota_loc"],
+                        "Moneyline_Visita": datos_partido["cuota_vis"],
+                        "Cuota_Over": datos_partido["cuota_over"],
+                        "Cuota_Under": datos_partido["cuota_under"]
                     }
                     
-                    # Generar diccionario adaptado para analizar apuestas sin requerir ML
                     veredicto_apuestas = []
                     prob_loc = res_mc['Moneyline']['Gana Local']
                     prob_vis = res_mc['Moneyline']['Gana Visita']
                     cuota_loc = cuotas_reales['Moneyline_Local']
                     cuota_vis = cuotas_reales['Moneyline_Visita']
                     
-                    # Kelly y EV+ para local
                     kelly_loc = calcular_criterio_kelly(prob_loc, cuota_loc)
                     ev_loc = (prob_loc / 100.0) * cuota_loc - 1.0
                     veredicto_apuestas.append({
@@ -534,7 +527,6 @@ else:
                         "Kelly Stake": f"{kelly_loc}%"
                     })
                     
-                    # Kelly y EV+ para visita
                     kelly_vis = calcular_criterio_kelly(prob_vis, cuota_vis)
                     ev_vis = (prob_vis / 100.0) * cuota_vis - 1.0
                     veredicto_apuestas.append({
