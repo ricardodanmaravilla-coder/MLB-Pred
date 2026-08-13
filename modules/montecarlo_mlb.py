@@ -15,7 +15,6 @@ def obtener_h2h(df_games, loc_abbr, vis_abbr):
         return 50.0
     
     try:
-        # Intenta buscar columnas estándar de resultados
         cols = [c.lower() for c in df_games.columns]
         if 'home' in cols and 'away' in cols and ('home_score' in cols or 'homescore' in cols):
             h_col = df_games.columns[cols.index('home')]
@@ -44,35 +43,31 @@ def simular_partido_mlb(
     viento_mph, direccion_viento, temp_f, linea_carreras_casino,
     df_games=None, num_simulaciones=1000000
 ):
-    # Validar que existan líneas de casino reales
+    # Validación estricta sin números inventados
     if linea_carreras_casino is None or linea_carreras_casino <= 0:
-        raise ValueError(f"Falta línea de carreras de Las Vegas para el juego de {local}.")
+        raise ValueError("Línea de carreras de casino requerida y no disponible.")
 
-    # --- VALIDACIÓN ESTRICTA (Sin promedios inventados) ---
     metricas = [wrc_loc, wrc_vis, pitcher_loc_xfip, pitcher_vis_xfip, bullpen_loc_era, bullpen_vis_era, park_factor]
     if any(pd.isna(m) for m in metricas) or None in metricas:
-        raise ValueError(f"Datos Sabermétricos incompletos para {visita} @ {local}. No se puede simular.")
+         raise ValueError(f"Datos sabermétricos incompletos para simular {visita} @ {local}.")
 
-    # 1. NORMALIZACIÓN ESTADÍSTICA (Ya con datos empíricos puros)
-    w_loc_f = wrc_loc / 100.0
-    w_vis_f = wrc_vis / 100.0
+    # 1. NORMALIZACIÓN ESTADÍSTICA
+    w_loc_f = np.clip(float(wrc_loc) / 100.0, 0.75, 1.25)
+    w_vis_f = np.clip(float(wrc_vis) / 100.0, 0.75, 1.25)
     
-    p_loc_f = pitcher_loc_xfip / 4.10
-    p_vis_f = pitcher_vis_xfip / 4.10
+    p_loc_f = np.clip(float(pitcher_loc_xfip) / 4.10, 0.70, 1.30)
+    p_vis_f = np.clip(float(pitcher_vis_xfip) / 4.10, 0.70, 1.30)
     
-    # ... (Continuar con la matemática base) ...
-    
-    bp_loc_f = np.clip(bullpen_loc_era / 4.10, 0.75, 1.30)
-    bp_vis_f = np.clip(bullpen_vis_era / 4.10, 0.75, 1.30)
+    bp_loc_f = np.clip(float(bullpen_loc_era) / 4.10, 0.75, 1.30)
+    bp_vis_f = np.clip(float(bullpen_vis_era) / 4.10, 0.75, 1.30)
 
     factor_clima = calcular_factor_clima(viento_mph, direccion_viento, temp_f)
-    pf_loc = np.clip(park_factor / 100.0, 0.85, 1.15)
+    pf_loc = np.clip(float(park_factor) / 100.0, 0.85, 1.15)
 
     # 2. PROYECCIÓN DE CARRERAS (BaseRuns adaptado)
     carreras_exp_loc = 4.3 * w_loc_f * ((p_vis_f * 0.65) + (bp_vis_f * 0.35)) * pf_loc * factor_clima
     carreras_exp_vis = 4.3 * w_vis_f * ((p_loc_f * 0.65) + (bp_loc_f * 0.35)) * (1.0 / pf_loc) * factor_clima
 
-    # Seguro final por si alguna variable matemática se corrompe a NaN o negativo
     if np.isnan(carreras_exp_loc) or carreras_exp_loc <= 0: carreras_exp_loc = 4.3
     if np.isnan(carreras_exp_vis) or carreras_exp_vis <= 0: carreras_exp_vis = 4.3
 
@@ -96,7 +91,8 @@ def simular_partido_mlb(
 
     prob_mc_loc = np.mean(c_loc_sim > c_vis_sim) * 100
     
-# LIMITADOR CLAVE: Ningún equipo en MLB tiene más de 65% o menos de 35% antes del juego
+    # Promediar los modelos y limitar
+    prob_final_loc = (prob_pyth_loc + prob_h2h_loc + prob_mc_loc) / 3.0
     prob_final_loc = np.clip(prob_final_loc, 35.0, 65.0)
     prob_final_vis = 100.0 - prob_final_loc
 
