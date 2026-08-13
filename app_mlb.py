@@ -323,8 +323,8 @@ else:
                                 num_simulaciones=1000000
                             )
 
-                            umbral_ml = 54.0 
-                            umbral_ou = 58.0 
+                            umbral_ml = 60.0 
+                            umbral_ou = 60.0 
 
                             prob_mc_loc = res_mc['Moneyline']['Gana Local']
                             prob_mc_vis = res_mc['Moneyline']['Gana Visita']
@@ -519,7 +519,11 @@ else:
                         "Moneyline_Local": datos_partido["cuota_loc"],
                         "Moneyline_Visita": datos_partido["cuota_vis"],
                         "Cuota_Over": datos_partido["cuota_over"],
-                        "Cuota_Under": datos_partido["cuota_under"]
+                        "Cuota_Under": datos_partido["cuota_under"],
+                        "Spread_Local": datos_partido.get("spread_loc"),
+                        "Cuota_Spread_Local": datos_partido.get("cuota_spread_loc"),
+                        "Spread_Visita": datos_partido.get("spread_vis"),
+                        "Cuota_Spread_Visita": datos_partido.get("cuota_spread_vis")
                     }
                     
                     veredicto_apuestas = []
@@ -528,6 +532,7 @@ else:
                     cuota_loc = cuotas_reales['Moneyline_Local']
                     cuota_vis = cuotas_reales['Moneyline_Visita']
                     
+                    # Moneyline Local
                     kelly_loc = calcular_criterio_kelly(prob_loc, cuota_loc)
                     ev_loc = (prob_loc / 100.0) * cuota_loc - 1.0
                     veredicto_apuestas.append({
@@ -538,6 +543,7 @@ else:
                         "Kelly Stake": f"{kelly_loc}%"
                     })
                     
+                    # Moneyline Visita
                     kelly_vis = calcular_criterio_kelly(prob_vis, cuota_vis)
                     ev_vis = (prob_vis / 100.0) * cuota_vis - 1.0
                     veredicto_apuestas.append({
@@ -547,6 +553,66 @@ else:
                         "EV+": f"{round(ev_vis*100, 2)}%",
                         "Kelly Stake": f"{kelly_vis}%"
                     })
+
+                    # Over / Under (Totales)
+                    carreras_dict = res_mc.get('Carreras', {})
+                    prob_over = carreras_dict.get(f"Over {linea_casino}", 50.0)
+                    cuota_ov = cuotas_reales.get("Cuota_Over")
+                    if cuota_ov is not None:
+                        kelly_ov = calcular_criterio_kelly(prob_over, cuota_ov)
+                        ev_ov = (prob_over / 100.0) * cuota_ov - 1.0
+                        veredicto_apuestas.append({
+                            "Apuesta": f"Over {linea_casino}",
+                            "Prob. Real": f"{prob_over}%",
+                            "Cuota": cuota_ov,
+                            "EV+": f"{round(ev_ov*100, 2)}%",
+                            "Kelly Stake": f"{kelly_ov}%"
+                        })
+
+                    prob_under = carreras_dict.get(f"Under {linea_casino}", 50.0)
+                    cuota_un = cuotas_reales.get("Cuota_Under")
+                    if cuota_un is not None:
+                        kelly_un = calcular_criterio_kelly(prob_under, cuota_un)
+                        ev_un = (prob_under / 100.0) * cuota_un - 1.0
+                        veredicto_apuestas.append({
+                            "Apuesta": f"Under {linea_casino}",
+                            "Prob. Real": f"{prob_under}%",
+                            "Cuota": cuota_un,
+                            "EV+": f"{round(ev_un*100, 2)}%",
+                            "Kelly Stake": f"{kelly_un}%"
+                        })
+
+                    # Hándicap (Spreads)
+                    spread_loc = cuotas_reales.get("Spread_Local")
+                    cuota_sp_loc = cuotas_reales.get("Cuota_Spread_Local")
+                    if spread_loc is not None and cuota_sp_loc is not None:
+                        # Aproximación probabilística base para spread común de béisbol (-1.5 / +1.5)
+                        prob_spread_loc = prob_loc * 0.95 if spread_loc < 0 else prob_loc * 1.05
+                        prob_spread_loc = np.clip(prob_spread_loc, 1.0, 99.0)
+                        kelly_sp_loc = calcular_criterio_kelly(prob_spread_loc, cuota_sp_loc)
+                        ev_sp_loc = (prob_spread_loc / 100.0) * cuota_sp_loc - 1.0
+                        veredicto_apuestas.append({
+                            "Apuesta": f"Hándicap {spread_loc} ({datos_partido['local']})",
+                            "Prob. Real": f"{round(prob_spread_loc, 2)}%",
+                            "Cuota": cuota_sp_loc,
+                            "EV+": f"{round(ev_sp_loc*100, 2)}%",
+                            "Kelly Stake": f"{kelly_sp_loc}%"
+                        })
+
+                    spread_vis = cuotas_reales.get("Spread_Visita")
+                    cuota_sp_vis = cuotas_reales.get("Cuota_Spread_Visita")
+                    if spread_vis is not None and cuota_sp_vis is not None:
+                        prob_spread_vis = prob_vis * 0.95 if spread_vis < 0 else prob_vis * 1.05
+                        prob_spread_vis = np.clip(prob_spread_vis, 1.0, 99.0)
+                        kelly_sp_vis = calcular_criterio_kelly(prob_spread_vis, cuota_sp_vis)
+                        ev_sp_vis = (prob_spread_vis / 100.0) * cuota_sp_vis - 1.0
+                        veredicto_apuestas.append({
+                            "Apuesta": f"Hándicap {spread_vis} ({datos_partido['visita']})",
+                            "Prob. Real": f"{round(prob_spread_vis, 2)}%",
+                            "Cuota": cuota_sp_vis,
+                            "EV+": f"{round(ev_sp_vis*100, 2)}%",
+                            "Kelly Stake": f"{kelly_sp_vis}%"
+                        })
                     
                     df_apuestas = pd.DataFrame(veredicto_apuestas)
                     
