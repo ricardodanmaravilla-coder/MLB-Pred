@@ -52,42 +52,27 @@ def calcular_criterio_kelly(probabilidad_real, cuota_decimal, fraccion=0.25):
 
 @st.cache_data(ttl=3600)
 def cargar_datos_historicos():
-    equipos_lista = list(EQUIPOS_MAP.values())
-    
-    bateo = pd.DataFrame({
-        'Team': equipos_lista,
-        'wRC+': [100.0] * len(equipos_lista)
-    })
-    pitcheo = pd.DataFrame({
-        'Team': equipos_lista,
-        'xFIP': [4.10] * len(equipos_lista),
-        'ERA': [4.10] * len(equipos_lista),
-        'Name': ['Pitcher Genérico'] * len(equipos_lista)
-    })
-    park = pd.DataFrame({
-        'Team': equipos_lista,
-        'Park_Factor': [100.0] * len(equipos_lista),
-        'Altitud': [500.0] * len(equipos_lista)
-    })
+    # Inicializar DataFrames vacíos, NO con datos falsos
+    bateo = pd.DataFrame()
+    pitcheo = pd.DataFrame()
+    park = pd.DataFrame()
     games = pd.DataFrame()
 
     try:
         if os.path.exists("data/mlb_batting.csv"):
             df_temp = pd.read_csv("data/mlb_batting.csv", sep=None, engine='python', on_bad_lines='skip')
             df_temp.columns = df_temp.columns.str.strip()
-            if not df_temp.empty and 'Team' in df_temp.columns and 'wRC+' in df_temp.columns:
-                df_temp['wRC+'] = pd.to_numeric(df_temp['wRC+'], errors='coerce').fillna(100.0)
-                bateo = df_temp
+            # Eliminar el .fillna(100.0)
+            df_temp['wRC+'] = pd.to_numeric(df_temp['wRC+'], errors='coerce') 
+            bateo = df_temp.dropna(subset=['wRC+']) # Exigir dato real
 
         if os.path.exists("data/mlb_pitching.csv"):
             df_temp = pd.read_csv("data/mlb_pitching.csv", sep=None, engine='python', on_bad_lines='skip')
             df_temp.columns = df_temp.columns.str.strip()
-            if not df_temp.empty and 'Team' in df_temp.columns and 'xFIP' in df_temp.columns:
-                df_temp['xFIP'] = pd.to_numeric(df_temp['xFIP'], errors='coerce').fillna(4.10)
-                df_temp['ERA'] = pd.to_numeric(df_temp['ERA'], errors='coerce').fillna(4.10)
-                if 'Name' not in df_temp.columns:
-                    df_temp['Name'] = 'Pitcher Genérico'
-                pitcheo = df_temp
+            # Eliminar el .fillna(4.10)
+            df_temp['xFIP'] = pd.to_numeric(df_temp['xFIP'], errors='coerce')
+            df_temp['ERA'] = pd.to_numeric(df_temp['ERA'], errors='coerce')
+            pitcheo = df_temp.dropna(subset=['xFIP', 'ERA']) # Exigir dato real
 
         if os.path.exists("data/mlb_park_factors.csv"): 
             df_temp = pd.read_csv("data/mlb_park_factors.csv", sep=None, engine='python', on_bad_lines='skip')
