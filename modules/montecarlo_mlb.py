@@ -44,24 +44,23 @@ def simular_partido_mlb(
     viento_mph, direccion_viento, temp_f, linea_carreras_casino,
     df_games=None, num_simulaciones=1000000
 ):
+    # Validar que existan líneas de casino reales
     if linea_carreras_casino is None or linea_carreras_casino <= 0:
-        linea_carreras_casino = 8.5 
+        raise ValueError(f"Falta línea de carreras de Las Vegas para el juego de {local}.")
 
-    # --- BLINDAJE CONTRA DATOS NULOS (Evita el error de Poisson) ---
-    wrc_loc = 100.0 if pd.isna(wrc_loc) else float(wrc_loc)
-    wrc_vis = 100.0 if pd.isna(wrc_vis) else float(wrc_vis)
-    pitcher_loc_xfip = 4.10 if pd.isna(pitcher_loc_xfip) else float(pitcher_loc_xfip)
-    pitcher_vis_xfip = 4.10 if pd.isna(pitcher_vis_xfip) else float(pitcher_vis_xfip)
-    bullpen_loc_era = 4.10 if pd.isna(bullpen_loc_era) else float(bullpen_loc_era)
-    bullpen_vis_era = 4.10 if pd.isna(bullpen_vis_era) else float(bullpen_vis_era)
-    park_factor = 100.0 if pd.isna(park_factor) else float(park_factor)
+    # --- VALIDACIÓN ESTRICTA (Sin promedios inventados) ---
+    metricas = [wrc_loc, wrc_vis, pitcher_loc_xfip, pitcher_vis_xfip, bullpen_loc_era, bullpen_vis_era, park_factor]
+    if any(pd.isna(m) for m in metricas) or None in metricas:
+        raise ValueError(f"Datos Sabermétricos incompletos para {visita} @ {local}. No se puede simular.")
 
-    # 1. NORMALIZACIÓN ESTADÍSTICA
-    w_loc_f = np.clip(wrc_loc / 100.0, 0.75, 1.25)
-    w_vis_f = np.clip(wrc_vis / 100.0, 0.75, 1.25)
+    # 1. NORMALIZACIÓN ESTADÍSTICA (Ya con datos empíricos puros)
+    w_loc_f = wrc_loc / 100.0
+    w_vis_f = wrc_vis / 100.0
     
-    p_loc_f = np.clip(pitcher_loc_xfip / 4.10, 0.70, 1.30)
-    p_vis_f = np.clip(pitcher_vis_xfip / 4.10, 0.70, 1.30)
+    p_loc_f = pitcher_loc_xfip / 4.10
+    p_vis_f = pitcher_vis_xfip / 4.10
+    
+    # ... (Continuar con la matemática base) ...
     
     bp_loc_f = np.clip(bullpen_loc_era / 4.10, 0.75, 1.30)
     bp_vis_f = np.clip(bullpen_vis_era / 4.10, 0.75, 1.30)
