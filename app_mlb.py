@@ -156,23 +156,18 @@ def obtener_cartelera_y_cuotas_automaticas():
                             "local": home, "visita": away,
                             "pitcher_local": home_pitcher, "pitcher_visita": away_pitcher,
                             "linea_carreras": None,
-                            "cuota_loc": None, "cuota_vis": None, "cuota_over": None, "cuota_under": None
+                            "cuota_loc": None, "cuota_vis": None, "cuota_over": None, "cuota_under": None,
+                            "spread_loc": None, "cuota_spread_loc": None, "spread_vis": None, "cuota_spread_vis": None
                         }
     except Exception as e:
         st.error(f"Error en MLB StatsAPI: {e}")
 
     if ODDS_API_KEY != "":
-        url_odds = f"https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/?apiKey={ODDS_API_KEY}&regions=us&markets=h2h,totals&oddsFormat=american"
+        url_odds = f"https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/?apiKey={ODDS_API_KEY}&regions=us&markets=h2h,totals,spreads&oddsFormat=american"
         try:
             res_odds = requests.get(url_odds, timeout=5)
             if res_odds.status_code == 200:
                 data_odds = res_odds.json()
-                # --- MODO DEBUG: Forzar la impresión en la interfaz ---
-                #st.warning("🔍 MODO DEBUG: Mostrando la respuesta cruda de The-Odds-API")
-                #st.write("Cantidad de eventos recibidos:", len(data_odds))
-                #st.json(data_odds)
-                #st.stop() # Esto detendrá el escáner aquí para que no marque errores adicionales
-                # -----------------------------------------------------
                 for item in data_odds:
                     h_team = item.get('home_team')
                     for k, p in partidos.items():
@@ -181,6 +176,7 @@ def obtener_cartelera_y_cuotas_automaticas():
                             
                             h2h_encontrado = False
                             totals_encontrado = False
+                            spreads_encontrado = False
                             
                             for bookmaker in bookmakers:
                                 markets = bookmaker.get('markets', [])
@@ -201,8 +197,18 @@ def obtener_cartelera_y_cuotas_automaticas():
                                             elif out['name'] == 'Under':
                                                 p['cuota_under'] = american_to_decimal(out['price'])
                                         totals_encontrado = True
+
+                                    elif m['key'] == 'spreads' and not spreads_encontrado:
+                                        for out in m['outcomes']:
+                                            if out['name'] == h_team:
+                                                p['spread_loc'] = float(out['point'])
+                                                p['cuota_spread_loc'] = american_to_decimal(out['price'])
+                                            else:
+                                                p['spread_vis'] = float(out['point'])
+                                                p['cuota_spread_vis'] = american_to_decimal(out['price'])
+                                        spreads_encontrado = True
                                 
-                                if h2h_encontrado and totals_encontrado:
+                                if h2h_encontrado and totals_encontrado and spreads_encontrado:
                                     break
             elif res_odds.status_code == 429:
                 st.warning("⚠️ Límite de tu API Key de cuotas agotado (The-Odds-API). Pasando a modo matemático sin cuotas reales.")
@@ -245,7 +251,6 @@ else:
                         cuota_vis = datos_partido.get("cuota_vis")
                         linea_casino = datos_partido.get("linea_carreras")
                         
-                        # Si no hay mercado real, ignorar este partido para no afectar las métricas
                         if cuota_loc is None or cuota_vis is None or linea_casino is None:
                             continue
                         
