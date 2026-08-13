@@ -11,7 +11,7 @@ from modules.odds_mlb import analizar_apuestas_mlb
 # --- CONFIGURACIÓN ---
 st.set_page_config(page_title="MLB Quant Analytics", layout="wide", page_icon="⚾")
 
-ODDS_API_KEY = "de66554a17bce1149445b1a883056607" 
+ODDS_API_KEY = "4725b4a69b90b1310a23134c58f3de9c"
 
 EQUIPOS_MAP = {
     "New York Yankees": "NYY", "Boston Red Sox": "BOS", "Los Angeles Dodgers": "LAD",
