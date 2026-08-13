@@ -168,10 +168,10 @@ def obtener_cartelera_y_cuotas_automaticas():
             if res_odds.status_code == 200:
                 data_odds = res_odds.json()
                 # --- MODO DEBUG: Forzar la impresión en la interfaz ---
-                st.warning("🔍 MODO DEBUG: Mostrando la respuesta cruda de The-Odds-API")
-                st.write("Cantidad de eventos recibidos:", len(data_odds))
-                st.json(data_odds)
-                st.stop() # Esto detendrá el escáner aquí para que no marque errores adicionales
+                #st.warning("🔍 MODO DEBUG: Mostrando la respuesta cruda de The-Odds-API")
+                #st.write("Cantidad de eventos recibidos:", len(data_odds))
+                #st.json(data_odds)
+                #st.stop() # Esto detendrá el escáner aquí para que no marque errores adicionales
                 # -----------------------------------------------------
                 for item in data_odds:
                     h_team = item.get('home_team')
