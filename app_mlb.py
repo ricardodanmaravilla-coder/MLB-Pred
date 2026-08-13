@@ -7,6 +7,7 @@ import datetime
 
 from modules.montecarlo_mlb import simular_partido_mlb
 from modules.odds_mlb import analizar_apuestas_mlb
+from modules.ml_mlb import PredictorMLMLB
 
 # --- CONFIGURACIÓN ---
 st.set_page_config(page_title="MLB Quant Analytics", layout="wide", page_icon="⚾")
@@ -92,6 +93,11 @@ def cargar_datos_historicos():
     return bateo, pitcheo, park, games
 
 df_bat, df_pit, df_parks, df_games = cargar_datos_historicos()
+
+# Inicializar y entrenar el modelo de Machine Learning de manera transparente
+predictor_ml = PredictorMLMLB()
+if not df_games.empty and not df_bat.empty and not df_pit.empty:
+    predictor_ml.entrenar(df_bat, df_pit, df_games)
 
 @st.cache_data(ttl=600)
 def obtener_clima_estadio(nombre_equipo):
@@ -236,10 +242,10 @@ else:
         
         if modo_app == "🔍 Escáner Automático de la Jornada (EV+)":
             st.subheader("🔍 Escáner Cuántico de Valor para Toda la Jornada")
-            st.markdown("Escanea toda la cartelera usando exclusivamente el motor de **Montecarlo con probabilidades EV+** y cálculo de **Criterio de Kelly**.")
+            st.markdown("Escanea toda la cartelera cruzando **Montecarlo, Machine Learning y Cuotas en Vivo** (Exigiendo >60% de probabilidad real y EV+).")
             
             if st.button("🚀 Ejecutar Escáner Global de la Jornada", type="primary"):
-                with st.spinner("Escaneando duelos y procesando simulaciones..."):
+                with st.spinner("Escaneando duelos y procesando simulaciones avanzadas..."):
                     recomendaciones = []
                     
                     for llave, datos_partido in partidos_hoy.items():
@@ -311,6 +317,7 @@ else:
                             park_factor = float(park_data[col_pf].values[0])
                             altitud = float(park_data[col_alt].values[0])
                             
+                            # Ejecutar Simulación de Montecarlo
                             res_mc = simular_partido_mlb(
                                 local=datos_partido['local'], visita=datos_partido['visita'],
                                 pitcher_loc_xfip=xfip_loc, pitcher_vis_xfip=xfip_vis,
@@ -323,45 +330,55 @@ else:
                                 num_simulaciones=1000000
                             )
 
-                            umbral_ml = 60.0 
-                            umbral_ou = 60.0 
+                            # Ejecutar Machine Learning
+                            res_ml = predictor_ml.predecir_partido(loc_abbr, vis_abbr, wrc_loc, wrc_vis, xfip_loc, xfip_vis, park_factor)
 
+                            # REGLA ESTRICTA: Combinación Montecarlo + ML con mínimo 60% de probabilidad
                             prob_mc_loc = res_mc['Moneyline']['Gana Local']
                             prob_mc_vis = res_mc['Moneyline']['Gana Visita']
-                            
-                            ev_loc = (prob_mc_loc / 100.0) * cuota_loc - 1.0
-                            if prob_mc_loc >= umbral_ml and ev_loc > 0:
-                                kelly_pct = calcular_criterio_kelly(prob_mc_loc, cuota_loc)
+                            prob_ml_loc = res_ml['Probabilidad_Local']
+                            prob_ml_vis = res_ml['Probabilidad_Visita']
+
+                            prob_comb_loc = (prob_mc_loc + prob_ml_loc) / 2.0
+                            prob_comb_vis = (prob_mc_vis + prob_ml_vis) / 2.0
+
+                            umbral_apuesta = 60.0 # Exigencia superior al 60%
+
+                            # 1. Moneyline Local
+                            ev_loc = (prob_comb_loc / 100.0) * cuota_loc - 1.0
+                            if prob_comb_loc >= umbral_apuesta and ev_loc > 0:
+                                kelly_pct = calcular_criterio_kelly(prob_comb_loc, cuota_loc)
                                 recomendaciones.append({
                                     "Partido": f"{datos_partido['visita']} @ {datos_partido['local']}",
                                     "Mercado": "Moneyline",
                                     "Apuesta": f"Gana Local ({datos_partido['local']})",
-                                    "Prob. Real": f"{prob_mc_loc}%",
+                                    "Prob. Real": f"{round(prob_comb_loc, 2)}%",
                                     "Cuota": cuota_loc,
                                     "EV+": f"{round(ev_loc*100, 2)}%",
                                     "Stake Kelly": f"{kelly_pct}%"
                                 })
                                 
-                            ev_vis = (prob_mc_vis / 100.0) * cuota_vis - 1.0
-                            if prob_mc_vis >= umbral_ml and ev_vis > 0:
-                                kelly_pct = calcular_criterio_kelly(prob_mc_vis, cuota_vis)
+                            # 2. Moneyline Visita
+                            ev_vis = (prob_comb_vis / 100.0) * cuota_vis - 1.0
+                            if prob_comb_vis >= umbral_apuesta and ev_vis > 0:
+                                kelly_pct = calcular_criterio_kelly(prob_comb_vis, cuota_vis)
                                 recomendaciones.append({
                                     "Partido": f"{datos_partido['visita']} @ {datos_partido['local']}",
                                     "Mercado": "Moneyline",
                                     "Apuesta": f"Gana Visita ({datos_partido['visita']})",
-                                    "Prob. Real": f"{prob_mc_vis}%",
+                                    "Prob. Real": f"{round(prob_comb_vis, 2)}%",
                                     "Cuota": cuota_vis,
                                     "EV+": f"{round(ev_vis*100, 2)}%",
                                     "Stake Kelly": f"{kelly_pct}%"
                                 })
                             
+                            # 3. Totales (Over / Under)
                             carreras_dict = res_mc.get('Carreras', {})
                             prob_over = carreras_dict.get(f"Over {linea_casino}", 50.0)
                             cuota_ov = datos_partido.get("cuota_over")
-                            
-                            if cuota_ov:
+                            if cuota_ov is not None:
                                 ev_over = (prob_over / 100.0) * cuota_ov - 1.0
-                                if prob_over >= umbral_ou and ev_over > 0:
+                                if prob_over >= umbral_apuesta and ev_over > 0:
                                     recomendaciones.append({
                                         "Partido": f"{datos_partido['visita']} @ {datos_partido['local']}",
                                         "Mercado": "Totales",
@@ -374,9 +391,9 @@ else:
                             
                             prob_under = carreras_dict.get(f"Under {linea_casino}", 50.0)
                             cuota_un = datos_partido.get("cuota_under")
-                            if cuota_un:
+                            if cuota_un is not None:
                                 ev_under = (prob_under / 100.0) * cuota_un - 1.0
-                                if prob_under >= umbral_ou and ev_under > 0:
+                                if prob_under >= umbral_apuesta and ev_under > 0:
                                     recomendaciones.append({
                                         "Partido": f"{datos_partido['visita']} @ {datos_partido['local']}",
                                         "Mercado": "Totales",
@@ -387,6 +404,41 @@ else:
                                         "Stake Kelly": f"{calcular_criterio_kelly(prob_under, cuota_un)}%"
                                     })
 
+                            # 4. Hándicap (Spreads)
+                            spread_loc = datos_partido.get("spread_loc")
+                            cuota_sp_loc = datos_partido.get("cuota_spread_loc")
+                            if spread_loc is not None and cuota_sp_loc is not None:
+                                prob_sp_loc = prob_comb_loc * 0.95 if spread_loc < 0 else prob_comb_loc * 1.05
+                                prob_sp_loc = np.clip(prob_sp_loc, 1.0, 99.0)
+                                ev_sp_loc = (prob_sp_loc / 100.0) * cuota_sp_loc - 1.0
+                                if prob_sp_loc >= umbral_apuesta and ev_sp_loc > 0:
+                                    recomendaciones.append({
+                                        "Partido": f"{datos_partido['visita']} @ {datos_partido['local']}",
+                                        "Mercado": "Hándicap",
+                                        "Apuesta": f"Hándicap {spread_loc} ({datos_partido['local']})",
+                                        "Prob. Real": f"{round(prob_sp_loc, 2)}%",
+                                        "Cuota": cuota_sp_loc,
+                                        "EV+": f"{round(ev_sp_loc*100, 2)}%",
+                                        "Stake Kelly": f"{calcular_criterio_kelly(prob_sp_loc, cuota_sp_loc)}%"
+                                    })
+
+                            spread_vis = datos_partido.get("spread_vis")
+                            cuota_sp_vis = datos_partido.get("cuota_spread_vis")
+                            if spread_vis is not None and cuota_sp_vis is not None:
+                                prob_sp_vis = prob_comb_vis * 0.95 if spread_vis < 0 else prob_comb_vis * 1.05
+                                prob_sp_vis = np.clip(prob_sp_vis, 1.0, 99.0)
+                                ev_sp_vis = (prob_sp_vis / 100.0) * cuota_sp_vis - 1.0
+                                if prob_sp_vis >= umbral_apuesta and ev_sp_vis > 0:
+                                    recomendaciones.append({
+                                        "Partido": f"{datos_partido['visita']} @ {datos_partido['local']}",
+                                        "Mercado": "Hándicap",
+                                        "Apuesta": f"Hándicap {spread_vis} ({datos_partido['visita']})",
+                                        "Prob. Real": f"{round(prob_sp_vis, 2)}%",
+                                        "Cuota": cuota_sp_vis,
+                                        "EV+": f"{round(ev_sp_vis*100, 2)}%",
+                                        "Stake Kelly": f"{calcular_criterio_kelly(prob_sp_vis, cuota_sp_vis)}%"
+                                    })
+
                         except Exception as e:
                             continue
                     
@@ -394,7 +446,7 @@ else:
                         df_recom = pd.DataFrame(recomendaciones)
                         st.dataframe(df_recom, use_container_width=True, hide_index=True)
                     else:
-                        st.info("No se encontraron partidos con EV+ y ventaja matemática real hoy.")
+                        st.info("No se encontraron partidos con EV+ y más del 60% de probabilidad real hoy.")
         else:
             st.subheader("1. Cartelera Oficial Sincronizada")
             seleccion = st.selectbox("Selecciona un duelo:", list(partidos_hoy.keys()))
@@ -586,7 +638,6 @@ else:
                     spread_loc = cuotas_reales.get("Spread_Local")
                     cuota_sp_loc = cuotas_reales.get("Cuota_Spread_Local")
                     if spread_loc is not None and cuota_sp_loc is not None:
-                        # Aproximación probabilística base para spread común de béisbol (-1.5 / +1.5)
                         prob_spread_loc = prob_loc * 0.95 if spread_loc < 0 else prob_loc * 1.05
                         prob_spread_loc = np.clip(prob_spread_loc, 1.0, 99.0)
                         kelly_sp_loc = calcular_criterio_kelly(prob_spread_loc, cuota_sp_loc)
@@ -621,7 +672,7 @@ else:
                     m1, m2, m3 = st.columns(3)
                     m1.metric("Altitud del Parque", f"{altitud} ft")
                     m2.metric("Park Factor General", park_factor)
-                    m3.metric("Clima en Vivo", f"{temp}°F | Viento: {viento}mph")
+                    m3.metric("Clima in Vivo", f"{temp}°F | Viento: {viento}mph")
                     
                     st.markdown("### 🎲 Probabilidades Reales del Duelo")
                     c1, c2, c3, c4 = st.columns(4)
