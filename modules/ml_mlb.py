@@ -81,19 +81,33 @@ class PredictorMLMLB:
             
         return False
 
-    def predecir_partido(self, loc_abbr, vis_abbr, wrc_loc, wrc_vis, xfip_loc, xfip_vis, pf):
-    try:
-        # Preparamos los datos exactamente igual que en el entrenamiento
-        features = pd.DataFrame([[wrc_loc, wrc_vis, xfip_loc, xfip_vis, pf]], 
-                                columns=['wRC+_loc', 'wRC+_vis', 'xFIP_loc', 'xFIP_vis', 'PF'])
-        
-        # Obtenemos probabilidades (asegúrate de que sea predict_proba)
-        probs = self.model.predict_proba(features)[0]
-        
-        return {
-            'Probabilidad_Local': round(probs[1] * 100, 2),
-            'Probabilidad_Visita': round(probs[0] * 100, 2)
-        }
-    except Exception as e:
-        # Si falla, devolvemos un valor seguro pero notificamos
-        return {'Probabilidad_Local': 50.0, 'Probabilidad_Visita': 50.0}
+    def predecir_partido(self, loc_abbr, vis_abbr, wrc_loc, wrc_vis, xfip_loc, xfip_vis, pf=None):
+        try:
+            racha_loc = 2.5
+            racha_vis = 2.5
+            
+            if not self.df_games.empty:
+                juegos_loc = self.df_games[(self.df_games['Home'] == loc_abbr) | (self.df_games['Away'] == loc_abbr)].tail(5)
+                if not juegos_loc.empty:
+                    victorias_loc = sum((juegos_loc['Home'] == loc_abbr) & (juegos_loc['Home_Score'] > juegos_loc['Away_Score'])) + \
+                                    sum((juegos_loc['Away'] == loc_abbr) & (juegos_loc['Away_Score'] > juegos_loc['Home_Score']))
+                    racha_loc = victorias_loc
+                
+                juegos_vis = self.df_games[(self.df_games['Home'] == vis_abbr) | (self.df_games['Away'] == vis_abbr)].tail(5)
+                if not juegos_vis.empty:
+                    victorias_vis = sum((juegos_vis['Home'] == vis_abbr) & (juegos_vis['Home_Score'] > juegos_vis['Away_Score'])) + \
+                                    sum((juegos_vis['Away'] == vis_abbr) & (juegos_vis['Away_Score'] > juegos_vis['Home_Score']))
+                    racha_vis = victorias_vis
+
+            features = pd.DataFrame([[wrc_loc - wrc_vis, xfip_vis - xfip_loc, racha_loc, racha_vis]], 
+                                    columns=['Diff_wRC+', 'Diff_xFIP', 'Racha_Loc', 'Racha_Vis'])
+            
+            probs = self.modelo_ganador.predict_proba(features)[0]
+            
+            return {
+                'Probabilidad_Local': round(probs[1] * 100, 2),
+                'Probabilidad_Visita': round(probs[0] * 100, 2)
+            }
+        except Exception as e:
+            print(f"Error en predicción ML: {e}")
+            return {'Probabilidad_Local': 50.0, 'Probabilidad_Visita': 50.0}
