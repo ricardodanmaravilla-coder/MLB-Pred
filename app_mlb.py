@@ -161,7 +161,7 @@ def obtener_cartelera_y_cuotas_automaticas():
     except Exception as e:
         st.error(f"Error en MLB StatsAPI: {e}")
 
-    if ODDS_API_KEY != "TU_API_KEY_AQUI":
+    if ODDS_API_KEY != "4725b4a69b90b1310a23134c58f3de9c":
         url_odds = f"https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/?apiKey={ODDS_API_KEY}&regions=us&markets=h2h,totals&oddsFormat=american"
         try:
             res_odds = requests.get(url_odds, timeout=5)
