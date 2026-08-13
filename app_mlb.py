@@ -299,7 +299,7 @@ else:
 
                             if park_data.empty:
                                 nombre_ciudad = datos_partido["local"].split()[-1]
-                                park_data = df_parks[df_parks.astype(str).str.contains(nombre_ciudad, case=False).any(axis=1)]
+                                park_data = df_parks[df_parks.apply(lambda row: row.astype(str).str.contains(nombre_ciudad, case=False).any(), axis=1)]
 
                             if park_data.empty: continue
 
@@ -483,7 +483,7 @@ else:
 
                     if park_data.empty:
                         nombre_ciudad = datos_partido["local"].split()[-1]
-                        park_data = df_parks[df_parks.astype(str).str.contains(nombre_ciudad, case=False).any(axis=1)]
+                        park_data = df_parks[df_parks.apply(lambda row: row.astype(str).str.contains(nombre_ciudad, case=False).any(), axis=1)]
 
                     if park_data.empty:
                         st.error(f"❌ Error de integridad: No se encontró ningún registro real para el equipo '{datos_partido['local']}' ({loc_abbr}) en 'mlb_park_factors.csv'. Verifica tu archivo de estadios.")
