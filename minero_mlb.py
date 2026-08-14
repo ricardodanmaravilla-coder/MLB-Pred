@@ -151,27 +151,31 @@ def descargar_abridores_individuales():
     
     pitchers_data = []
     try:
-        # Recorremos los equipos actuales para extraer los pitchers directamente de su roster activo
         equipos = statsapi.get('teams', {'season': 2026, 'sportId': 1})['teams']
         for equipo in equipos:
             team_id = equipo['id']
             team_abbr = equipo.get('abbreviation', 'UNK')
             
             try:
-                roster = statsapi.get('team_roster', {'teamId': team_id, 'rosterType': 'active'})['roster']
+                roster_data = statsapi.get('team_roster', {'teamId': team_id, 'rosterType': 'active'})
+                roster = roster_data.get('roster', [])
                 for miembro in roster:
                     posicion = miembro.get('position', {}).get('abbreviation', '')
-                    # Filtramos exclusivamente posiciones de lanzador (Pitcher)
+                    # Filtramos exclusivamente lanzadores (Pitcher)
                     if posicion == 'P':
-                        jugador = miembro.get('person', {})
-                        pitchers_data.append({
-                            'Name': jugador.get('fullName'),
-                            'Team': team_abbr,
-                            'ERA': 4.00,  # Valor base estándar para simulador de Montecarlo
-                            'xFIP': 4.00,
-                            'GS': 1
-                        })
-            except:
+                        # La API de MLB entrega la info del jugador bajo la llave 'player'
+                        jugador = miembro.get('player', {})
+                        nombre_completo = jugador.get('fullName')
+                        
+                        if nombre_completo:
+                            pitchers_data.append({
+                                'Name': nombre_completo,
+                                'Team': team_abbr,
+                                'ERA': 4.00,  # Valor estándar de respaldo para Montecarlo
+                                'xFIP': 4.00,
+                                'GS': 1
+                            })
+            except Exception as e:
                 continue
             time.sleep(0.2)
             
@@ -180,7 +184,6 @@ def descargar_abridores_individuales():
         if not df_pitchers.empty:
             df_pitchers = df_pitchers.drop_duplicates(subset=['Name'], keep='first')
             
-            # Fusionar manteniendo los datos globales de equipos y agregando la lista limpia de pitchers
             if os.path.exists(ruta_archivo):
                 df_equipos = pd.read_csv(ruta_archivo)
                 df_fusion = pd.concat([df_equipos, df_pitchers], ignore_index=True)
