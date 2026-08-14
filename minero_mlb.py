@@ -131,40 +131,43 @@ def extraer_historico_juegos():
         df_juegos.to_csv("data/mlb_games.csv", index=False)
         print(f"✅ Historial guardado: {len(df_juegos)} partidos en data/mlb_games.csv")
 
-def descargar_abridores_individuales():
-    print("DEBUG: Iniciando descargar_abridores_individuales...")
-    os.makedirs("data", exist_ok=True)
-    ruta_archivo = "data/mlb_pitching_individual.csv"
+print("--- INICIANDO SCRIPT DE MINERÍA ---")
+print(f"Directorio actual: {os.getcwd()}")
+os.makedirs("data", exist_ok=True)
+
+def descargar_abridores_forzado():
+    print("Iniciando descarga forzada...")
+    # Prueba de vida de la librería
+    print(f"Statsapi version: {statsapi.__version__}")
     
-    # FORZAR CONSULTA: No dependas de la fecha de hoy si el servidor está en UTC
-    # Buscaremos los pitchers de los equipos de 2026 directamente
+    # Lista de equipos
+    equipos = statsapi.get('teams', {'season': 2026, 'sportId': 1})['teams']
+    print(f"Se encontraron {len(equipos)} equipos.")
+    
+    todos_los_pitchers = []
+    
+    for equipo in equipos:
+        tid = equipo['id']
+        print(f"Procesando equipo: {equipo['name']}")
+        roster_data = statsapi.get('team_roster', {'teamId': tid, 'rosterType': 'active'})
+        roster = roster_data.get('roster', [])
+        
+        for m in roster:
+            if m.get('position', {}).get('abbreviation') == 'P':
+                nombre = m.get('player', {}).get('fullName')
+                if nombre:
+                    todos_los_pitchers.append({'Name': nombre, 'Team': equipo['abbreviation'], 'ERA': 4.0, 'xFIP': 4.0, 'GS': 1})
+    
+    df = pd.DataFrame(todos_los_pitchers)
+    print(f"DataFrame tiene {len(df)} registros.")
+    df.to_csv("data/mlb_pitching_individual.csv", index=False)
+    print("Archivo guardado en data/mlb_pitching_individual.csv")
+
+if __name__ == "__main__":
     try:
-        print("DEBUG: Consultando equipos 2026...")
-        equipos = statsapi.get('teams', {'season': 2026, 'sportId': 1})['teams']
-        print(f"DEBUG: Se encontraron {len(equipos)} equipos.")
-        
-        pitchers_data = []
-        for equipo in equipos:
-            tid = equipo['id']
-            # Consultar roster directamente
-            roster = statsapi.get('team_roster', {'teamId': tid, 'rosterType': 'active'}).get('roster', [])
-            for m in roster:
-                if m.get('position', {}).get('abbreviation') == 'P':
-                    jugador = m.get('player', {})
-                    if jugador.get('fullName'):
-                        pitchers_data.append({
-                            'Name': jugador.get('fullName'),
-                            'Team': equipo.get('abbreviation'),
-                            'ERA': 3.50, # Valor temporal, lo ajustaremos
-                            'xFIP': 3.50,
-                            'GS': 1
-                        })
-        
-        df = pd.DataFrame(pitchers_data)
-        print(f"DEBUG: Dataframe creado con {len(df)} filas.")
-        df.to_csv(ruta_archivo, index=False)
-        print(f"DEBUG: Archivo guardado en {os.path.abspath(ruta_archivo)}")
-        
+        descargar_abridores_forzado()
+        print("--- FINALIZADO CON ÉXITO ---")
     except Exception as e:
-        print(f"DEBUG CRÍTICO: {str(e)}")
-        raise e # Esto hará que GitHub Actions marque "Error" en lugar de "Finalizado"
+        print(f"--- ERROR CRÍTICO ---")
+        print(e)
+        sys.exit(1) # Esto forzará que GitHub marque Error
