@@ -2,6 +2,7 @@ import os
 import time
 import pandas as pd
 import statsapi
+from pybaseball import pitching_stats  # <--- Importación agregada para los abridores
 
 TEMPORADAS = [2020, 2021, 2022, 2023, 2024, 2025, 2026]
 
@@ -154,8 +155,37 @@ def extraer_historico_juegos():
     else:
         print("⚠️ NO se obtuvieron los juegos históricos.")
 
+# <--- NUEVA FUNCIÓN AGREGADA AQUÍ --->
+def descargar_abridores_individuales():
+    print("⚾ [INICIO] Extrayendo Sabermetría Individual de Pitchers (FanGraphs)...")
+    os.makedirs("data", exist_ok=True)
+    
+    try:
+        # Extraer lanzadores desde 2024 hasta 2026
+        print("📊 Consultando servidores de FanGraphs. Esto puede tardar un par de minutos...")
+        df_pitchers = pitching_stats(2024, 2026, qual=20)
+        
+        # Filtrar solo las columnas que consume tu app
+        cols_necesarias = ['Name', 'Team', 'ERA', 'xFIP', 'GS']
+        df_final = df_pitchers[cols_necesarias].copy()
+        
+        # Filtrar a los que son abridores
+        df_abridores = df_final[df_final['GS'] > 0].copy()
+        
+        # Eliminar duplicados
+        df_abridores = df_abridores.drop_duplicates(subset=['Name'], keep='first')
+        
+        # Sobreescribir el archivo de pitcheo con la info de abridores reales
+        ruta_archivo = "data/mlb_pitching.csv"
+        df_abridores.to_csv(ruta_archivo, index=False)
+        print(f"✅ [ÉXITO] Archivo '{ruta_archivo}' guardado/sobreescrito con {len(df_abridores)} abridores reales.")
+        
+    except Exception as e:
+        print(f"❌ Error crítico al descargar datos de FanGraphs: {e}")
+
 if __name__ == "__main__":
     extraer_estadisticas_oficiales_mlb()
     generar_park_factors()
-    extraer_historico_juegos()  # <--- Agregamos la nueva función al flujo principal
+    extraer_historico_juegos()  
+    descargar_abridores_individuales() # <--- Llamada a la nueva función
     print("🎯 ¡Minería de datos MLB completada con éxito y sin bloqueos!")
