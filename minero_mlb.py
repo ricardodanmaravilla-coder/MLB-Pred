@@ -63,19 +63,19 @@ def extraer_estadisticas_oficiales_mlb():
         df_pitcheo.to_csv("data/mlb_pitching.csv", index=False)
         print(f"✅ Pitcheo guardado exitosamente.")
 
-def generar_park_factors():
-    print("🏟️ Generando base de datos de Estadios (Park Factors & Altitud)...")
-    estadios = {
-        "Team": ["COL", "CIN", "BOS", "LAA", "NYY", "ATL", "LAD", "HOU", "SD", "SF", "SEA"],
-        "Estadio": ["Coors Field", "Great American", "Fenway Park", "Angel Stadium", "Yankee Stadium", 
-                    "Truist Park", "Dodger Stadium", "Minute Maid", "Petco Park", "Oracle Park", "T-Mobile Park"],
-        "Altitud_pies": [5200, 683, 15, 160, 54, 978, 267, 40, 13, 15, 10],
-        "Park_Factor_General": [114, 107, 106, 103, 102, 101, 100, 99, 95, 94, 91],
-        "Park_Factor_HR": [115, 128, 96, 114, 117, 105, 108, 97, 98, 86, 92] 
-    }
-    df_park = pd.DataFrame(estadios)
-    df_park.to_csv("data/mlb_park_factors.csv", index=False)
-    print(f"✅ Park Factors guardados en data/mlb_park_factors.csv")
+#def generar_park_factors():
+ #   print("🏟️ Generando base de datos de Estadios (Park Factors & Altitud)...")
+  #  estadios = {
+   #     "Team": ["COL", "CIN", "BOS", "LAA", "NYY", "ATL", "LAD", "HOU", "SD", "SF", "SEA"],
+    #    "Estadio": ["Coors Field", "Great American", "Fenway Park", "Angel Stadium", "Yankee Stadium", 
+     #               "Truist Park", "Dodger Stadium", "Minute Maid", "Petco Park", "Oracle Park", "T-Mobile Park"],
+      #  "Altitud_pies": [5200, 683, 15, 160, 54, 978, 267, 40, 13, 15, 10],
+       # "Park_Factor_General": [114, 107, 106, 103, 102, 101, 100, 99, 95, 94, 91],
+        #"Park_Factor_HR": [115, 128, 96, 114, 117, 105, 108, 97, 98, 86, 92] 
+    #}
+    #df_park = pd.DataFrame(estadios)
+    #df_park.to_csv("data/mlb_park_factors.csv", index=False)
+    #print(f"✅ Park Factors guardados en data/mlb_park_factors.csv")
 
 def extraer_historico_juegos():
     """
