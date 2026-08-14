@@ -131,26 +131,32 @@ def extraer_historico_juegos():
         df_juegos.to_csv("data/mlb_games.csv", index=False)
         print(f"✅ Historial guardado: {len(df_juegos)} partidos en data/mlb_games.csv")
 
-def descargar_abridores_individuales():
-    print("⚾ [INICIO] Extrayendo Abridores Activos...")
+def descargar_abridores_reales():
+    print("⚾ [INICIO] Extrayendo estadísticas reales desde FanGraphs...")
     os.makedirs("data", exist_ok=True)
-    pitchers_data = []
+    
     try:
-        equipos = statsapi.get('teams', {'season': 2026, 'sportId': 1})['teams']
-        for equipo in equipos:
-            roster = statsapi.get('team_roster', {'teamId': equipo['id'], 'rosterType': 'active'})['roster']
-            for m in roster:
-                if m.get('position', {}).get('abbreviation') == 'P':
-                    jugador = m.get('player', {})
-                    if jugador.get('fullName'):
-                        pitchers_data.append({'Name': jugador.get('fullName'), 'Team': equipo.get('abbreviation'), 'ERA': 4.00, 'xFIP': 4.00, 'GS': 1})
-        pd.DataFrame(pitchers_data).to_csv("data/mlb_pitching_individual.csv", index=False)
-        print(f"✅ Guardados {len(pitchers_data)} nombres en mlb_pitching_individual.csv")
-    except Exception as e: print(f"❌ Error: {e}")
+        # Aumentamos la calidad (qual=5) para obtener pitchers con al menos 5 entradas lanzadas
+        # pybaseball maneja internamente las cabeceras para evitar bloqueos
+        print("📊 Conectando con bases de datos de sabermetría real (FanGraphs)...")
+        
+        # Obtenemos stats de la temporada 2026
+        df = pitching_stats(2026, qual=5)
+        
+        # Filtramos solo las columnas que necesitas y que NO son ficticias
+        # 'ERA' y 'xFIP' son datos reales calculados por FanGraphs
+        df_real = df[['Name', 'Team', 'ERA', 'xFIP', 'GS']].copy()
+        
+        # Filtramos solo abridores (GS > 0)
+        df_abridores = df_real[df_real['GS'] > 0].copy()
+        
+        # Guardar en archivo dedicado
+        df_abridores.to_csv("data/mlb_pitching_individual.csv", index=False)
+        print(f"✅ [ÉXITO] Se han registrado {len(df_abridores)} abridores con datos REALES.")
+        
+    except Exception as e:
+        print(f"❌ Error al conectar con FanGraphs: {e}")
+        print("💡 Nota: Asegúrate de tener conexión a internet estable.")
 
 if __name__ == "__main__":
-    extraer_estadisticas_oficiales_mlb()
-    generar_park_factors()
-    extraer_historico_juegos()
-    descargar_abridores_individuales()
-    print("🎯 ¡Minería de datos MLB completada con éxito y sin bloqueos!")
+    descargar_abridores_reales()
