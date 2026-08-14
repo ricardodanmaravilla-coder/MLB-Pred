@@ -56,6 +56,7 @@ def calcular_criterio_kelly(probabilidad_real, cuota_decimal, fraccion=0.25):
 def cargar_datos_historicos():
     bateo = pd.DataFrame()
     pitcheo = pd.DataFrame()
+    pitcheo_individual = pd.DataFrame()
     park = pd.DataFrame()
     games = pd.DataFrame()
 
@@ -75,6 +76,15 @@ def cargar_datos_historicos():
                 df_temp['ERA'] = pd.to_numeric(df_temp['ERA'], errors='coerce')
                 pitcheo = df_temp.dropna(subset=['xFIP', 'ERA'])
 
+        # Carga del nuevo archivo dedicado de abridores individuales con nombres reales
+        if os.path.exists("data/mlb_pitching_individual.csv"):
+            df_temp = pd.read_csv("data/mlb_pitching_individual.csv", sep=None, engine='python', on_bad_lines='skip')
+            df_temp.columns = df_temp.columns.str.strip()
+            if not df_temp.empty and 'Name' in df_temp.columns:
+                df_temp['xFIP'] = pd.to_numeric(df_temp['xFIP'], errors='coerce')
+                df_temp['ERA'] = pd.to_numeric(df_temp['ERA'], errors='coerce')
+                pitcheo_individual = df_temp.dropna(subset=['Name', 'xFIP'])
+
         if os.path.exists("data/mlb_park_factors.csv"): 
             df_temp = pd.read_csv("data/mlb_park_factors.csv", sep=None, engine='python', on_bad_lines='skip')
             df_temp.columns = df_temp.columns.str.strip()
@@ -90,9 +100,9 @@ def cargar_datos_historicos():
     except Exception as e:
         st.warning(f"Aviso menor de lectura de archivos: {e}")
         
-    return bateo, pitcheo, park, games
+    return bateo, pitcheo, pitcheo_individual, park, games
 
-df_bat, df_pit, df_parks, df_games = cargar_datos_historicos()
+df_bat, df_pit, df_pit_ind, df_parks, df_games = cargar_datos_historicos()
 
 # Inicializar y entrenar el modelo de Machine Learning de manera transparente
 predictor_ml = PredictorMLMLB()
@@ -264,16 +274,11 @@ else:
                             wrc_loc = float(df_bat[df_bat['Team'] == loc_abbr]['wRC+'].mean())
                             wrc_vis = float(df_bat[df_bat['Team'] == vis_abbr]['wRC+'].mean())
                             
-                            col_nombre_pitcher = 'Name'
-                            for posible_col in ['Name', 'PlayerName', 'jugador', 'pitcher']:
-                                if posible_col in df_pit.columns:
-                                    col_nombre_pitcher = posible_col
-                                    break
-
+                            # Lectura de xFIP del pitcher local (Plan A: Individual, Plan B: Equipo)
                             pitcher_loc_nombre = datos_partido["pitcher_local"]
                             xfip_loc = None
-                            if pitcher_loc_nombre != "Por Anunciar" and col_nombre_pitcher in df_pit.columns:
-                                match_loc = df_pit[df_pit[col_nombre_pitcher].str.contains(pitcher_loc_nombre.split()[-1], case=False, na=False)]
+                            if pitcher_loc_nombre != "Por Anunciar" and not df_pit_ind.empty:
+                                match_loc = df_pit_ind[df_pit_ind['Name'].str.contains(pitcher_loc_nombre.split()[-1], case=False, na=False)]
                                 if not match_loc.empty:
                                     xfip_loc = float(match_loc['xFIP'].values[0])
                             
@@ -282,10 +287,11 @@ else:
                                 if team_pit_loc.empty: continue
                                 xfip_loc = float(team_pit_loc['xFIP'].mean())
 
+                            # Lectura de xFIP del pitcher visitante (Plan A: Individual, Plan B: Equipo)
                             pitcher_vis_nombre = datos_partido["pitcher_visita"]
                             xfip_vis = None
-                            if pitcher_vis_nombre != "Por Anunciar" and col_nombre_pitcher in df_pit.columns:
-                                match_vis = df_pit[df_pit[col_nombre_pitcher].str.contains(pitcher_vis_nombre.split()[-1], case=False, na=False)]
+                            if pitcher_vis_nombre != "Por Anunciar" and not df_pit_ind.empty:
+                                match_vis = df_pit_ind[df_pit_ind['Name'].str.contains(pitcher_vis_nombre.split()[-1], case=False, na=False)]
                                 if not match_vis.empty:
                                     xfip_vis = float(match_vis['xFIP'].values[0])
                             
@@ -371,7 +377,7 @@ else:
                                     "EV+": f"{round(ev_vis*100, 2)}%",
                                     "Stake Kelly": f"{kelly_pct}%"
                                 })
-                            
+                                
                             # 3. Totales (Over / Under)
                             carreras_dict = res_mc.get('Carreras', {})
                             prob_over = carreras_dict.get(f"Over {linea_casino}", 50.0)
@@ -388,7 +394,7 @@ else:
                                         "EV+": f"{round(ev_over*100, 2)}%",
                                         "Stake Kelly": f"{calcular_criterio_kelly(prob_over, cuota_ov)}%"
                                     })
-                            
+                                
                             prob_under = carreras_dict.get(f"Under {linea_casino}", 50.0)
                             cuota_un = datos_partido.get("cuota_under")
                             if cuota_un is not None:
@@ -488,16 +494,11 @@ else:
                         st.error(f"Error procesando wRC+ de bateo: {e}")
                         st.stop()
                     
-                    col_nombre_pitcher = 'Name'
-                    for posible_col in ['Name', 'PlayerName', 'jugador', 'pitcher']:
-                        if posible_col in df_pit.columns:
-                            col_nombre_pitcher = posible_col
-                            break
-
+                    # Búsqueda individual de abridor local (Plan A: Individual, Plan B: Equipo)
                     pitcher_loc_nombre = datos_partido["pitcher_local"]
                     xfip_loc = None
-                    if pitcher_loc_nombre != "Por Anunciar" and col_nombre_pitcher in df_pit.columns:
-                        match_loc = df_pit[df_pit[col_nombre_pitcher].str.contains(pitcher_loc_nombre.split()[-1], case=False, na=False)]
+                    if pitcher_loc_nombre != "Por Anunciar" and not df_pit_ind.empty:
+                        match_loc = df_pit_ind[df_pit_ind['Name'].str.contains(pitcher_loc_nombre.split()[-1], case=False, na=False)]
                         if not match_loc.empty:
                             xfip_loc = float(match_loc['xFIP'].values[0])
                     
@@ -508,10 +509,11 @@ else:
                             st.stop()
                         xfip_loc = float(team_pit_loc['xFIP'].mean())
 
+                    # Búsqueda individual de abridor visitante (Plan A: Individual, Plan B: Equipo)
                     pitcher_vis_nombre = datos_partido["pitcher_visita"]
                     xfip_vis = None
-                    if pitcher_vis_nombre != "Por Anunciar" and col_nombre_pitcher in df_pit.columns:
-                        match_vis = df_pit[df_pit[col_nombre_pitcher].str.contains(pitcher_vis_nombre.split()[-1], case=False, na=False)]
+                    if pitcher_vis_nombre != "Por Anunciar" and not df_pit_ind.empty:
+                        match_vis = df_pit_ind[df_pit_ind['Name'].str.contains(pitcher_vis_nombre.split()[-1], case=False, na=False)]
                         if not match_vis.empty:
                             xfip_vis = float(match_vis['xFIP'].values[0])
                     
