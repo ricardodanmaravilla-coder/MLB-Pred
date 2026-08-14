@@ -2,9 +2,9 @@ name: Actualizar Sabermetria MLB (Minero)
 
 on:
   schedule:
-    # Se ejecuta todos los días a las 11:00 AM UTC (Madrugada/Mañana en América, ideal para tener los datos de ayer procesados)
+    # Se ejecuta todos los días a las 11:00 AM UTC
     - cron: '0 11 * * *'
-  workflow_dispatch: # Permite ejecutarlo manualmente con un clic en la pestaña "Actions"
+  workflow_dispatch: # Permite ejecutarlo manualmente con un clic
 
 permissions:
   contents: write
@@ -25,10 +25,7 @@ jobs:
     - name: 📦 Instalar dependencias
       run: |
         python -m pip install --upgrade pip
-        pip install pandas requests lxml
-        pip install git+https://github.com/jldbc/pybaseball.git |
-        python -m pip install --upgrade pip
-        pip install pandas requests MLB-StatsAPI
+        pip install pandas requests lxml MLB-StatsAPI pybaseball
 
     - name: ⛏️ Ejecutar Minero MLB
       run: |
@@ -43,5 +40,4 @@ jobs:
       run: |
         git status
         git add data/*.csv
-        # Verifica si hay cambios. Si los hay, hace commit, sincroniza la rama y sube.
         git diff --quiet && git diff --staged --quiet || (git commit -m "🤖 Actualización diaria de Sabermetría y Park Factors MLB" && git pull --rebase origin main && git push origin main)
