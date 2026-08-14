@@ -136,38 +136,37 @@ print(f"Directorio actual: {os.getcwd()}")
 os.makedirs("data", exist_ok=True)
 
 def descargar_abridores_forzado():
-    print("Iniciando descarga forzada...")
-    # Prueba de vida de la librería
-    print(f"Statsapi version: {statsapi.__version__}")
+    print("Iniciando descarga forzada (Modo Global)...")
+    os.makedirs("data", exist_ok=True)
     
-    # Lista de equipos
-    equipos = statsapi.get('teams', {'season': 2026, 'sportId': 1})['teams']
-    print(f"Se encontraron {len(equipos)} equipos.")
+    # En lugar de ir equipo por equipo, pedimos la lista de todos los jugadores activos
+    # Esto evita problemas con rosters de equipos individuales
+    print("Consultando lista global de jugadores activos...")
+    all_players = statsapi.get('sports_players', {'sportId': 1, 'season': 2026})
     
-    todos_los_pitchers = []
+    pitchers_data = []
+    people = all_players.get('people', [])
+    print(f"Total de personas encontradas: {len(people)}")
     
-    for equipo in equipos:
-        tid = equipo['id']
-        print(f"Procesando equipo: {equipo['name']}")
-        roster_data = statsapi.get('team_roster', {'teamId': tid, 'rosterType': 'active'})
-        roster = roster_data.get('roster', [])
-        
-        for m in roster:
-            if m.get('position', {}).get('abbreviation') == 'P':
-                nombre = m.get('player', {}).get('fullName')
-                if nombre:
-                    todos_los_pitchers.append({'Name': nombre, 'Team': equipo['abbreviation'], 'ERA': 4.0, 'xFIP': 4.0, 'GS': 1})
+    for p in people:
+        # Buscamos la posición primaria
+        pos = p.get('primaryPosition', {}).get('abbreviation')
+        if pos == 'P':
+            # Guardamos
+            pitchers_data.append({
+                'Name': p.get('fullName'),
+                'Team': p.get('currentTeam', {}).get('abbreviation', 'UNK'),
+                'ERA': 4.0, 
+                'xFIP': 4.0, 
+                'GS': 1
+            })
     
-    df = pd.DataFrame(todos_los_pitchers)
-    print(f"DataFrame tiene {len(df)} registros.")
-    df.to_csv("data/mlb_pitching_individual.csv", index=False)
-    print("Archivo guardado en data/mlb_pitching_individual.csv")
-
-if __name__ == "__main__":
-    try:
-        descargar_abridores_forzado()
-        print("--- FINALIZADO CON ÉXITO ---")
-    except Exception as e:
-        print(f"--- ERROR CRÍTICO ---")
-        print(e)
-        sys.exit(1) # Esto forzará que GitHub marque Error
+    df = pd.DataFrame(pitchers_data)
+    print(f"DataFrame tiene {len(df)} registros encontrados globalmente.")
+    
+    if len(df) > 0:
+        df.to_csv("data/mlb_pitching_individual.csv", index=False)
+        print("Archivo guardado con éxito.")
+    else:
+        print("ERROR: No se pudieron extraer datos de la lista global.")
+        sys.exit(1)
