@@ -2,7 +2,7 @@ import os
 import time
 import pandas as pd
 import statsapi
-from pybaseball import pitching_stats  # <--- Importación agregada para los abridores
+from pybaseball import pitching_stats
 
 TEMPORADAS = [2020, 2021, 2022, 2023, 2024, 2025, 2026]
 
@@ -36,7 +36,7 @@ def extraer_estadisticas_oficiales_mlb():
                         stat_dict['wRC+'] = float(ops_val) * 100 if ops_val else 70.0
                         bateo_data.append(stat_dict)
                 
-                # Pitcheo
+                # Pitcheo (Datos de Equipo / Bullpen)
                 stats_pit = statsapi.get('team_stats', {'teamId': team_id, 'season': year, 'group': 'pitching', 'stats': 'season'})
                 if stats_pit and 'stats' in stats_pit and stats_pit['stats']:
                     splits = stats_pit['stats'][0].get('splits', [])
@@ -62,13 +62,12 @@ def extraer_estadisticas_oficiales_mlb():
         
     if not df_pitcheo.empty:
         df_pitcheo.to_csv("data/mlb_pitching.csv", index=False)
-        print(f"✅ Pitcheo guardado exitosamente.")
+        print(f"✅ Pitcheo (Equipos) guardado exitosamente.")
 
 def generar_park_factors():
     import os
     import pandas as pd
     os.makedirs("data", exist_ok=True)
-    # Lista base de estadios reales con sus factores
     datos_parks = [
         {"Team": "COL", "Estadio": "Coors Field", "Altitud": 5200, "Park_Factor": 114, "Park_Factor_HR": 115},
         {"Team": "CIN", "Estadio": "Great American Ball Park", "Altitud": 683, "Park_Factor": 107, "Park_Factor_HR": 128},
@@ -106,14 +105,9 @@ def generar_park_factors():
     print("✅ Archivo mlb_park_factors.csv generado exitosamente.")
 
 def extraer_historico_juegos():
-    """
-    Descarga el registro partido a partido.
-    Se hace en bloques de meses para evitar el error 503 (Timeout) del servidor de la MLB.
-    """
     print("🗓️ Descargando historial de juegos (Resultados por partido)...")
     juegos_data = []
     
-    # Dividimos el año en 5 bloques para no saturar al servidor
     bloques_meses = [
         ("01/01", "03/31"),
         ("04/01", "05/31"),
@@ -141,51 +135,51 @@ def extraer_historico_juegos():
                             'Innings': game.get('current_inning', 9),
                             'Venue': game.get('venue_name', 'Unknown')
                         })
-                # Pequeña pausa para ser amigables con el servidor
                 time.sleep(0.3)
             except Exception as e:
                 print(f"❌ Error descargando juegos de {inicio} a {fin} en {year}: {e}")
     
     df_juegos = pd.DataFrame(juegos_data)
     if not df_juegos.empty:
-        # Eliminamos posibles duplicados por seguridad
         df_juegos = df_juegos.drop_duplicates(subset=['GameID'])
         df_juegos.to_csv("data/mlb_games.csv", index=False)
         print(f"✅ Historial guardado: {len(df_juegos)} partidos en data/mlb_games.csv")
-    else:
-        print("⚠️ NO se obtuvieron los juegos históricos.")
 
-# <--- NUEVA FUNCIÓN AGREGADA AQUÍ --->
 def descargar_abridores_individuales():
     print("⚾ [INICIO] Extrayendo Sabermetría Individual de Pitchers (FanGraphs)...")
     os.makedirs("data", exist_ok=True)
+    ruta_archivo = "data/mlb_pitching.csv"
     
     try:
-        # Extraer lanzadores desde 2024 hasta 2026
-        print("📊 Consultando servidores de FanGraphs. Esto puede tardar un par de minutos...")
-        df_pitchers = pitching_stats(2024, 2026, qual=20)
+        # Extraemos lanzadores desde 2024 para no sobrecargar el servidor y evitar bloqueos en GitHub
+        print("📊 Consultando servidores de FanGraphs. Esto puede tardar un poco...")
+        df_pitchers = pitching_stats(2024, 2026, qual=10)
         
-        # Filtrar solo las columnas que consume tu app
         cols_necesarias = ['Name', 'Team', 'ERA', 'xFIP', 'GS']
         df_final = df_pitchers[cols_necesarias].copy()
         
-        # Filtrar a los que son abridores
+        # Filtramos solo a los abridores reales
         df_abridores = df_final[df_final['GS'] > 0].copy()
-        
-        # Eliminar duplicados
         df_abridores = df_abridores.drop_duplicates(subset=['Name'], keep='first')
         
-        # Sobreescribir el archivo de pitcheo con la info de abridores reales
-        ruta_archivo = "data/mlb_pitching.csv"
-        df_abridores.to_csv(ruta_archivo, index=False)
-        print(f"✅ [ÉXITO] Archivo '{ruta_archivo}' guardado/sobreescrito con {len(df_abridores)} abridores reales.")
-        
+        # ⚠️ AQUÍ ESTÁ LA MAGIA: Fusionamos el archivo en lugar de borrarlo
+        if os.path.exists(ruta_archivo):
+            df_equipos = pd.read_csv(ruta_archivo)
+            # Juntamos los promedios globales de los equipos con los individuales de los abridores
+            df_fusion = pd.concat([df_equipos, df_abridores], ignore_index=True)
+            df_fusion.to_csv(ruta_archivo, index=False)
+            print(f"✅ [ÉXITO] Archivo actualizado. Contiene datos de equipos y de {len(df_abridores)} abridores individuales.")
+        else:
+            df_abridores.to_csv(ruta_archivo, index=False)
+            print(f"✅ [ÉXITO] Archivo creado solo con abridores.")
+            
     except Exception as e:
         print(f"❌ Error crítico al descargar datos de FanGraphs: {e}")
+        print("💡 Si estás en GitHub Actions, puede que FanGraphs haya rechazado la conexión.")
 
 if __name__ == "__main__":
     extraer_estadisticas_oficiales_mlb()
     generar_park_factors()
     extraer_historico_juegos()  
-    descargar_abridores_individuales() # <--- Llamada a la nueva función
-    print("🎯 ¡Minería de datos MLB completada con éxito y sin bloqueos!")
+    descargar_abridores_individuales() 
+    print("🎯 ¡Minería de datos MLB completada con éxito!")
