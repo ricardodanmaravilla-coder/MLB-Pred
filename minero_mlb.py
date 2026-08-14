@@ -132,46 +132,39 @@ def extraer_historico_juegos():
         print(f"✅ Historial guardado: {len(df_juegos)} partidos en data/mlb_games.csv")
 
 def descargar_abridores_individuales():
-    print("⚾ [INICIO] Extrayendo Abridores Activos vía Data Feed Real...")
+    print("DEBUG: Iniciando descargar_abridores_individuales...")
     os.makedirs("data", exist_ok=True)
     ruta_archivo = "data/mlb_pitching_individual.csv"
     
-    pitchers_data = []
-    # Obtenemos la lista de equipos activos
+    # FORZAR CONSULTA: No dependas de la fecha de hoy si el servidor está en UTC
+    # Buscaremos los pitchers de los equipos de 2026 directamente
     try:
-        # Obtenemos el calendario de hoy para ver quién lanza
-        hoy = datetime.date.today().strftime('%Y-%m-%d')
-        schedule = statsapi.schedule(start_date=hoy, end_date=hoy)
+        print("DEBUG: Consultando equipos 2026...")
+        equipos = statsapi.get('teams', {'season': 2026, 'sportId': 1})['teams']
+        print(f"DEBUG: Se encontraron {len(equipos)} equipos.")
         
-        for game in schedule:
-            game_id = game['game_id']
-            # Consultamos el "Live Feed" del juego, donde están las estadísticas REALES de los jugadores
-            feed = statsapi.get('game', {'gamePk': game_id})
-            boxscore = feed.get('liveData', {}).get('boxscore', {})
-            teams = ['home', 'away']
-            
-            for t in teams:
-                players = boxscore.get('teams', {}).get(t, {}).get('players', {})
-                for player_id, p_info in players.items():
-                    pos = p_info.get('position', {}).get('abbreviation')
-                    if pos == 'P':
-                        stats = p_info.get('stats', {}).get('pitching', {})
-                        # Solo tomamos pitchers que ya tienen stats reales este año
-                        if stats.get('era') and stats.get('era') != '-.--':
-                            pitchers_data.append({
-                                'Name': p_info.get('person', {}).get('fullName'),
-                                'Team': p_info.get('parentTeamId'), # Ajustaremos esto abajo
-                                'ERA': float(stats.get('era')),
-                                'xFIP': float(stats.get('era')), # Usamos ERA real como base
-                                'GS': stats.get('gamesStarted', 0)
-                            })
-                            
-        if pitchers_data:
-            df = pd.DataFrame(pitchers_data)
-            df.to_csv(ruta_archivo, index=False)
-            print(f"✅ [ÉXITO] Datos REALES de {len(df)} pitchers obtenidos desde Feed en Vivo.")
-        else:
-            print("⚠️ No se encontraron pitchers con stats activas hoy.")
-            
+        pitchers_data = []
+        for equipo in equipos:
+            tid = equipo['id']
+            # Consultar roster directamente
+            roster = statsapi.get('team_roster', {'teamId': tid, 'rosterType': 'active'}).get('roster', [])
+            for m in roster:
+                if m.get('position', {}).get('abbreviation') == 'P':
+                    jugador = m.get('player', {})
+                    if jugador.get('fullName'):
+                        pitchers_data.append({
+                            'Name': jugador.get('fullName'),
+                            'Team': equipo.get('abbreviation'),
+                            'ERA': 3.50, # Valor temporal, lo ajustaremos
+                            'xFIP': 3.50,
+                            'GS': 1
+                        })
+        
+        df = pd.DataFrame(pitchers_data)
+        print(f"DEBUG: Dataframe creado con {len(df)} filas.")
+        df.to_csv(ruta_archivo, index=False)
+        print(f"DEBUG: Archivo guardado en {os.path.abspath(ruta_archivo)}")
+        
     except Exception as e:
-        print(f"❌ Error en extracción real: {e}")
+        print(f"DEBUG CRÍTICO: {str(e)}")
+        raise e # Esto hará que GitHub Actions marque "Error" en lugar de "Finalizado"
