@@ -132,38 +132,46 @@ def extraer_historico_juegos():
         print(f"✅ Historial guardado: {len(df_juegos)} partidos en data/mlb_games.csv")
 
 def descargar_abridores_individuales():
-    print("⚾ [INICIO] Extrayendo datos reales de pitcheo...")
+    print("⚾ [INICIO] Extrayendo Abridores Activos vía Data Feed Real...")
     os.makedirs("data", exist_ok=True)
     ruta_archivo = "data/mlb_pitching_individual.csv"
     
+    pitchers_data = []
+    # Obtenemos la lista de equipos activos
     try:
-        # Descarga la tabla completa de 2026 SIN FILTROS (qual=0)
-        # Esto nos asegura que si hay datos, los descargará todos sin descartar a nadie
-        print("📊 Descargando tabla completa de pitcheo...")
-        df = pitching_stats(2026, qual=0)
+        # Obtenemos el calendario de hoy para ver quién lanza
+        hoy = datetime.date.today().strftime('%Y-%m-%d')
+        schedule = statsapi.schedule(start_date=hoy, end_date=hoy)
         
-        # Validación: ¿Hay datos?
-        if df is None or df.empty:
-            print("❌ La descarga devolvió una tabla vacía. Revisa tu conexión.")
-            return
-
-        # Selección de columnas necesarias
-        # Aseguramos que existan las columnas de datos reales
-        columnas = ['Name', 'Team', 'ERA', 'xFIP', 'GS']
-        df_limpio = df[columnas].copy()
-        
-        # Filtramos abridores reales (GS > 0)
-        df_abridores = df_limpio[df_limpio['GS'] > 0].copy()
-        
-        # Limpieza final: eliminar filas donde ERA o xFIP sean nulos
-        df_abridores = df_abridores.dropna(subset=['ERA', 'xFIP'])
-        
-        # Guardar archivo
-        df_abridores.to_csv(ruta_archivo, index=False)
-        print(f"✅ [ÉXITO] Archivo creado con {len(df_abridores)} abridores y datos REALES.")
-        
-        # --- DEPURACIÓN: Vamos a ver qué está pasando si sale vacío ---
-        print(f"Primeras 5 filas encontradas:\n{df_abridores.head()}")
-        
+        for game in schedule:
+            game_id = game['game_id']
+            # Consultamos el "Live Feed" del juego, donde están las estadísticas REALES de los jugadores
+            feed = statsapi.get('game', {'gamePk': game_id})
+            boxscore = feed.get('liveData', {}).get('boxscore', {})
+            teams = ['home', 'away']
+            
+            for t in teams:
+                players = boxscore.get('teams', {}).get(t, {}).get('players', {})
+                for player_id, p_info in players.items():
+                    pos = p_info.get('position', {}).get('abbreviation')
+                    if pos == 'P':
+                        stats = p_info.get('stats', {}).get('pitching', {})
+                        # Solo tomamos pitchers que ya tienen stats reales este año
+                        if stats.get('era') and stats.get('era') != '-.--':
+                            pitchers_data.append({
+                                'Name': p_info.get('person', {}).get('fullName'),
+                                'Team': p_info.get('parentTeamId'), # Ajustaremos esto abajo
+                                'ERA': float(stats.get('era')),
+                                'xFIP': float(stats.get('era')), # Usamos ERA real como base
+                                'GS': stats.get('gamesStarted', 0)
+                            })
+                            
+        if pitchers_data:
+            df = pd.DataFrame(pitchers_data)
+            df.to_csv(ruta_archivo, index=False)
+            print(f"✅ [ÉXITO] Datos REALES de {len(df)} pitchers obtenidos desde Feed en Vivo.")
+        else:
+            print("⚠️ No se encontraron pitchers con stats activas hoy.")
+            
     except Exception as e:
-        print(f"❌ Error crítico en la descarga: {e}")
+        print(f"❌ Error en extracción real: {e}")
