@@ -12,14 +12,12 @@ def minar_stats_pitchers():
     
     try:
         print("📥 Conectando con mlb.com (modo robusto)...")
-        # Usamos el encabezado para evitar bloqueos y pedimos las tablas
         dfs = pd.read_html(url, storage_options=headers)
         
-        # En lugar de asumir que es la primera tabla (dfs[0]), 
-        # buscamos la que tenga la columna 'Player' o similar
         df = None
-        for i, table in enumerate(dfs):
-            if 'Player' in table.columns or 'Name' in str(table.columns):
+        for table in dfs:
+            cols_str = str(table.columns)
+            if 'Player' in cols_str or 'Name' in cols_str:
                 df = table
                 break
         
@@ -27,29 +25,39 @@ def minar_stats_pitchers():
             print("❌ No se encontró la tabla de estadísticas. El sitio cambió su estructura.")
             return
 
-        # Limpieza inteligente: buscamos las columnas independientemente de cómo se llamen
-        # Esto evita el error de "None of [Index] are in the columns"
+        # Aplanar columnas multilínea si existen en pandas moderno
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = ['_'.join(str(c) for c in col if c) for col in df.columns]
+
         rename_map = {}
         for col in df.columns:
-            if 'Player' in str(col): rename_map[col] = 'Name'
-            if 'ERA' in str(col): rename_map[col] = 'ERA'
-            if 'IP' in str(col): rename_map[col] = 'Innings'
-            if 'GS' in str(col): rename_map[col] = 'GS'
+            col_s = str(col)
+            if 'Player' in col_s: rename_map[col] = 'Name'
+            elif 'ERA' in col_s: rename_map[col] = 'ERA'
+            elif 'IP' in col_s: rename_map[col] = 'Innings'
+            elif 'GS' in col_s: rename_map[col] = 'GS'
+            elif 'Team' in col_s: rename_map[col] = 'Team'
         
         df = df.rename(columns=rename_map)
         
-        # Filtrar columnas requeridas
-        if all(c in df.columns for c in ['Name', 'ERA', 'GS']):
-            df_abridores = df[df['GS'] > 0].copy()
-            df_abridores['xFIP'] = df_abridores['ERA'] # Valor real como base
+        if 'Name' in df.columns and 'ERA' in df.columns and 'GS' in df.columns:
+            df['GS'] = pd.to_numeric(df['GS'], errors='coerce').fillna(0)
+            df['ERA'] = pd.to_numeric(df['ERA'], errors='coerce')
             
-            df_abridores.to_csv("data/mlb_pitching_individual.csv", index=False)
-            print(f"✅ [ÉXITO] Archivo guardado con {len(df_abridores)} lanzadores.")
+            df_abridores = df[df['GS'] > 0].copy()
+            df_abridores['xFIP'] = df_abridores['ERA']
+            
+            if 'Team' not in df_abridores.columns:
+                df_abridores['Team'] = 'UNK'
+                
+            df_final = df_abridores[['Name', 'Team', 'ERA', 'xFIP', 'GS']].dropna(subset=['ERA'])
+            df_final.to_csv("data/mlb_pitching_individual.csv", index=False)
+            print(f"✅ [ÉXITO] Archivo guardado con {len(df_final)} lanzadores.")
         else:
             print(f"❌ Columnas detectadas: {df.columns.tolist()}")
             
     except Exception as e:
-        print(f"❌ Error en la descarga: {e}") descarga: {e}")
+        print(f"❌ Error en la descarga: {e}")
 
 if __name__ == "__main__":
     minar_stats_pitchers()
