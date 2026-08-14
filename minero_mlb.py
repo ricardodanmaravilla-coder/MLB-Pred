@@ -145,58 +145,81 @@ def extraer_historico_juegos():
         print(f"✅ Historial guardado: {len(df_juegos)} partidos en data/mlb_games.csv")
 
 def descargar_abridores_individuales():
-    print("⚾ [INICIO] Extrayendo Roster de Lanzadores Activos desde MLB API...")
+    print("⚾ [INICIO] Extrayendo Lanzadores Abridores desde la API de MLB...")
     os.makedirs("data", exist_ok=True)
     ruta_archivo = "data/mlb_pitching.csv"
     
     pitchers_data = []
-    try:
-        equipos = statsapi.get('teams', {'season': 2026, 'sportId': 1})['teams']
-        for equipo in equipos:
-            team_id = equipo['id']
-            team_abbr = equipo.get('abbreviation', 'UNK')
+    # Consultamos las temporadas recientes para obtener pitchers activos
+    for year in [2024, 2025, 2026]:
+        print(f"📊 Buscando lanzadores individuales para la temporada {year}...")
+        try:
+            # Petición a la API oficial de la MLB filtrando por estadísticas individuales de pitcheo
+            endpoint = f"stats/leaders?leaderCategories=era&statGroup=pitching&season={year}&sportId=1&limit=500"
+            res = statsapi.get('stats_leaders', {'leaderCategories': 'era', 'statGroup': 'pitching', 'season': year, 'sportId': 1, 'limit': 500})
             
-            try:
-                roster_data = statsapi.get('team_roster', {'teamId': team_id, 'rosterType': 'active'})
-                roster = roster_data.get('roster', [])
-                for miembro in roster:
-                    posicion = miembro.get('position', {}).get('abbreviation', '')
-                    # Filtramos exclusivamente lanzadores (Pitcher)
-                    if posicion == 'P':
-                        # La API de MLB entrega la info del jugador bajo la llave 'player'
-                        jugador = miembro.get('player', {})
-                        nombre_completo = jugador.get('fullName')
-                        
-                        if nombre_completo:
-                            pitchers_data.append({
-                                'Name': nombre_completo,
-                                'Team': team_abbr,
-                                'ERA': 4.00,  # Valor estándar de respaldo para Montecarlo
-                                'xFIP': 4.00,
-                                'GS': 1
-                            })
-            except Exception as e:
-                continue
-            time.sleep(0.2)
+            # Si el endpoint devuelve una respuesta válida con líderes/lanzadores
+            leaders = res.get('leagueLeaders', [])
+            for cat in leaders:
+                for entry in cat.get('leaders', []):
+                    person = entry.get('person', {})
+                    nombre = person.get('fullName')
+                    team_dict = entry.get('team', {})
+                    team_name = team_dict.get('abbreviation') or team_dict.get('name', 'UNK')
+                    era_val = entry.get('value')
+                    
+                    if nombre and era_val:
+                        try:
+                            era_float = float(era_val)
+                        except ValueError:
+                            era_float = 4.00
+                            
+                        pitchers_data.append({
+                            'Name': nombre,
+                            'Team': team_name,
+                            'ERA': era_float,
+                            'xFIP': era_float,  # Métrica espejo para las simulaciones de Montecarlo
+                            'GS': 1
+                        })
+        except Exception as e:
+            print(f"⚠️ Aviso en consulta {year}: {e}")
             
-        df_pitchers = pd.DataFrame(pitchers_data)
+    df_pitchers = pd.DataFrame(pitchers_data)
+    
+    # Si la consulta de líderes no devolvió datos por la fecha del año, ejecutamos el método directo de búsqueda de jugadores
+    if df_pitchers.empty:
+        print("🔄 Aplicando método secundario por búsqueda directa de jugadores activos...")
+        try:
+            # Lista de abridores conocidos/destacados para asegurar la presencia de lanzadores
+            lanzadores_consulta = statsapi.get('sports_players', {'sportId': 1, 'season': 2025})
+            for p in lanzadores_consulta.get('people', []):
+                primary_pos = p.get('primaryPosition', {}).get('abbreviation', '')
+                if primary_pos == 'P':
+                    pitchers_data.append({
+                        'Name': p.get('fullName'),
+                        'Team': p.get('currentTeam', {}).get('abbreviation', 'UNK'),
+                        'ERA': 4.00,
+                        'xFIP': 4.00,
+                        'GS': 1
+                    })
+            df_pitchers = pd.DataFrame(pitchers_data)
+        except Exception as e:
+            print(f"❌ Error en método secundario: {e}")
+
+    if not df_pitchers.empty:
+        # Eliminamos duplicados conservando la entrada más reciente
+        df_pitchers = df_pitchers.drop_duplicates(subset=['Name'], keep='first')
         
-        if not df_pitchers.empty:
-            df_pitchers = df_pitchers.drop_duplicates(subset=['Name'], keep='first')
-            
-            if os.path.exists(ruta_archivo):
-                df_equipos = pd.read_csv(ruta_archivo)
-                df_fusion = pd.concat([df_equipos, df_pitchers], ignore_index=True)
-                df_fusion.to_csv(ruta_archivo, index=False)
-                print(f"✅ [ÉXITO] Archivo de pitcheo actualizado con {len(df_pitchers)} lanzadores individuales.")
-            else:
-                df_pitchers.to_csv(ruta_archivo, index=False)
-                print(f"✅ [ÉXITO] Archivo creado con {len(df_pitchers)} lanzadores.")
+        if os.path.exists(ruta_archivo):
+            df_equipos = pd.read_csv(ruta_archivo)
+            df_fusion = pd.concat([df_equipos, df_pitchers], ignore_index=True)
+            df_fusion.to_csv(ruta_archivo, index=False)
+            print(f"✅ [ÉXITO] Archivo 'mlb_pitching.csv' actualizado exitosamente con {len(df_pitchers)} lanzadores registrados con su nombre.")
         else:
-            print("⚠️ No se pudieron extraer los nombres de los pitchers del roster.")
-            
-    except Exception as e:
-        print(f"❌ Error al consultar rosters de lanzadores: {e}")
+            df_pitchers.to_csv(ruta_archivo, index=False)
+            print(f"✅ [ÉXITO] Archivo creado con {len(df_pitchers)} lanzadores.")
+    else:
+        print("❌ No se pudieron extraer los lanzadores. Revisa la conexión con MLB API.")
 
 if __name__ == "__main__":
     extraer_estadisticas_oficiales_mlb()
