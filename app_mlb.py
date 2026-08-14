@@ -410,14 +410,14 @@ else:
                                         "Stake Kelly": f"{calcular_criterio_kelly(prob_under, cuota_un)}%"
                                     })
 
-                            # 4. Hándicap (Spreads)
+                            # 4. Hándicap (Spreads reales desde Montecarlo)
                             spread_loc = datos_partido.get("spread_loc")
                             cuota_sp_loc = datos_partido.get("cuota_spread_loc")
                             if spread_loc is not None and cuota_sp_loc is not None:
-                                prob_sp_loc = prob_comb_loc * 0.95 if spread_loc < 0 else prob_comb_loc * 1.05
-                                prob_sp_loc = np.clip(prob_sp_loc, 1.0, 99.0)
+                                prob_sp_loc = carreras_dict.get(f"Spread {spread_loc} Local", prob_comb_loc * 0.90)
                                 ev_sp_loc = (prob_sp_loc / 100.0) * cuota_sp_loc - 1.0
                                 if prob_sp_loc >= umbral_apuesta and ev_sp_loc > 0:
+                                    kelly_pct = calcular_criterio_kelly(prob_sp_loc, cuota_sp_loc)
                                     recomendaciones.append({
                                         "Partido": f"{datos_partido['visita']} @ {datos_partido['local']}",
                                         "Mercado": "Hándicap",
@@ -425,16 +425,16 @@ else:
                                         "Prob. Real": f"{round(prob_sp_loc, 2)}%",
                                         "Cuota": cuota_sp_loc,
                                         "EV+": f"{round(ev_sp_loc*100, 2)}%",
-                                        "Stake Kelly": f"{calcular_criterio_kelly(prob_sp_loc, cuota_sp_loc)}%"
+                                        "Stake Kelly": f"{kelly_pct}%"
                                     })
 
                             spread_vis = datos_partido.get("spread_vis")
                             cuota_sp_vis = datos_partido.get("cuota_spread_vis")
                             if spread_vis is not None and cuota_sp_vis is not None:
-                                prob_sp_vis = prob_comb_vis * 0.95 if spread_vis < 0 else prob_comb_vis * 1.05
-                                prob_sp_vis = np.clip(prob_sp_vis, 1.0, 99.0)
+                                prob_sp_vis = carreras_dict.get(f"Spread {spread_vis} Visita", prob_comb_vis * 0.90)
                                 ev_sp_vis = (prob_sp_vis / 100.0) * cuota_sp_vis - 1.0
                                 if prob_sp_vis >= umbral_apuesta and ev_sp_vis > 0:
+                                    kelly_pct = calcular_criterio_kelly(prob_sp_vis, cuota_sp_vis)
                                     recomendaciones.append({
                                         "Partido": f"{datos_partido['visita']} @ {datos_partido['local']}",
                                         "Mercado": "Hándicap",
@@ -442,7 +442,7 @@ else:
                                         "Prob. Real": f"{round(prob_sp_vis, 2)}%",
                                         "Cuota": cuota_sp_vis,
                                         "EV+": f"{round(ev_sp_vis*100, 2)}%",
-                                        "Stake Kelly": f"{calcular_criterio_kelly(prob_sp_vis, cuota_sp_vis)}%"
+                                        "Stake Kelly": f"{kelly_pct}%"
                                     })
 
                         except Exception as e:
@@ -636,12 +636,11 @@ else:
                             "Kelly Stake": f"{kelly_un}%"
                         })
 
-                    # Hándicap (Spreads)
+                    # Hándicap (Spreads reales desde Montecarlo)
                     spread_loc = cuotas_reales.get("Spread_Local")
                     cuota_sp_loc = cuotas_reales.get("Cuota_Spread_Local")
                     if spread_loc is not None and cuota_sp_loc is not None:
-                        prob_spread_loc = prob_loc * 0.95 if spread_loc < 0 else prob_loc * 1.05
-                        prob_spread_loc = np.clip(prob_spread_loc, 1.0, 99.0)
+                        prob_spread_loc = carreras_dict.get(f"Spread {spread_loc} Local", prob_loc * 0.90)
                         kelly_sp_loc = calcular_criterio_kelly(prob_spread_loc, cuota_sp_loc)
                         ev_sp_loc = (prob_spread_loc / 100.0) * cuota_sp_loc - 1.0
                         veredicto_apuestas.append({
@@ -655,8 +654,7 @@ else:
                     spread_vis = cuotas_reales.get("Spread_Visita")
                     cuota_sp_vis = cuotas_reales.get("Cuota_Spread_Visita")
                     if spread_vis is not None and cuota_sp_vis is not None:
-                        prob_spread_vis = prob_vis * 0.95 if spread_vis < 0 else prob_vis * 1.05
-                        prob_spread_vis = np.clip(prob_spread_vis, 1.0, 99.0)
+                        prob_spread_vis = carreras_dict.get(f"Spread {spread_vis} Visita", prob_vis * 0.90)
                         kelly_sp_vis = calcular_criterio_kelly(prob_spread_vis, cuota_sp_vis)
                         ev_sp_vis = (prob_spread_vis / 100.0) * cuota_sp_vis - 1.0
                         veredicto_apuestas.append({
