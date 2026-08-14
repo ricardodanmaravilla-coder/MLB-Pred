@@ -35,7 +35,7 @@ def extraer_estadisticas_oficiales_mlb():
                         stat_dict['wRC+'] = float(ops_val) * 100 if ops_val else 70.0
                         bateo_data.append(stat_dict)
                 
-                # Pitcheo
+                # Pitcheo (Datos de Equipo / Bullpen)
                 stats_pit = statsapi.get('team_stats', {'teamId': team_id, 'season': year, 'group': 'pitching', 'stats': 'season'})
                 if stats_pit and 'stats' in stats_pit and stats_pit['stats']:
                     splits = stats_pit['stats'][0].get('splits', [])
@@ -131,42 +131,13 @@ def extraer_historico_juegos():
         df_juegos.to_csv("data/mlb_games.csv", index=False)
         print(f"✅ Historial guardado: {len(df_juegos)} partidos en data/mlb_games.csv")
 
-print("--- INICIANDO SCRIPT DE MINERÍA ---")
-print(f"Directorio actual: {os.getcwd()}")
-os.makedirs("data", exist_ok=True)
-
-def descargar_abridores_forzado():
-    print("Iniciando descarga forzada (Modo Global)...")
+if __name__ == "__main__":
+    print("--- INICIANDO SCRIPT DE MINERÍA ---")
+    print(f"Directorio actual: {os.getcwd()}")
     os.makedirs("data", exist_ok=True)
     
-    # En lugar de ir equipo por equipo, pedimos la lista de todos los jugadores activos
-    # Esto evita problemas con rosters de equipos individuales
-    print("Consultando lista global de jugadores activos...")
-    all_players = statsapi.get('sports_players', {'sportId': 1, 'season': 2026})
+    extraer_estadisticas_oficiales_mlb()
+    generar_park_factors()
+    extraer_historico_juegos()
     
-    pitchers_data = []
-    people = all_players.get('people', [])
-    print(f"Total de personas encontradas: {len(people)}")
-    
-    for p in people:
-        # Buscamos la posición primaria
-        pos = p.get('primaryPosition', {}).get('abbreviation')
-        if pos == 'P':
-            # Guardamos
-            pitchers_data.append({
-                'Name': p.get('fullName'),
-                'Team': p.get('currentTeam', {}).get('abbreviation', 'UNK'),
-                'ERA': 4.0, 
-                'xFIP': 4.0, 
-                'GS': 1
-            })
-    
-    df = pd.DataFrame(pitchers_data)
-    print(f"DataFrame tiene {len(df)} registros encontrados globalmente.")
-    
-    if len(df) > 0:
-        df.to_csv("data/mlb_pitching_individual.csv", index=False)
-        print("Archivo guardado con éxito.")
-    else:
-        print("ERROR: No se pudieron extraer datos de la lista global.")
-        sys.exit(1)
+    print("🎯 ¡Minería de datos MLB completada con éxito!")
