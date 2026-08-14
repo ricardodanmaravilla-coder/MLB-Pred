@@ -76,14 +76,14 @@ def cargar_datos_historicos():
                 df_temp['ERA'] = pd.to_numeric(df_temp['ERA'], errors='coerce')
                 pitcheo = df_temp.dropna(subset=['xFIP', 'ERA'])
 
-        # Carga del nuevo archivo dedicado de abridores individuales con nombres reales
+        # Carga integrada del archivo de pitcheo individual real
         if os.path.exists("data/mlb_pitching_individual.csv"):
             df_temp = pd.read_csv("data/mlb_pitching_individual.csv", sep=None, engine='python', on_bad_lines='skip')
             df_temp.columns = df_temp.columns.str.strip()
             if not df_temp.empty and 'Name' in df_temp.columns:
                 df_temp['xFIP'] = pd.to_numeric(df_temp['xFIP'], errors='coerce')
                 df_temp['ERA'] = pd.to_numeric(df_temp['ERA'], errors='coerce')
-                pitcheo_individual = df_temp.dropna(subset=['Name', 'xFIP'])
+                pitcheo_individual = df_temp.dropna(subset=['Name', 'ERA'])
 
         if os.path.exists("data/mlb_park_factors.csv"): 
             df_temp = pd.read_csv("data/mlb_park_factors.csv", sep=None, engine='python', on_bad_lines='skip')
@@ -274,7 +274,7 @@ else:
                             wrc_loc = float(df_bat[df_bat['Team'] == loc_abbr]['wRC+'].mean())
                             wrc_vis = float(df_bat[df_bat['Team'] == vis_abbr]['wRC+'].mean())
                             
-                            # Lectura de xFIP del pitcher local (Plan A: Individual, Plan B: Equipo)
+                            # Lectura integrada de xFIP del pitcher local (Individual o Respaldo en Equipo)
                             pitcher_loc_nombre = datos_partido["pitcher_local"]
                             xfip_loc = None
                             if pitcher_loc_nombre != "Por Anunciar" and not df_pit_ind.empty:
@@ -287,7 +287,7 @@ else:
                                 if team_pit_loc.empty: continue
                                 xfip_loc = float(team_pit_loc['xFIP'].mean())
 
-                            # Lectura de xFIP del pitcher visitante (Plan A: Individual, Plan B: Equipo)
+                            # Lectura integrada de xFIP del pitcher visitante (Individual o Respaldo en Equipo)
                             pitcher_vis_nombre = datos_partido["pitcher_visita"]
                             xfip_vis = None
                             if pitcher_vis_nombre != "Por Anunciar" and not df_pit_ind.empty:
@@ -494,7 +494,7 @@ else:
                         st.error(f"Error procesando wRC+ de bateo: {e}")
                         st.stop()
                     
-                    # Búsqueda individual de abridor local (Plan A: Individual, Plan B: Equipo)
+                    # Búsqueda individual integrada de abridor local (Plan A: Individual, Plan B: Equipo)
                     pitcher_loc_nombre = datos_partido["pitcher_local"]
                     xfip_loc = None
                     if pitcher_loc_nombre != "Por Anunciar" and not df_pit_ind.empty:
@@ -509,7 +509,7 @@ else:
                             st.stop()
                         xfip_loc = float(team_pit_loc['xFIP'].mean())
 
-                    # Búsqueda individual de abridor visitante (Plan A: Individual, Plan B: Equipo)
+                    # Búsqueda individual integrada de abridor visitante (Plan A: Individual, Plan B: Equipo)
                     pitcher_vis_nombre = datos_partido["pitcher_visita"]
                     xfip_vis = None
                     if pitcher_vis_nombre != "Por Anunciar" and not df_pit_ind.empty:
