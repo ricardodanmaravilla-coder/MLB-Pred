@@ -63,19 +63,46 @@ def extraer_estadisticas_oficiales_mlb():
         df_pitcheo.to_csv("data/mlb_pitching.csv", index=False)
         print(f"✅ Pitcheo guardado exitosamente.")
 
-#def generar_park_factors():
- #   print("🏟️ Generando base de datos de Estadios (Park Factors & Altitud)...")
-  #  estadios = {
-   #     "Team": ["COL", "CIN", "BOS", "LAA", "NYY", "ATL", "LAD", "HOU", "SD", "SF", "SEA"],
-    #    "Estadio": ["Coors Field", "Great American", "Fenway Park", "Angel Stadium", "Yankee Stadium", 
-     #               "Truist Park", "Dodger Stadium", "Minute Maid", "Petco Park", "Oracle Park", "T-Mobile Park"],
-      #  "Altitud_pies": [5200, 683, 15, 160, 54, 978, 267, 40, 13, 15, 10],
-       # "Park_Factor_General": [114, 107, 106, 103, 102, 101, 100, 99, 95, 94, 91],
-        #"Park_Factor_HR": [115, 128, 96, 114, 117, 105, 108, 97, 98, 86, 92] 
-    #}
-    #df_park = pd.DataFrame(estadios)
-    #df_park.to_csv("data/mlb_park_factors.csv", index=False)
-    #print(f"✅ Park Factors guardados en data/mlb_park_factors.csv")
+def generar_park_factors():
+    import os
+    import pandas as pd
+    os.makedirs("data", exist_ok=True)
+    # Lista base de estadios reales con sus factores
+    datos_parks = [
+        {"Team": "COL", "Estadio": "Coors Field", "Altitud": 5200, "Park_Factor": 114, "Park_Factor_HR": 115},
+        {"Team": "CIN", "Estadio": "Great American Ball Park", "Altitud": 683, "Park_Factor": 107, "Park_Factor_HR": 128},
+        {"Team": "BOS", "Estadio": "Fenway Park", "Altitud": 15, "Park_Factor": 106, "Park_Factor_HR": 96},
+        {"Team": "LAA", "Estadio": "Angel Stadium", "Altitud": 160, "Park_Factor": 103, "Park_Factor_HR": 114},
+        {"Team": "NYY", "Estadio": "Yankee Stadium", "Altitud": 54, "Park_Factor": 102, "Park_Factor_HR": 117},
+        {"Team": "ATL", "Estadio": "Truist Park", "Altitud": 978, "Park_Factor": 101, "Park_Factor_HR": 105},
+        {"Team": "LAD", "Estadio": "Dodger Stadium", "Altitud": 267, "Park_Factor": 100, "Park_Factor_HR": 108},
+        {"Team": "HOU", "Estadio": "Minute Maid Park", "Altitud": 40, "Park_Factor": 99, "Park_Factor_HR": 97},
+        {"Team": "SDP", "Estadio": "Petco Park", "Altitud": 13, "Park_Factor": 95, "Park_Factor_HR": 98},
+        {"Team": "SFG", "Estadio": "Oracle Park", "Altitud": 15, "Park_Factor": 94, "Park_Factor_HR": 86},
+        {"Team": "SEA", "Estadio": "T-Mobile Park", "Altitud": 10, "Park_Factor": 91, "Park_Factor_HR": 92},
+        {"Team": "ARI", "Estadio": "Chase Field", "Altitud": 1086, "Park_Factor": 102, "Park_Factor_HR": 105},
+        {"Team": "BAL", "Estadio": "Oriole Park at Camden Yards", "Altitud": 33, "Park_Factor": 98, "Park_Factor_HR": 105},
+        {"Team": "CHC", "Estadio": "Wrigley Field", "Altitud": 610, "Park_Factor": 100, "Park_Factor_HR": 104},
+        {"Team": "CLE", "Estadio": "Progressive Field", "Altitud": 580, "Park_Factor": 98, "Park_Factor_HR": 95},
+        {"Team": "DET", "Estadio": "Comerica Park", "Altitud": 600, "Park_Factor": 97, "Park_Factor_HR": 91},
+        {"Team": "KCR", "Estadio": "Kauffman Stadium", "Altitud": 750, "Park_Factor": 99, "Park_Factor_HR": 94},
+        {"Team": "MIN", "Estadio": "Target Field", "Altitud": 840, "Park_Factor": 99, "Park_Factor_HR": 96},
+        {"Team": "NYM", "Estadio": "Citi Field", "Altitud": 20, "Park_Factor": 95, "Park_Factor_HR": 94},
+        {"Team": "OAK", "Estadio": "Oakland Coliseum / Sutter Health Park", "Altitud": 10, "Park_Factor": 96, "Park_Factor_HR": 90},
+        {"Team": "PHI", "Estadio": "Citizens Bank Park", "Altitud": 20, "Park_Factor": 103, "Park_Factor_HR": 112},
+        {"Team": "PIT", "Estadio": "PNC Park", "Altitud": 74, "Park_Factor": 97, "Park_Factor_HR": 88},
+        {"Team": "STL", "Estadio": "Busch Stadium", "Altitud": 455, "Park_Factor": 96, "Park_Factor_HR": 89},
+        {"Team": "TBR", "Estadio": "Tropicana Field", "Altitud": 40, "Park_Factor": 95, "Park_Factor_HR": 93},
+        {"Team": "TEX", "Estadio": "Globe Life Field", "Altitud": 600, "Park_Factor": 99, "Park_Factor_HR": 102},
+        {"Team": "TOR", "Estadio": "Rogers Centre", "Altitud": 250, "Park_Factor": 100, "Park_Factor_HR": 101},
+        {"Team": "WSN", "Estadio": "Nationals Park", "Altitud": 20, "Park_Factor": 99, "Park_Factor_HR": 98},
+        {"Team": "CHW", "Estadio": "Guaranteed Rate Field", "Altitud": 25, "Park_Factor": 98, "Park_Factor_HR": 104},
+        {"Team": "MIA", "Estadio": "loanDepot park", "Altitud": 12, "Park_Factor": 93, "Park_Factor_HR": 85},
+        {"Team": "MIL", "Estadio": "American Family Field", "Altitud": 632, "Park_Factor": 101, "Park_Factor_HR": 108}
+    ]
+    df = pd.DataFrame(datos_parks)
+    df.to_csv("data/mlb_park_factors.csv", index=False)
+    print("✅ Archivo mlb_park_factors.csv generado exitosamente.")
 
 def extraer_historico_juegos():
     """
