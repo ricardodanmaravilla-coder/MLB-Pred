@@ -35,7 +35,7 @@ def extraer_estadisticas_oficiales_mlb():
                         stat_dict['wRC+'] = float(ops_val) * 100 if ops_val else 70.0
                         bateo_data.append(stat_dict)
                 
-                # Pitcheo (Datos de Equipo / Bullpen)
+                # Pitcheo
                 stats_pit = statsapi.get('team_stats', {'teamId': team_id, 'season': year, 'group': 'pitching', 'stats': 'season'})
                 if stats_pit and 'stats' in stats_pit and stats_pit['stats']:
                     splits = stats_pit['stats'][0].get('splits', [])
@@ -61,7 +61,7 @@ def extraer_estadisticas_oficiales_mlb():
         
     if not df_pitcheo.empty:
         df_pitcheo.to_csv("data/mlb_pitching.csv", index=False)
-        print(f"✅ Pitcheo (Equipos) guardado exitosamente.")
+        print(f"✅ Pitcheo guardado exitosamente.")
 
 def generar_park_factors():
     import os
@@ -106,33 +106,20 @@ def generar_park_factors():
 def extraer_historico_juegos():
     print("🗓️ Descargando historial de juegos (Resultados por partido)...")
     juegos_data = []
-    
-    bloques_meses = [
-        ("01/01", "03/31"),
-        ("04/01", "05/31"),
-        ("06/01", "07/31"),
-        ("08/01", "09/30"),
-        ("10/01", "12/31")
-    ]
+    bloques_meses = [("01/01", "03/31"), ("04/01", "05/31"), ("06/01", "07/31"), ("08/01", "09/30"), ("10/01", "12/31")]
     
     for year in TEMPORADAS:
         print(f"  -> Obteniendo calendario {year} por bloques...")
         for inicio, fin in bloques_meses:
             try:
                 schedule = statsapi.schedule(start_date=f"{inicio}/{year}", end_date=f"{fin}/{year}")
-                
                 for game in schedule:
                     if game.get('status') in ['Final', 'Completed Early']:
                         juegos_data.append({
-                            'GameID': game.get('game_id'),
-                            'Date': game.get('game_date'),
-                            'Season': year,
-                            'Away': game.get('away_name'),
-                            'Home': game.get('home_name'),
-                            'Away_Score': game.get('away_score', 0),
-                            'Home_Score': game.get('home_score', 0),
-                            'Innings': game.get('current_inning', 9),
-                            'Venue': game.get('venue_name', 'Unknown')
+                            'GameID': game.get('game_id'), 'Date': game.get('game_date'), 'Season': year,
+                            'Away': game.get('away_name'), 'Home': game.get('home_name'),
+                            'Away_Score': game.get('away_score', 0), 'Home_Score': game.get('home_score', 0),
+                            'Innings': game.get('current_inning', 9), 'Venue': game.get('venue_name', 'Unknown')
                         })
                 time.sleep(0.3)
             except Exception as e:
@@ -145,85 +132,25 @@ def extraer_historico_juegos():
         print(f"✅ Historial guardado: {len(df_juegos)} partidos en data/mlb_games.csv")
 
 def descargar_abridores_individuales():
-    print("⚾ [INICIO] Extrayendo Lanzadores Abridores desde la API de MLB...")
+    print("⚾ [INICIO] Extrayendo Abridores Activos...")
     os.makedirs("data", exist_ok=True)
-    ruta_archivo = "data/mlb_pitching.csv"
-    
     pitchers_data = []
-    # Consultamos las temporadas recientes para obtener pitchers activos
-    for year in [2024, 2025, 2026]:
-        print(f"📊 Buscando lanzadores individuales para la temporada {year}...")
-        try:
-            # Petición a la API oficial de la MLB filtrando por estadísticas individuales de pitcheo
-            endpoint = f"stats/leaders?leaderCategories=era&statGroup=pitching&season={year}&sportId=1&limit=500"
-            res = statsapi.get('stats_leaders', {'leaderCategories': 'era', 'statGroup': 'pitching', 'season': year, 'sportId': 1, 'limit': 500})
-            
-            # Si el endpoint devuelve una respuesta válida con líderes/lanzadores
-            leaders = res.get('leagueLeaders', [])
-            for cat in leaders:
-                for entry in cat.get('leaders', []):
-                    person = entry.get('person', {})
-                    nombre = person.get('fullName')
-                    team_dict = entry.get('team', {})
-                    team_name = team_dict.get('abbreviation') or team_dict.get('name', 'UNK')
-                    era_val = entry.get('value')
-                    
-                    if nombre and era_val:
-                        try:
-                            era_float = float(era_val)
-                        except ValueError:
-                            era_float = 4.00
-                            
-                        pitchers_data.append({
-                            'Name': nombre,
-                            'Team': team_name,
-                            'ERA': era_float,
-                            'xFIP': era_float,  # Métrica espejo para las simulaciones de Montecarlo
-                            'GS': 1
-                        })
-        except Exception as e:
-            print(f"⚠️ Aviso en consulta {year}: {e}")
-            
-    df_pitchers = pd.DataFrame(pitchers_data)
-    
-    # Si la consulta de líderes no devolvió datos por la fecha del año, ejecutamos el método directo de búsqueda de jugadores
-    if df_pitchers.empty:
-        print("🔄 Aplicando método secundario por búsqueda directa de jugadores activos...")
-        try:
-            # Lista de abridores conocidos/destacados para asegurar la presencia de lanzadores
-            lanzadores_consulta = statsapi.get('sports_players', {'sportId': 1, 'season': 2025})
-            for p in lanzadores_consulta.get('people', []):
-                primary_pos = p.get('primaryPosition', {}).get('abbreviation', '')
-                if primary_pos == 'P':
-                    pitchers_data.append({
-                        'Name': p.get('fullName'),
-                        'Team': p.get('currentTeam', {}).get('abbreviation', 'UNK'),
-                        'ERA': 4.00,
-                        'xFIP': 4.00,
-                        'GS': 1
-                    })
-            df_pitchers = pd.DataFrame(pitchers_data)
-        except Exception as e:
-            print(f"❌ Error en método secundario: {e}")
-
-    if not df_pitchers.empty:
-        # Eliminamos duplicados conservando la entrada más reciente
-        df_pitchers = df_pitchers.drop_duplicates(subset=['Name'], keep='first')
-        
-        if os.path.exists(ruta_archivo):
-            df_equipos = pd.read_csv(ruta_archivo)
-            df_fusion = pd.concat([df_equipos, df_pitchers], ignore_index=True)
-            df_fusion.to_csv(ruta_archivo, index=False)
-            print(f"✅ [ÉXITO] Archivo 'mlb_pitching.csv' actualizado exitosamente con {len(df_pitchers)} lanzadores registrados con su nombre.")
-        else:
-            df_pitchers.to_csv(ruta_archivo, index=False)
-            print(f"✅ [ÉXITO] Archivo creado con {len(df_pitchers)} lanzadores.")
-    else:
-        print("❌ No se pudieron extraer los lanzadores. Revisa la conexión con MLB API.")
+    try:
+        equipos = statsapi.get('teams', {'season': 2026, 'sportId': 1})['teams']
+        for equipo in equipos:
+            roster = statsapi.get('team_roster', {'teamId': equipo['id'], 'rosterType': 'active'})['roster']
+            for m in roster:
+                if m.get('position', {}).get('abbreviation') == 'P':
+                    jugador = m.get('player', {})
+                    if jugador.get('fullName'):
+                        pitchers_data.append({'Name': jugador.get('fullName'), 'Team': equipo.get('abbreviation'), 'ERA': 4.00, 'xFIP': 4.00, 'GS': 1})
+        pd.DataFrame(pitchers_data).to_csv("data/mlb_pitching_individual.csv", index=False)
+        print(f"✅ Guardados {len(pitchers_data)} nombres en mlb_pitching_individual.csv")
+    except Exception as e: print(f"❌ Error: {e}")
 
 if __name__ == "__main__":
     extraer_estadisticas_oficiales_mlb()
     generar_park_factors()
-    extraer_historico_juegos()  
-    descargar_abridores_individuales() 
-    print("🎯 ¡Minería de datos MLB completada con éxito!")
+    extraer_historico_juegos()
+    descargar_abridores_individuales()
+    print("🎯 ¡Minería de datos MLB completada con éxito y sin bloqueos!")
