@@ -131,32 +131,39 @@ def extraer_historico_juegos():
         df_juegos.to_csv("data/mlb_games.csv", index=False)
         print(f"✅ Historial guardado: {len(df_juegos)} partidos en data/mlb_games.csv")
 
-def descargar_abridores_reales():
-    print("⚾ [INICIO] Extrayendo estadísticas reales desde FanGraphs...")
+def descargar_abridores_individuales():
+    print("⚾ [INICIO] Extrayendo datos reales de pitcheo...")
     os.makedirs("data", exist_ok=True)
+    ruta_archivo = "data/mlb_pitching_individual.csv"
     
     try:
-        # Aumentamos la calidad (qual=5) para obtener pitchers con al menos 5 entradas lanzadas
-        # pybaseball maneja internamente las cabeceras para evitar bloqueos
-        print("📊 Conectando con bases de datos de sabermetría real (FanGraphs)...")
+        # Descarga la tabla completa de 2026 SIN FILTROS (qual=0)
+        # Esto nos asegura que si hay datos, los descargará todos sin descartar a nadie
+        print("📊 Descargando tabla completa de pitcheo...")
+        df = pitching_stats(2026, qual=0)
         
-        # Obtenemos stats de la temporada 2026
-        df = pitching_stats(2026, qual=5)
+        # Validación: ¿Hay datos?
+        if df is None or df.empty:
+            print("❌ La descarga devolvió una tabla vacía. Revisa tu conexión.")
+            return
+
+        # Selección de columnas necesarias
+        # Aseguramos que existan las columnas de datos reales
+        columnas = ['Name', 'Team', 'ERA', 'xFIP', 'GS']
+        df_limpio = df[columnas].copy()
         
-        # Filtramos solo las columnas que necesitas y que NO son ficticias
-        # 'ERA' y 'xFIP' son datos reales calculados por FanGraphs
-        df_real = df[['Name', 'Team', 'ERA', 'xFIP', 'GS']].copy()
+        # Filtramos abridores reales (GS > 0)
+        df_abridores = df_limpio[df_limpio['GS'] > 0].copy()
         
-        # Filtramos solo abridores (GS > 0)
-        df_abridores = df_real[df_real['GS'] > 0].copy()
+        # Limpieza final: eliminar filas donde ERA o xFIP sean nulos
+        df_abridores = df_abridores.dropna(subset=['ERA', 'xFIP'])
         
-        # Guardar en archivo dedicado
-        df_abridores.to_csv("data/mlb_pitching_individual.csv", index=False)
-        print(f"✅ [ÉXITO] Se han registrado {len(df_abridores)} abridores con datos REALES.")
+        # Guardar archivo
+        df_abridores.to_csv(ruta_archivo, index=False)
+        print(f"✅ [ÉXITO] Archivo creado con {len(df_abridores)} abridores y datos REALES.")
+        
+        # --- DEPURACIÓN: Vamos a ver qué está pasando si sale vacío ---
+        print(f"Primeras 5 filas encontradas:\n{df_abridores.head()}")
         
     except Exception as e:
-        print(f"❌ Error al conectar con FanGraphs: {e}")
-        print("💡 Nota: Asegúrate de tener conexión a internet estable.")
-
-if __name__ == "__main__":
-    descargar_abridores_reales()
+        print(f"❌ Error crítico en la descarga: {e}")
