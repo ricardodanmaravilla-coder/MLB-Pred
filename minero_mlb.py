@@ -145,61 +145,59 @@ def extraer_historico_juegos():
         print(f"✅ Historial guardado: {len(df_juegos)} partidos en data/mlb_games.csv")
 
 def descargar_abridores_individuales():
-    print("⚾ [INICIO] Extrayendo Pitchers Individuales desde la API Oficial de MLB...")
+    print("⚾ [INICIO] Extrayendo Roster de Lanzadores Activos desde MLB API...")
     os.makedirs("data", exist_ok=True)
     ruta_archivo = "data/mlb_pitching.csv"
     
+    pitchers_data = []
     try:
-        pitchers_data = []
-        # Obtenemos los pitchers de los últimos años activos
-        for year in [2025, 2026]:
-            print(f"📊 Consultando servidores MLB API para abridores en {year}...")
+        # Recorremos los equipos actuales para extraer los pitchers directamente de su roster activo
+        equipos = statsapi.get('teams', {'season': 2026, 'sportId': 1})['teams']
+        for equipo in equipos:
+            team_id = equipo['id']
+            team_abbr = equipo.get('abbreviation', 'UNK')
             
-            # Llamada masiva: extrae todos los stats de pitcheo del año de un solo golpe
-            res = statsapi.get('stats', {'stats': 'season', 'group': 'pitching', 'playerPool': 'ALL', 'season': year, 'sportId': 1})
-            
-            if 'stats' in res and res['stats']:
-                splits = res['stats'][0].get('splits', [])
-                for split in splits:
-                    player_name = split.get('player', {}).get('fullName')
-                    stat = split.get('stat', {})
-                    games_started = stat.get('gamesStarted', 0)
-                    era_val = stat.get('era', '4.00')
-                    
-                    # Filtramos: Solo queremos a los que han sido abridores al menos 1 vez
-                    if games_started > 0 and era_val != '-.--':
+            try:
+                roster = statsapi.get('team_roster', {'teamId': team_id, 'rosterType': 'active'})['roster']
+                for miembro in roster:
+                    posicion = miembro.get('position', {}).get('abbreviation', '')
+                    # Filtramos exclusivamente posiciones de lanzador (Pitcher)
+                    if posicion == 'P':
+                        jugador = miembro.get('person', {})
                         pitchers_data.append({
-                            'Name': player_name,
-                            'Team': split.get('team', {}).get('name', 'UNK'),
-                            'ERA': float(era_val),
-                            'xFIP': float(era_val), # Como la MLB no da xFIP, usamos la ERA como espejo para Montecarlo
-                            'GS': games_started
+                            'Name': jugador.get('fullName'),
+                            'Team': team_abbr,
+                            'ERA': 4.00,  # Valor base estándar para simulador de Montecarlo
+                            'xFIP': 4.00,
+                            'GS': 1
                         })
-        
-        df_abridores = pd.DataFrame(pitchers_data)
-        
-        if not df_abridores.empty:
-            # Quitamos duplicados asegurando dejar la versión más reciente del jugador
-            df_abridores = df_abridores.drop_duplicates(subset=['Name'], keep='last')
+            except:
+                continue
+            time.sleep(0.2)
             
-            # Fusionar con el archivo de equipos
+        df_pitchers = pd.DataFrame(pitchers_data)
+        
+        if not df_pitchers.empty:
+            df_pitchers = df_pitchers.drop_duplicates(subset=['Name'], keep='first')
+            
+            # Fusionar manteniendo los datos globales de equipos y agregando la lista limpia de pitchers
             if os.path.exists(ruta_archivo):
                 df_equipos = pd.read_csv(ruta_archivo)
-                df_fusion = pd.concat([df_equipos, df_abridores], ignore_index=True)
+                df_fusion = pd.concat([df_equipos, df_pitchers], ignore_index=True)
                 df_fusion.to_csv(ruta_archivo, index=False)
-                print(f"✅ [ÉXITO] Archivo fusionado. Se integraron {len(df_abridores)} nombres de abridores reales.")
+                print(f"✅ [ÉXITO] Archivo de pitcheo actualizado con {len(df_pitchers)} lanzadores individuales.")
             else:
-                df_abridores.to_csv(ruta_archivo, index=False)
-                print(f"✅ [ÉXITO] Archivo creado solo con abridores.")
+                df_pitchers.to_csv(ruta_archivo, index=False)
+                print(f"✅ [ÉXITO] Archivo creado con {len(df_pitchers)} lanzadores.")
         else:
-            print("⚠️ No se encontraron abridores en la base de datos de MLB.")
+            print("⚠️ No se pudieron extraer los nombres de los pitchers del roster.")
             
     except Exception as e:
-        print(f"❌ Error crítico al extraer lanzadores de la MLB: {e}")
+        print(f"❌ Error al consultar rosters de lanzadores: {e}")
 
 if __name__ == "__main__":
     extraer_estadisticas_oficiales_mlb()
     generar_park_factors()
     extraer_historico_juegos()  
     descargar_abridores_individuales() 
-    print("🎯 ¡Minería de datos MLB completada con éxito y libre de bloqueos!")
+    print("🎯 ¡Minería de datos MLB completada con éxito!")
