@@ -103,20 +103,19 @@ class PredictorMLMLB:
                                     sum((juegos_vis['Away'] == vis_abbr) & (juegos_vis['Away_Score'] > juegos_vis['Home_Score']))
                     racha_vis = victorias_vis
 
-            features = pd.DataFrame([[wrc_loc - wrc_vis, xfip_vis - xfip_loc, racha_loc, racha_vis]], 
-                                    columns=['Diff_wRC+', 'Diff_xFIP', 'Racha_Loc', 'Racha_Vis'])
+            # CORRECCIÓN: Pasar una lista plana en lugar de un pd.DataFrame para evitar el ValueError
+            features = [[wrc_loc - wrc_vis, xfip_vis - xfip_loc, racha_loc, racha_vis]]
             
             probs = self.modelo_ganador.predict_proba(features)[0]
-            carreras_pred = self.modelo_carreras.predict(features)[0] # NUEVO
-            handicap_pred = self.modelo_handicap.predict(features)[0] # NUEVO
+            carreras_pred = self.modelo_carreras.predict(features)[0] 
+            handicap_pred = self.modelo_handicap.predict(features)[0] 
             
             return {
                 'Probabilidad_Local': round(probs[1] * 100, 2),
                 'Probabilidad_Visita': round(probs[0] * 100, 2),
-                'Proyeccion_Carreras': round(carreras_pred, 2), # NUEVO
-                'Proyeccion_Handicap_Local': round(handicap_pred, 2) # NUEVO
+                'Proyeccion_Carreras': round(carreras_pred, 2), 
+                'Proyeccion_Handicap_Local': round(handicap_pred, 2) 
             }
         except Exception as e:
             print(f"Error en predicción ML: {e}")
             return {'Probabilidad_Local': 50.0, 'Probabilidad_Visita': 50.0, 'Proyeccion_Carreras': 0.0, 'Proyeccion_Handicap_Local': 0.0}
-            
