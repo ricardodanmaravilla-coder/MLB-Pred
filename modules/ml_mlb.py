@@ -4,19 +4,13 @@ from sklearn.ensemble import RandomForestClassifier, GradientBoostingRegressor
 
 class PredictorMLMLB:
     def __init__(self):
-        # Usamos Random Forest para predecir al ganador y Gradient Boosting para las carreras
         self.modelo_ganador = RandomForestClassifier(n_estimators=150, max_depth=6, random_state=42)
         self.modelo_carreras = GradientBoostingRegressor(n_estimators=150, max_depth=5, random_state=42)
-        # Modelo dedicado para el Hándicap (Diferencial de Carreras)
         self.modelo_handicap = GradientBoostingRegressor(n_estimators=150, max_depth=5, random_state=42)
         self.entrenado = False
         self.df_games = pd.DataFrame()
 
     def entrenar(self, df_batting, df_pitching, df_games):
-        """
-        Entrena el modelo usando RESULTADOS REALES, cruzando el score con
-        la Sabermetría avanzada y calculando tendencias de rachas (Momentum).
-        """
         try:
             if df_batting.empty or df_pitching.empty or df_games.empty:
                 return False
@@ -30,11 +24,9 @@ class PredictorMLMLB:
             y_runs = []
             y_diff = []
 
-            # Diccionarios rápidos para buscar sabermetría (O(1) lookup)
             bat_dict = df_batting.set_index('Team')['wRC+'].to_dict()
             pit_dict = df_pitching.set_index('Team')['xFIP'].to_dict()
 
-            # Diccionario para rastrear la forma reciente (últimos 5 resultados)
             equipos = pd.concat([self.df_games['Home'], self.df_games['Away']]).unique()
             forma_reciente = {equipo: [] for equipo in equipos}
 
@@ -52,11 +44,9 @@ class PredictorMLMLB:
                 xfip_l = pit_dict.get(loc, 4.0)
                 xfip_v = pit_dict.get(vis, 4.0)
 
-                # Calcular la racha actual antes de jugar este partido (Momentum)
                 racha_l = sum(forma_reciente.get(loc, [-1])[-5:]) if len(forma_reciente.get(loc, [])) > 0 else 2.5
                 racha_v = sum(forma_reciente.get(vis, [-1])[-5:]) if len(forma_reciente.get(vis, [])) > 0 else 2.5
                 
-                # Actualizar el historial de resultados para el próximo ciclo
                 if g_loc > g_vis:
                     forma_reciente[loc].append(1)
                     forma_reciente[vis].append(0)
@@ -64,20 +54,21 @@ class PredictorMLMLB:
                     forma_reciente[loc].append(0)
                     forma_reciente[vis].append(1)
 
-                # NORMALIZACIÓN ESTRICTA: Las variables de entrenamiento deben ser idénticas
-                # a las variables que pasamos en predecir_partido.
-                diff_wrc = float(wrc_l - wrc_v) / 20.0
-                diff_xfip = float(xfip_v - xfip_l) / 2.0
-                diff_racha = float(racha_l - racha_v) / 5.0
+                # CORRECCIÓN: Usar valores absolutos normalizados en lugar de restas
+                wrc_l_norm = float(wrc_l) / 100.0
+                wrc_v_norm = float(wrc_v) / 100.0
+                xfip_l_norm = float(xfip_l) / 4.0
+                xfip_v_norm = float(xfip_v) / 4.0
+                r_l_norm = float(racha_l) / 5.0
+                r_v_norm = float(racha_v) / 5.0
 
-                feat = [diff_wrc, diff_xfip, diff_racha, float(racha_l)]
+                feat = [wrc_l_norm, wrc_v_norm, xfip_l_norm, xfip_v_norm, r_l_norm, r_v_norm]
                 
                 X.append(feat)
                 y_win.append(1 if g_loc > g_vis else 0)
                 y_runs.append(g_loc + g_vis)
                 y_diff.append(g_loc - g_vis)
 
-            # Entrenar solo si tenemos una muestra robusta
             if len(X) > 100:
                 self.modelo_ganador.fit(X, y_win)
                 self.modelo_carreras.fit(X, y_runs)
@@ -108,19 +99,21 @@ class PredictorMLMLB:
                                     sum((juegos_vis['Away'] == vis_abbr) & (juegos_vis['Away_Score'] > juegos_vis['Home_Score']))
                     racha_vis = victorias_vis
 
-            # Normalización estricta de variables para evitar desbordamiento en los árboles de decisión
-            diff_wrc = float(wrc_loc - wrc_vis) / 20.0
-            diff_xfip = float(xfip_vis - xfip_loc) / 2.0
-            diff_racha = float(racha_loc - racha_vis) / 5.0
+            # CORRECCIÓN: Entradas absolutas idénticas a la función de entrenamiento
+            wrc_l_norm = float(wrc_loc) / 100.0
+            wrc_v_norm = float(wrc_vis) / 100.0
+            xfip_l_norm = float(xfip_loc) / 4.0
+            xfip_v_norm = float(xfip_vis) / 4.0
+            r_l_norm = float(racha_loc) / 5.0
+            r_v_norm = float(racha_vis) / 5.0
 
-            features = [[diff_wrc, diff_xfip, diff_racha, float(racha_loc)]]
+            features = [[wrc_l_norm, wrc_v_norm, xfip_l_norm, xfip_v_norm, r_l_norm, r_v_norm]]
             
-            # Obtención de probabilidades base
             probs = self.modelo_ganador.predict_proba(features)[0]
             
-            # Suavización matemática (Evita ceros absolutos y 100% forzados)
-            p_local_suavizada = (probs[1] * 0.85) + 0.075 
-            p_visita_suavizada = (probs[0] * 0.85) + 0.075
+            # Suavización más ligera para permitir alertas fuertes de Moneyline
+            p_local_suavizada = (probs[1] * 0.94) + 0.03 
+            p_visita_suavizada = (probs[0] * 0.94) + 0.03
 
             carreras_pred = self.modelo_carreras.predict(features)[0] 
             handicap_pred = self.modelo_handicap.predict(features)[0] 
