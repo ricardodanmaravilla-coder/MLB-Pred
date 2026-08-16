@@ -7,6 +7,8 @@ class PredictorMLMLB:
         # Usamos Random Forest para predecir al ganador y Gradient Boosting para las carreras
         self.modelo_ganador = RandomForestClassifier(n_estimators=150, max_depth=6, random_state=42)
         self.modelo_carreras = GradientBoostingRegressor(n_estimators=150, max_depth=5, random_state=42)
+        # NUEVO: Modelo dedicado para el Hándicap (Diferencial de Carreras)
+        self.modelo_handicap = GradientBoostingRegressor(n_estimators=150, max_depth=5, random_state=42)
         self.entrenado = False
         self.df_games = pd.DataFrame()
 
@@ -26,6 +28,7 @@ class PredictorMLMLB:
             X = []
             y_win = []
             y_runs = []
+            y_diff = [] # NUEVO: Para el modelo de hándicap
 
             # Diccionarios rápidos para buscar sabermetría (O(1) lookup)
             bat_dict = df_batting.set_index('Team')['wRC+'].to_dict()
@@ -62,17 +65,18 @@ class PredictorMLMLB:
                     forma_reciente[vis].append(1)
 
                 # FEATURES (Variables de entrenamiento):
-                # 1. Ventaja Ofensiva | 2. Ventaja de Pitcheo | 3. Momentum Local | 4. Momentum Visita
                 feat = [wrc_l - wrc_v, xfip_v - xfip_l, racha_l, racha_v]
                 
                 X.append(feat)
                 y_win.append(1 if g_loc > g_vis else 0)
                 y_runs.append(g_loc + g_vis)
+                y_diff.append(g_loc - g_vis) # NUEVO: Guardar diferencia
 
             # Entrenar solo si tenemos una muestra robusta
             if len(X) > 100:
                 self.modelo_ganador.fit(X, y_win)
                 self.modelo_carreras.fit(X, y_runs)
+                self.modelo_handicap.fit(X, y_diff) # NUEVO: Entrenar Hándicap
                 self.entrenado = True
                 return True
                 
@@ -103,11 +107,16 @@ class PredictorMLMLB:
                                     columns=['Diff_wRC+', 'Diff_xFIP', 'Racha_Loc', 'Racha_Vis'])
             
             probs = self.modelo_ganador.predict_proba(features)[0]
+            carreras_pred = self.modelo_carreras.predict(features)[0] # NUEVO
+            handicap_pred = self.modelo_handicap.predict(features)[0] # NUEVO
             
             return {
                 'Probabilidad_Local': round(probs[1] * 100, 2),
-                'Probabilidad_Visita': round(probs[0] * 100, 2)
+                'Probabilidad_Visita': round(probs[0] * 100, 2),
+                'Proyeccion_Carreras': round(carreras_pred, 2), # NUEVO
+                'Proyeccion_Handicap_Local': round(handicap_pred, 2) # NUEVO
             }
         except Exception as e:
             print(f"Error en predicción ML: {e}")
-            return {'Probabilidad_Local': 50.0, 'Probabilidad_Visita': 50.0}
+            return {'Probabilidad_Local': 50.0, 'Probabilidad_Visita': 50.0, 'Proyeccion_Carreras': 0.0, 'Proyeccion_Handicap_Local': 0.0}
+            
