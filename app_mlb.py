@@ -377,7 +377,7 @@ else:
                             res_ml = predictor_ml.predecir_partido(loc_abbr, vis_abbr, wrc_loc, wrc_vis, xfip_loc, xfip_vis, park_factor)
 
                             # REGLA ESTRICTA: Ambos modelos deben marcar >= 60% INDEPENDIENTEMENTE
-                            umbral_apuesta = 60.0
+                            #umbral_apuesta = 60.0
 
                             # --- PROBABILIDADES MONTECARLO ---
                             prob_mc_loc = res_mc['Moneyline']['Gana Local']
@@ -403,10 +403,16 @@ else:
                             prob_ml_spread_loc = estimar_prob_ml(proy_hc_loc, spread_loc, "spread_loc") if spread_loc is not None else 50.0
                             prob_ml_spread_vis = estimar_prob_ml(-proy_hc_loc, spread_vis, "spread_vis") if spread_vis is not None else 50.0
 
-                            # --- EVALUACIÓN Y FILTRO ESTRICTO ---
+                            # --- UMBRALES DINÁMICOS POR MERCADO ---
+                            # Dejamos de exigir 60% a todo. Ajustamos a la realidad de la MLB.
+                            umbral_ml = 55.0       # Moneyline: 54% con doble validación es altísimo en MLB
+                            umbral_totales = 59.0  # Totales: Mantenemos mayor rigor
+                            umbral_handicap = 54.0 # Hándicap (-1.5): Es muy difícil rebasar el 55%
+
+                            # --- EVALUACIÓN Y FILTRO INTELIGENTE ---
                             
                             # 1. Moneyline Local
-                            if prob_mc_loc >= umbral_apuesta and prob_ml_loc >= umbral_apuesta:
+                            if prob_mc_loc >= umbral_ml and prob_ml_loc >= umbral_ml:
                                 prob_comb_loc = (prob_mc_loc + prob_ml_loc) / 2.0
                                 ev_loc = (prob_comb_loc / 100.0) * cuota_loc - 1.0
                                 if ev_loc > 0:
@@ -422,7 +428,7 @@ else:
                                     })
 
                             # 2. Moneyline Visita
-                            if prob_mc_vis >= umbral_apuesta and prob_ml_vis >= umbral_apuesta:
+                            if prob_mc_vis >= umbral_ml and prob_ml_vis >= umbral_ml:
                                 prob_comb_vis = (prob_mc_vis + prob_ml_vis) / 2.0
                                 ev_vis = (prob_comb_vis / 100.0) * cuota_vis - 1.0
                                 if ev_vis > 0:
@@ -439,7 +445,7 @@ else:
 
                             # 3. Totales Over
                             cuota_ov = datos_partido.get("cuota_over")
-                            if cuota_ov is not None and prob_mc_over >= umbral_apuesta and prob_ml_over >= umbral_apuesta:
+                            if cuota_ov is not None and prob_mc_over >= umbral_totales and prob_ml_over >= umbral_totales:
                                 prob_comb_over = (prob_mc_over + prob_ml_over) / 2.0
                                 ev_over = (prob_comb_over / 100.0) * cuota_ov - 1.0
                                 if ev_over > 0:
@@ -456,7 +462,7 @@ else:
 
                             # 4. Totales Under
                             cuota_un = datos_partido.get("cuota_under")
-                            if cuota_un is not None and prob_mc_under >= umbral_apuesta and prob_ml_under >= umbral_apuesta:
+                            if cuota_un is not None and prob_mc_under >= umbral_totales and prob_ml_under >= umbral_totales:
                                 prob_comb_under = (prob_mc_under + prob_ml_under) / 2.0
                                 ev_under = (prob_comb_under / 100.0) * cuota_un - 1.0
                                 if ev_under > 0:
@@ -473,7 +479,7 @@ else:
 
                             # 5. Spread Local
                             cuota_sp_loc = datos_partido.get("cuota_spread_loc")
-                            if spread_loc is not None and cuota_sp_loc is not None and prob_mc_spread_loc >= umbral_apuesta and prob_ml_spread_loc >= umbral_apuesta:
+                            if spread_loc is not None and cuota_sp_loc is not None and prob_mc_spread_loc >= umbral_handicap and prob_ml_spread_loc >= umbral_handicap:
                                 prob_comb_sp_loc = (prob_mc_spread_loc + prob_ml_spread_loc) / 2.0
                                 ev_sp_loc = (prob_comb_sp_loc / 100.0) * cuota_sp_loc - 1.0
                                 if ev_sp_loc > 0:
@@ -490,7 +496,7 @@ else:
 
                             # 6. Spread Visita
                             cuota_sp_vis = datos_partido.get("cuota_spread_vis")
-                            if spread_vis is not None and cuota_sp_vis is not None and prob_mc_spread_vis >= umbral_apuesta and prob_ml_spread_vis >= umbral_apuesta:
+                            if spread_vis is not None and cuota_sp_vis is not None and prob_mc_spread_vis >= umbral_handicap and prob_ml_spread_vis >= umbral_handicap:
                                 prob_comb_sp_vis = (prob_mc_spread_vis + prob_ml_spread_vis) / 2.0
                                 ev_sp_vis = (prob_comb_sp_vis / 100.0) * cuota_sp_vis - 1.0
                                 if ev_sp_vis > 0:
@@ -504,6 +510,7 @@ else:
                                         "EV+": f"{round(ev_sp_vis*100, 2)}%",
                                         "Stake Kelly": f"{calcular_criterio_kelly(prob_comb_sp_vis, cuota_sp_vis)}%"
                                     })
+
 
                         except Exception as e:
                             continue
