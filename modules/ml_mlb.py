@@ -7,7 +7,7 @@ class PredictorMLMLB:
         # Usamos Random Forest para predecir al ganador y Gradient Boosting para las carreras
         self.modelo_ganador = RandomForestClassifier(n_estimators=150, max_depth=6, random_state=42)
         self.modelo_carreras = GradientBoostingRegressor(n_estimators=150, max_depth=5, random_state=42)
-        # NUEVO: Modelo dedicado para el Hándicap (Diferencial de Carreras)
+        # Modelo dedicado para el Hándicap (Diferencial de Carreras)
         self.modelo_handicap = GradientBoostingRegressor(n_estimators=150, max_depth=5, random_state=42)
         self.entrenado = False
         self.df_games = pd.DataFrame()
@@ -28,7 +28,7 @@ class PredictorMLMLB:
             X = []
             y_win = []
             y_runs = []
-            y_diff = [] # NUEVO: Para el modelo de hándicap
+            y_diff = []
 
             # Diccionarios rápidos para buscar sabermetría (O(1) lookup)
             bat_dict = df_batting.set_index('Team')['wRC+'].to_dict()
@@ -64,19 +64,24 @@ class PredictorMLMLB:
                     forma_reciente[loc].append(0)
                     forma_reciente[vis].append(1)
 
-                # FEATURES (Variables de entrenamiento):
-                feat = [wrc_l - wrc_v, xfip_v - xfip_l, racha_l, racha_v]
+                # NORMALIZACIÓN ESTRICTA: Las variables de entrenamiento deben ser idénticas
+                # a las variables que pasamos en predecir_partido.
+                diff_wrc = float(wrc_l - wrc_v) / 20.0
+                diff_xfip = float(xfip_v - xfip_l) / 2.0
+                diff_racha = float(racha_l - racha_v) / 5.0
+
+                feat = [diff_wrc, diff_xfip, diff_racha, float(racha_l)]
                 
                 X.append(feat)
                 y_win.append(1 if g_loc > g_vis else 0)
                 y_runs.append(g_loc + g_vis)
-                y_diff.append(g_loc - g_vis) # NUEVO: Guardar diferencia
+                y_diff.append(g_loc - g_vis)
 
             # Entrenar solo si tenemos una muestra robusta
             if len(X) > 100:
                 self.modelo_ganador.fit(X, y_win)
                 self.modelo_carreras.fit(X, y_runs)
-                self.modelo_handicap.fit(X, y_diff) # NUEVO: Entrenar Hándicap
+                self.modelo_handicap.fit(X, y_diff)
                 self.entrenado = True
                 return True
                 
@@ -85,7 +90,7 @@ class PredictorMLMLB:
             
         return False
 
-        def predecir_partido(self, loc_abbr, vis_abbr, wrc_loc, wrc_vis, xfip_loc, xfip_vis, pf=None):
+    def predecir_partido(self, loc_abbr, vis_abbr, wrc_loc, wrc_vis, xfip_loc, xfip_vis, pf=None):
         try:
             racha_loc = 2.5
             racha_vis = 2.5
@@ -104,7 +109,7 @@ class PredictorMLMLB:
                     racha_vis = victorias_vis
 
             # Normalización estricta de variables para evitar desbordamiento en los árboles de decisión
-            diff_wrc = float(wrc_loc - wrc_vis) / 20.0  # Escalado a rangos estables (-1 a 1)
+            diff_wrc = float(wrc_loc - wrc_vis) / 20.0
             diff_xfip = float(xfip_vis - xfip_loc) / 2.0
             diff_racha = float(racha_loc - racha_vis) / 5.0
 
@@ -129,3 +134,4 @@ class PredictorMLMLB:
         except Exception as e:
             print(f"Error en predicción ML: {e}")
             return {'Probabilidad_Local': 50.0, 'Probabilidad_Visita': 50.0, 'Proyeccion_Carreras': 8.5, 'Proyeccion_Handicap_Local': 0.0}
+            
