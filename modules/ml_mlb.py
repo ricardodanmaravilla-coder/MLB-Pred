@@ -85,7 +85,7 @@ class PredictorMLMLB:
             
         return False
 
-    def predecir_partido(self, loc_abbr, vis_abbr, wrc_loc, wrc_vis, xfip_loc, xfip_vis, pf=None):
+        def predecir_partido(self, loc_abbr, vis_abbr, wrc_loc, wrc_vis, xfip_loc, xfip_vis, pf=None):
         try:
             racha_loc = 2.5
             racha_vis = 2.5
@@ -103,19 +103,29 @@ class PredictorMLMLB:
                                     sum((juegos_vis['Away'] == vis_abbr) & (juegos_vis['Away_Score'] > juegos_vis['Home_Score']))
                     racha_vis = victorias_vis
 
-            # CORRECCIÓN: Pasar una lista plana en lugar de un pd.DataFrame para evitar el ValueError
-            features = [[wrc_loc - wrc_vis, xfip_vis - xfip_loc, racha_loc, racha_vis]]
+            # Normalización estricta de variables para evitar desbordamiento en los árboles de decisión
+            diff_wrc = float(wrc_loc - wrc_vis) / 20.0  # Escalado a rangos estables (-1 a 1)
+            diff_xfip = float(xfip_vis - xfip_loc) / 2.0
+            diff_racha = float(racha_loc - racha_vis) / 5.0
+
+            features = [[diff_wrc, diff_xfip, diff_racha, float(racha_loc)]]
             
+            # Obtención de probabilidades base
             probs = self.modelo_ganador.predict_proba(features)[0]
+            
+            # Suavización matemática (Evita ceros absolutos y 100% forzados)
+            p_local_suavizada = (probs[1] * 0.85) + 0.075 
+            p_visita_suavizada = (probs[0] * 0.85) + 0.075
+
             carreras_pred = self.modelo_carreras.predict(features)[0] 
             handicap_pred = self.modelo_handicap.predict(features)[0] 
             
             return {
-                'Probabilidad_Local': round(probs[1] * 100, 2),
-                'Probabilidad_Visita': round(probs[0] * 100, 2),
-                'Proyeccion_Carreras': round(carreras_pred, 2), 
-                'Proyeccion_Handicap_Local': round(handicap_pred, 2) 
+                'Probabilidad_Local': round(p_local_suavizada * 100, 2),
+                'Probabilidad_Visita': round(p_visita_suavizada * 100, 2),
+                'Proyeccion_Carreras': round(float(carreras_pred), 2), 
+                'Proyeccion_Handicap_Local': round(float(handicap_pred), 2) 
             }
         except Exception as e:
             print(f"Error en predicción ML: {e}")
-            return {'Probabilidad_Local': 50.0, 'Probabilidad_Visita': 50.0, 'Proyeccion_Carreras': 0.0, 'Proyeccion_Handicap_Local': 0.0}
+            return {'Probabilidad_Local': 50.0, 'Probabilidad_Visita': 50.0, 'Proyeccion_Carreras': 8.5, 'Proyeccion_Handicap_Local': 0.0}
