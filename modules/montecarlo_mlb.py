@@ -77,8 +77,8 @@ def simular_partido_mlb(
     vis_abbr = visita if len(visita) <= 3 else visita[:3].upper()
     prob_h2h_loc = obtener_h2h(df_games, loc_abbr, vis_abbr)
 
-    # CORRECCIÓN: Binomial Negativa para simular correctamente los "Overs" y entradas explosivas
-    r_dispersion = 4.5
+    # CORRECCIÓN: Subimos la dispersión de 4.5 a 14.5 para nivelar la mediana.
+    r_dispersion = 14.5
     p_loc_nb = r_dispersion / (r_dispersion + carreras_exp_loc)
     p_vis_nb = r_dispersion / (r_dispersion + carreras_exp_vis)
 
