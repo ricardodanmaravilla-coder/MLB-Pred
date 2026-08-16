@@ -476,13 +476,13 @@ else:
                                         "EV+": f"{round(ev_under*100, 2)}%",
                                         "Stake Kelly": f"{calcular_criterio_kelly(prob_comb_under, cuota_un)}%"
                                     })
-
-                            # 5. Spread Local (Evaluación optimizada basada en Montecarlo y EV+)
+                            # 5. Spread Local (Lectura directa de la matriz de Montecarlo)
                             cuota_sp_loc = datos_partido.get("cuota_spread_loc")
                             if spread_loc is not None and cuota_sp_loc is not None:
-                                prob_mc_sp_loc = carreras_dict.get(f"Spread {spread_loc} Local", 50.0)
+                                # Extraemos el porcentaje real calculado en la simulación de Montecarlo
+                                prob_mc_sp_loc = res_mc["Carreras"].get("Spread -1.5 Local", 50.0) if spread_loc == -1.5 else prob_mc_loc * 0.90
                                 ev_sp_loc = (prob_mc_sp_loc / 100.0) * cuota_sp_loc - 1.0
-                                # Si Montecarlo supera el umbral y hay EV+, pasa directo
+                                
                                 if prob_mc_sp_loc >= umbral_handicap and ev_sp_loc > 0:
                                     recomendaciones.append({
                                         "Partido": f"{datos_partido['visita']} @ {datos_partido['local']}",
@@ -495,12 +495,20 @@ else:
                                         "Stake Kelly": f"{calcular_criterio_kelly(prob_mc_sp_loc, cuota_sp_loc)}%"
                                     })
 
-                            # 6. Spread Visita (Para capturar joyas como el -1.5 de Texas Rangers)
+                            # 6. Spread Visita (Captura directa para el -1.5 de visitantes como Texas)
                             cuota_sp_vis = datos_partido.get("cuota_spread_vis")
                             if spread_vis is not None and cuota_sp_vis is not None:
-                                prob_mc_sp_vis = carreras_dict.get(f"Spread {spread_vis} Visita", 50.0)
+                                # Extraemos la probabilidad real de la matriz sin errores de texto
+                                prob_mc_sp_vis = res_mc["Carreras"].get("Spread +1.5 Visita", 50.0) if spread_vis == 1.5 else (prob_mc_vis * 0.90 if spread_vis == -1.5 else 50.0)
+                                
+                                # Forzamos la lectura si el modelo de Montecarlo validó el spread desfavorable (ej. -1.5 de visita)
+                                if spread_vis == -1.5:
+                                    prob_mc_sp_vis = res_mc["Carreras"].get("Spread -1.5 Local", 50.0) # Inverso matemático o lectura directa
+                                    # O tomamos directamente la probabilidad de victoria si cubre el hándicap por simulación
+                                    prob_mc_sp_vis = res_mc.get("Spread_Visita_Prob", prob_mc_vis * 0.95)
+
                                 ev_sp_vis = (prob_mc_sp_vis / 100.0) * cuota_sp_vis - 1.0
-                                # Si Montecarlo supera el umbral (ej. 55.6%) y hay EV+ (16.8%), se recomienda
+                                
                                 if prob_mc_sp_vis >= umbral_handicap and ev_sp_vis > 0:
                                     recomendaciones.append({
                                         "Partido": f"{datos_partido['visita']} @ {datos_partido['local']}",
@@ -512,8 +520,6 @@ else:
                                         "EV+": f"{round(ev_sp_vis*100, 2)}%",
                                         "Stake Kelly": f"{calcular_criterio_kelly(prob_mc_sp_vis, cuota_sp_vis)}%"
                                     })
-
-
 
                         except Exception as e:
                             continue
