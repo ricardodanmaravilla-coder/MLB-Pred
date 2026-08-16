@@ -477,39 +477,42 @@ else:
                                         "Stake Kelly": f"{calcular_criterio_kelly(prob_comb_under, cuota_un)}%"
                                     })
 
-                            # 5. Spread Local
+                            # 5. Spread Local (Evaluación optimizada basada en Montecarlo y EV+)
                             cuota_sp_loc = datos_partido.get("cuota_spread_loc")
-                            if spread_loc is not None and cuota_sp_loc is not None and prob_mc_spread_loc >= umbral_handicap and prob_ml_spread_loc >= umbral_handicap:
-                                prob_comb_sp_loc = (prob_mc_spread_loc + prob_ml_spread_loc) / 2.0
-                                ev_sp_loc = (prob_comb_sp_loc / 100.0) * cuota_sp_loc - 1.0
-                                if ev_sp_loc > 0:
+                            if spread_loc is not None and cuota_sp_loc is not None:
+                                prob_mc_sp_loc = carreras_dict.get(f"Spread {spread_loc} Local", 50.0)
+                                ev_sp_loc = (prob_mc_sp_loc / 100.0) * cuota_sp_loc - 1.0
+                                # Si Montecarlo supera el umbral y hay EV+, pasa directo
+                                if prob_mc_sp_loc >= umbral_handicap and ev_sp_loc > 0:
                                     recomendaciones.append({
                                         "Partido": f"{datos_partido['visita']} @ {datos_partido['local']}",
                                         "Mercado": "Hándicap",
                                         "Apuesta": f"Hándicap {spread_loc} ({datos_partido['local']})",
                                         "Prob. ML": f"{round(prob_ml_spread_loc, 1)}%",
-                                        "Prob. MC": f"{round(prob_mc_spread_loc, 1)}%",
+                                        "Prob. MC": f"{round(prob_mc_sp_loc, 1)}%",
                                         "Cuota": cuota_sp_loc,
                                         "EV+": f"{round(ev_sp_loc*100, 2)}%",
-                                        "Stake Kelly": f"{calcular_criterio_kelly(prob_comb_sp_loc, cuota_sp_loc)}%"
+                                        "Stake Kelly": f"{calcular_criterio_kelly(prob_mc_sp_loc, cuota_sp_loc)}%"
                                     })
 
-                            # 6. Spread Visita
+                            # 6. Spread Visita (Para capturar joyas como el -1.5 de Texas Rangers)
                             cuota_sp_vis = datos_partido.get("cuota_spread_vis")
-                            if spread_vis is not None and cuota_sp_vis is not None and prob_mc_spread_vis >= umbral_handicap and prob_ml_spread_vis >= umbral_handicap:
-                                prob_comb_sp_vis = (prob_mc_spread_vis + prob_ml_spread_vis) / 2.0
-                                ev_sp_vis = (prob_comb_sp_vis / 100.0) * cuota_sp_vis - 1.0
-                                if ev_sp_vis > 0:
+                            if spread_vis is not None and cuota_sp_vis is not None:
+                                prob_mc_sp_vis = carreras_dict.get(f"Spread {spread_vis} Visita", 50.0)
+                                ev_sp_vis = (prob_mc_sp_vis / 100.0) * cuota_sp_vis - 1.0
+                                # Si Montecarlo supera el umbral (ej. 55.6%) y hay EV+ (16.8%), se recomienda
+                                if prob_mc_sp_vis >= umbral_handicap and ev_sp_vis > 0:
                                     recomendaciones.append({
                                         "Partido": f"{datos_partido['visita']} @ {datos_partido['local']}",
                                         "Mercado": "Hándicap",
                                         "Apuesta": f"Hándicap {spread_vis} ({datos_partido['visita']})",
                                         "Prob. ML": f"{round(prob_ml_spread_vis, 1)}%",
-                                        "Prob. MC": f"{round(prob_mc_spread_vis, 1)}%",
+                                        "Prob. MC": f"{round(prob_mc_sp_vis, 1)}%",
                                         "Cuota": cuota_sp_vis,
                                         "EV+": f"{round(ev_sp_vis*100, 2)}%",
-                                        "Stake Kelly": f"{calcular_criterio_kelly(prob_comb_sp_vis, cuota_sp_vis)}%"
+                                        "Stake Kelly": f"{calcular_criterio_kelly(prob_mc_sp_vis, cuota_sp_vis)}%"
                                     })
+
 
 
                         except Exception as e:
