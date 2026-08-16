@@ -43,7 +43,6 @@ def simular_partido_mlb(
     viento_mph, direccion_viento, temp_f, linea_carreras_casino,
     df_games=None, num_simulaciones=1000000
 ):
-    # Validación estricta sin números inventados
     if linea_carreras_casino is None or linea_carreras_casino <= 0:
         raise ValueError("Línea de carreras de casino requerida y no disponible.")
 
@@ -64,25 +63,27 @@ def simular_partido_mlb(
     factor_clima = calcular_factor_clima(viento_mph, direccion_viento, temp_f)
     pf_loc = np.clip(float(park_factor) / 100.0, 0.85, 1.15)
 
-    # 2. PROYECCIÓN DE CARRERAS (BaseRuns adaptado)
-    carreras_exp_loc = 4.3 * w_loc_f * ((p_vis_f * 0.65) + (bp_vis_f * 0.35)) * pf_loc * factor_clima
-    carreras_exp_vis = 4.3 * w_vis_f * ((p_loc_f * 0.65) + (bp_loc_f * 0.35)) * (1.0 / pf_loc) * factor_clima
+    # CORRECCIÓN: Subir base a 4.6 (promedio actual) y dar 45% de peso al bullpen
+    carreras_exp_loc = 4.6 * w_loc_f * ((p_vis_f * 0.55) + (bp_vis_f * 0.45)) * pf_loc * factor_clima
+    carreras_exp_vis = 4.6 * w_vis_f * ((p_loc_f * 0.55) + (bp_loc_f * 0.45)) * (1.0 / pf_loc) * factor_clima
 
-    if np.isnan(carreras_exp_loc) or carreras_exp_loc <= 0: carreras_exp_loc = 4.3
-    if np.isnan(carreras_exp_vis) or carreras_exp_vis <= 0: carreras_exp_vis = 4.3
+    if np.isnan(carreras_exp_loc) or carreras_exp_loc <= 0: carreras_exp_loc = 4.6
+    if np.isnan(carreras_exp_vis) or carreras_exp_vis <= 0: carreras_exp_vis = 4.6
 
-    # 3. MODELO 1: PYTHAGENPAT
     exponente = (carreras_exp_loc + carreras_exp_vis) ** 0.285
     prob_pyth_loc = (carreras_exp_loc ** exponente) / ((carreras_exp_loc ** exponente) + (carreras_exp_vis ** exponente)) * 100
 
-    # 4. MODELO 2: H2H HISTÓRICO
     loc_abbr = local if len(local) <= 3 else local[:3].upper()
     vis_abbr = visita if len(visita) <= 3 else visita[:3].upper()
     prob_h2h_loc = obtener_h2h(df_games, loc_abbr, vis_abbr)
 
-    # 5. MODELO 3: MONTECARLO POISSON
-    c_loc_sim = np.random.poisson(carreras_exp_loc, num_simulaciones)
-    c_vis_sim = np.random.poisson(carreras_exp_vis, num_simulaciones)
+    # CORRECCIÓN: Binomial Negativa para simular correctamente los "Overs" y entradas explosivas
+    r_dispersion = 4.5
+    p_loc_nb = r_dispersion / (r_dispersion + carreras_exp_loc)
+    p_vis_nb = r_dispersion / (r_dispersion + carreras_exp_vis)
+
+    c_loc_sim = np.random.negative_binomial(r_dispersion, p_loc_nb, num_simulaciones)
+    c_vis_sim = np.random.negative_binomial(r_dispersion, p_vis_nb, num_simulaciones)
     
     empates = (c_loc_sim == c_vis_sim)
     desempate = np.random.rand(np.sum(empates)) > 0.47 
@@ -91,7 +92,6 @@ def simular_partido_mlb(
 
     prob_mc_loc = np.mean(c_loc_sim > c_vis_sim) * 100
     
-    # Promediar los modelos y limitar
     prob_final_loc = (prob_pyth_loc + prob_h2h_loc + prob_mc_loc) / 3.0
     prob_final_loc = np.clip(prob_final_loc, 35.0, 65.0)
     prob_final_vis = 100.0 - prob_final_loc
@@ -99,7 +99,6 @@ def simular_partido_mlb(
     totales = c_loc_sim + c_vis_sim
     dif_carreras = c_loc_sim - c_vis_sim
 
-    # Probabilidades reales de hándicap calculadas por simulación
     prob_spread_loc_minus_1_5 = np.mean(dif_carreras >= 2) * 100
     prob_spread_vis_plus_1_5 = np.mean(dif_carreras >= -1) * 100
 
