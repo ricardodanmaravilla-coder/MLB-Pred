@@ -4,6 +4,7 @@ import requests
 import numpy as np
 import os
 import datetime
+import math
 
 from modules.montecarlo_mlb import simular_partido_mlb
 from modules.odds_mlb import analizar_apuestas_mlb
@@ -53,13 +54,40 @@ def calcular_criterio_kelly(probabilidad_real, cuota_decimal, fraccion=0.25):
         return 0.0
 
 def estimar_prob_ml(proyeccion, linea, tipo="over"):
-    """Conversor heurístico de proyecciones continuas de ML a Probabilidad (%)"""
-    diff = proyeccion - linea
-    if tipo == "over": prob = 50.0 + (diff * 10.0)
-    elif tipo == "under": prob = 50.0 - (diff * 10.0)
-    elif tipo == "spread_loc": prob = 50.0 + (diff * 12.0)
-    elif tipo == "spread_vis": prob = 50.0 - (diff * 12.0)
-    return max(0.0, min(100.0, prob))
+    """
+    Convierte la proyección del Machine Learning en probabilidad real (%)
+    utilizando la Función de Distribución Acumulada (CDF) Normal.
+    """
+    if proyeccion is None or linea is None:
+        return 50.0
+
+    # Desviación estándar (RMSE) estimada empíricamente para MLB. 
+    # (Si mides el error real de tu modelo, ajusta estos valores)
+    sigma_carreras = 2.45  # El error promedio prediciendo Totales
+    sigma_spread = 1.75    # El error promedio prediciendo el Hándicap (Diferencial)
+    
+    try:
+        if tipo == "over":
+            # Distancia entre tu proyección y la línea del casino
+            z = (proyeccion - linea) / sigma_carreras
+        elif tipo == "under":
+            # Para el under, la lógica se invierte
+            z = (linea - proyeccion) / sigma_carreras
+        elif tipo in ["spread_loc", "spread_vis"]:
+            # El spread en el casino se suma a la proyección (ej. Proyección de 2.0 + Spread de -1.5 = Margen de 0.5)
+            z = (proyeccion + linea) / sigma_spread 
+        else:
+            return 50.0
+
+        # Cálculo matemático estricto de la probabilidad en la curva normal
+        prob = 0.5 * (1.0 + math.erf(z / math.sqrt(2.0)))
+        
+        return max(0.0, min(100.0, round(prob * 100.0, 2)))
+        
+    except Exception as e:
+        print(f"Error en CDF: {e}")
+        return 50.0
+
 
 @st.cache_data(ttl=3600)
 def cargar_datos_historicos():
