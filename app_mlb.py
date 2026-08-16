@@ -21,11 +21,12 @@ EQUIPOS_MAP = {
     "Baltimore Orioles": "BAL", "Tampa Bay Rays": "TB", "Toronto Blue Jays": "TOR",
     "Chicago White Sox": "CWS", "Cleveland Guardians": "CLE", "Detroit Tigers": "DET",
     "Kansas City Royals": "KC", "Minnesota Twins": "MIN", "Los Angeles Angels": "LAA",
-    "Oakland Athletics": "OAK", "Seattle Mariners": "SEA", "Texas Rangers": "TEX",
-    "Chicago Cubs": "CHC", "Cincinnati Reds": "CIN", "Milwaukee Brewers": "MIL",
-    "Pittsburgh Pirates": "PIT", "St. Louis Cardinals": "STL", "Arizona Diamondbacks": "AZ",
-    "Colorado Rockies": "COL", "San Francisco Giants": "SF", "San Diego Padres": "SD",
-    "Miami Marlins": "MIA", "New York Mets": "NYM", "Washington Nationals": "WSH"
+    "Oakland Athletics": "OAK", "Athletics": "OAK", "Sacramento Athletics": "OAK", # Actualizado por reubicación
+    "Seattle Mariners": "SEA", "Texas Rangers": "TEX", "Chicago Cubs": "CHC", 
+    "Cincinnati Reds": "CIN", "Milwaukee Brewers": "MIL", "Pittsburgh Pirates": "PIT", 
+    "St. Louis Cardinals": "STL", "Arizona Diamondbacks": "AZ", "Colorado Rockies": "COL", 
+    "San Francisco Giants": "SF", "San Diego Padres": "SD", "Miami Marlins": "MIA", 
+    "New York Mets": "NYM", "Washington Nationals": "WSH"
 }
 
 def american_to_decimal(am_odds):
