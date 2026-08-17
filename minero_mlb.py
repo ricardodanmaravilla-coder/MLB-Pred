@@ -66,20 +66,25 @@ def extraer_estadisticas_oficiales_mlb():
 def extraer_historico_juegos():
     print("🗓️ Descargando historial de juegos (Resultados por partido)...")
     juegos_data = []
-    bloques_meses = [("01/01", "03/31"), ("04/01", "05/31"), ("06/01", "07/31"), ("08/01", "09/30"), ("10/01", "12/31")]
     
-    # FILTRO INVERTIDO: Ignoramos los que sabemos que NO se han jugado ni tienen score final.
+    # CORRECCIÓN: Tramos de 1 mes exacto para evitar el límite de truncamiento de la API
+    bloques_meses = [
+        ("01/01", "01/31"), ("02/01", "02/28"), ("03/01", "03/31"),
+        ("04/01", "04/30"), ("05/01", "05/31"), ("06/01", "06/30"),
+        ("07/01", "07/31"), ("08/01", "08/31"), ("09/01", "09/30"),
+        ("10/01", "10/31")
+    ]
+    
     estados_ignorados = ['Scheduled', 'Pre-Game', 'Postponed', 'Cancelled', 'Delayed', 'Warmup', 'Preview']
     
     for year in TEMPORADAS:
-        print(f"  -> Obteniendo calendario {year} por bloques...")
+        print(f"  -> Obteniendo calendario {year} por bloques mensuales...")
         for inicio, fin in bloques_meses:
             try:
                 schedule = statsapi.schedule(start_date=f"{inicio}/{year}", end_date=f"{fin}/{year}")
                 for game in schedule:
                     status = game.get('status', 'Unknown')
                     
-                    # Verificamos que no esté cancelado/programado y que ya contenga el puntaje en el JSON
                     if status not in estados_ignorados and 'away_score' in game and 'home_score' in game:
                         juegos_data.append({
                             'GameID': game.get('game_id'), 'Date': game.get('game_date'), 'Season': year,
@@ -87,7 +92,7 @@ def extraer_historico_juegos():
                             'Away_Score': game.get('away_score', 0), 'Home_Score': game.get('home_score', 0),
                             'Innings': game.get('current_inning', 9), 'Venue': game.get('venue_name', 'Unknown')
                         })
-                time.sleep(0.3)
+                time.sleep(0.3) # Pausa para no saturar la API
             except Exception as e:
                 print(f"❌ Error descargando juegos de {inicio} a {fin} en {year}: {e}")
     
@@ -96,6 +101,7 @@ def extraer_historico_juegos():
         df_juegos = df_juegos.drop_duplicates(subset=['GameID'])
         df_juegos.to_csv("data/mlb_games.csv", index=False)
         print(f"✅ Historial guardado: {len(df_juegos)} partidos en data/mlb_games.csv")
+
 
 if __name__ == "__main__":
     print("--- INICIANDO SCRIPT DE MINERÍA ---")
