@@ -68,8 +68,8 @@ def extraer_historico_juegos():
     juegos_data = []
     bloques_meses = [("01/01", "03/31"), ("04/01", "05/31"), ("06/01", "07/31"), ("08/01", "09/30"), ("10/01", "12/31")]
     
-    # En lugar de buscar "Final", ignoramos los que sabemos que NO han terminado
-    estados_ignorados = ['Scheduled', 'Pre-Game', 'Postponed', 'Cancelled', 'Delayed', 'In Progress', 'Warmup']
+    # FILTRO INVERTIDO: Ignoramos los que sabemos que NO se han jugado ni tienen score final.
+    estados_ignorados = ['Scheduled', 'Pre-Game', 'Postponed', 'Cancelled', 'Delayed', 'Warmup', 'Preview']
     
     for year in TEMPORADAS:
         print(f"  -> Obteniendo calendario {year} por bloques...")
@@ -79,11 +79,7 @@ def extraer_historico_juegos():
                 for game in schedule:
                     status = game.get('status', 'Unknown')
                     
-                    # Modo Espía: Imprimir en pantalla los juegos del 15 y 16 de Agosto para ver el error de la API
-                    if year == 2026 and ("08-15" in game.get('game_date', '') or "08-16" in game.get('game_date', '') or "08/15" in game.get('game_date', '') or "08/16" in game.get('game_date', '')):
-                        print(f"🔎 DEBUG API: {game.get('game_date')} | {game.get('away_name')} @ {game.get('home_name')} | Status API: '{status}' | Score: {game.get('away_score')}-{game.get('home_score')}")
-
-                    # Si el estado no es "Cancelado/Pospuesto/Programado" y ya existen carreras, lo guardamos
+                    # Verificamos que no esté cancelado/programado y que ya contenga el puntaje en el JSON
                     if status not in estados_ignorados and 'away_score' in game and 'home_score' in game:
                         juegos_data.append({
                             'GameID': game.get('game_id'), 'Date': game.get('game_date'), 'Season': year,
@@ -100,8 +96,6 @@ def extraer_historico_juegos():
         df_juegos = df_juegos.drop_duplicates(subset=['GameID'])
         df_juegos.to_csv("data/mlb_games.csv", index=False)
         print(f"✅ Historial guardado: {len(df_juegos)} partidos en data/mlb_games.csv")
-
-
 
 if __name__ == "__main__":
     print("--- INICIANDO SCRIPT DE MINERÍA ---")
