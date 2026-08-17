@@ -2,6 +2,7 @@ import os
 import time
 import pandas as pd
 import statsapi
+from datetime import date, timedelta
 
 TEMPORADAS = [2020, 2021, 2022, 2023, 2024, 2025, 2026]
 
@@ -64,44 +65,69 @@ def extraer_estadisticas_oficiales_mlb():
         print(f"✅ Pitcheo guardado exitosamente.")
 
 def extraer_historico_juegos():
-    print("🗓️ Descargando historial de juegos (Resultados por partido)...")
-    juegos_data = []
+    print("🗓️ Actualizando historial de juegos de forma inteligente...")
+    archivo_csv = "data/mlb_games.csv"
     
-    # CORRECCIÓN: Tramos de 1 mes exacto para evitar el límite de truncamiento de la API
-    bloques_meses = [
-        ("01/01", "01/31"), ("02/01", "02/28"), ("03/01", "03/31"),
-        ("04/01", "04/30"), ("05/01", "05/31"), ("06/01", "06/30"),
-        ("07/01", "07/31"), ("08/01", "08/31"), ("09/01", "09/30"),
-        ("10/01", "10/31")
-    ]
+    # 1. Leer el archivo que ya tienes para no descargar todo desde cero
+    if os.path.exists(archivo_csv):
+        df_existente = pd.read_csv(archivo_csv)
+        # Encontrar la fecha más reciente en tu archivo
+        ultima_fecha = pd.to_datetime(df_existente['Date']).max()
+        print(f"✅ Archivo encontrado. Último partido registrado: {ultima_fecha.strftime('%Y-%m-%d')}")
+        # Retrocedemos 3 días por seguridad (por si algún juego suspendido se reanudó)
+        inicio_busqueda = (ultima_fecha - timedelta(days=3))
+    else:
+        print("⚠️ No se encontró archivo previo. Se descargará desde 2020 (tomará tiempo)...")
+        ultima_fecha = pd.to_datetime("2020-01-01")
+        df_existente = pd.DataFrame()
+        inicio_busqueda = ultima_fecha
+
+    # 2. Configurar la búsqueda solo para los días que te faltan
+    hoy = date.today()
+    inicio_str = inicio_busqueda.strftime('%m/%d/%Y')
+    fin_str = hoy.strftime('%m/%d/%Y')
     
+    print(f"🔍 Buscando partidos estrictamente desde {inicio_str} hasta {fin_str}...")
+    
+    nuevos_juegos = []
     estados_ignorados = ['Scheduled', 'Pre-Game', 'Postponed', 'Cancelled', 'Delayed', 'Warmup', 'Preview']
     
-    for year in TEMPORADAS:
-        print(f"  -> Obteniendo calendario {year} por bloques mensuales...")
-        for inicio, fin in bloques_meses:
+    try:
+        schedule = statsapi.schedule(start_date=inicio_str, end_date=fin_str)
+        for game in schedule:
+            status = game.get('status', 'Unknown')
+            if status not in estados_ignorados and 'away_score' in game and 'home_score' in game:
+                nuevos_juegos.append({
+                    'GameID': game.get('game_id'), 'Date': game.get('game_date'), 'Season': game.get('game_date')[:4],
+                    'Away': game.get('away_name'), 'Home': game.get('home_name'),
+                    'Away_Score': game.get('away_score', 0), 'Home_Score': game.get('home_score', 0),
+                    'Innings': game.get('current_inning', 9), 'Venue': game.get('venue_name', 'Unknown')
+                })
+        
+        if nuevos_juegos:
+            df_nuevos = pd.DataFrame(nuevos_juegos)
+            print(f"📥 La API entregó {len(df_nuevos)} juegos en este periodo corto.")
+            
+            # Fusionar los juegos viejos con los recién descargados
+            if not df_existente.empty:
+                df_final = pd.concat([df_existente, df_nuevos])
+            else:
+                df_final = df_nuevos
+                
+            # Eliminar duplicados manteniendo el resultado final más reciente
+            df_final = df_final.drop_duplicates(subset=['GameID'], keep='last')
+            
+            # 3. Guardado con alerta de permisos (Para detectar si Excel bloquea el guardado)
             try:
-                schedule = statsapi.schedule(start_date=f"{inicio}/{year}", end_date=f"{fin}/{year}")
-                for game in schedule:
-                    status = game.get('status', 'Unknown')
-                    
-                    if status not in estados_ignorados and 'away_score' in game and 'home_score' in game:
-                        juegos_data.append({
-                            'GameID': game.get('game_id'), 'Date': game.get('game_date'), 'Season': year,
-                            'Away': game.get('away_name'), 'Home': game.get('home_name'),
-                            'Away_Score': game.get('away_score', 0), 'Home_Score': game.get('home_score', 0),
-                            'Innings': game.get('current_inning', 9), 'Venue': game.get('venue_name', 'Unknown')
-                        })
-                time.sleep(0.3) # Pausa para no saturar la API
-            except Exception as e:
-                print(f"❌ Error descargando juegos de {inicio} a {fin} en {year}: {e}")
-    
-    df_juegos = pd.DataFrame(juegos_data)
-    if not df_juegos.empty:
-        df_juegos = df_juegos.drop_duplicates(subset=['GameID'])
-        df_juegos.to_csv("data/mlb_games.csv", index=False)
-        print(f"✅ Historial guardado: {len(df_juegos)} partidos en data/mlb_games.csv")
-
+                df_final.to_csv(archivo_csv, index=False)
+                print(f"✅ ¡ÉXITO! Archivo mlb_games.csv actualizado y guardado. Partidos totales: {len(df_final)}")
+            except PermissionError:
+                print("❌ ERROR CRÍTICO: El archivo mlb_games.csv está abierto en Excel u otro programa. Ciérralo y vuelve a correr el script.")
+        else:
+            print("🤷‍♂️ No hay partidos nuevos para agregar en estas fechas.")
+            
+    except Exception as e:
+        print(f"❌ Error conectando con la API de la MLB: {e}")
 
 if __name__ == "__main__":
     print("--- INICIANDO SCRIPT DE MINERÍA ---")
@@ -112,4 +138,3 @@ if __name__ == "__main__":
     extraer_historico_juegos()
     
     print("🎯 ¡Minería de datos MLB completada con éxito!")
-    
