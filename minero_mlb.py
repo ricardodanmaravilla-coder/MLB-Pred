@@ -68,13 +68,16 @@ def extraer_historico_juegos():
     juegos_data = []
     bloques_meses = [("01/01", "03/31"), ("04/01", "05/31"), ("06/01", "07/31"), ("08/01", "09/30"), ("10/01", "12/31")]
     
+    # Agregamos "Game Over" para capturar los juegos recién terminados
+    estados_validos = ['Final', 'Completed Early', 'Game Over']
+    
     for year in TEMPORADAS:
         print(f"  -> Obteniendo calendario {year} por bloques...")
         for inicio, fin in bloques_meses:
             try:
                 schedule = statsapi.schedule(start_date=f"{inicio}/{year}", end_date=f"{fin}/{year}")
                 for game in schedule:
-                    if game.get('status') in ['Final', 'Completed Early']:
+                    if game.get('status') in estados_validos:
                         juegos_data.append({
                             'GameID': game.get('game_id'), 'Date': game.get('game_date'), 'Season': year,
                             'Away': game.get('away_name'), 'Home': game.get('home_name'),
@@ -90,6 +93,7 @@ def extraer_historico_juegos():
         df_juegos = df_juegos.drop_duplicates(subset=['GameID'])
         df_juegos.to_csv("data/mlb_games.csv", index=False)
         print(f"✅ Historial guardado: {len(df_juegos)} partidos en data/mlb_games.csv")
+
 
 if __name__ == "__main__":
     print("--- INICIANDO SCRIPT DE MINERÍA ---")
