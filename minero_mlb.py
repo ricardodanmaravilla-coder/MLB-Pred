@@ -4,7 +4,7 @@ import pandas as pd
 import statsapi
 from datetime import date, timedelta
 
-TEMPORADAS = [2020, 2021, 2022, 2023, 2024, 2025, 2026]
+TEMPORADAS = [2021, 2022, 2023, 2024, 2025, 2026]
 
 def extraer_estadisticas_oficiales_mlb():
     print("⚾ [INICIO] Extrayendo Sabermetría Oficial de MLB...")
