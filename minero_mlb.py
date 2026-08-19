@@ -4,7 +4,7 @@ import pandas as pd
 import statsapi
 from datetime import date, timedelta
 
-TEMPORADAS = [2021, 2022, 2023, 2024, 2025, 2026]
+TEMPORADAS = [2020, 2021, 2022, 2023, 2024, 2025, 2026]
 
 def extraer_estadisticas_oficiales_mlb():
     print("⚾ [INICIO] Extrayendo Sabermetría Oficial de MLB...")
@@ -58,31 +58,32 @@ def extraer_estadisticas_oficiales_mlb():
     
     if not df_bateo.empty:
         df_bateo.to_csv("data/mlb_batting.csv", index=False)
-        print(f"✅ Bateo guardado exitosamente.")
+        print("✅ Bateo guardado exitosamente.")
         
     if not df_pitcheo.empty:
         df_pitcheo.to_csv("data/mlb_pitching.csv", index=False)
-        print(f"✅ Pitcheo guardado exitosamente.")
+        print("✅ Pitcheo guardado exitosamente.")
 
 def extraer_historico_juegos():
-    print("🗓️ Actualizando historial de juegos de forma inteligente...")
+    print("\n🗓️ Actualizando historial de juegos de forma inteligente...")
     archivo_csv = "data/mlb_games.csv"
+    
+    filas_antes = 0
     
     # 1. Leer el archivo que ya tienes para no descargar todo desde cero
     if os.path.exists(archivo_csv):
         df_existente = pd.read_csv(archivo_csv)
-        # Encontrar la fecha más reciente en tu archivo
+        filas_antes = len(df_existente)
         ultima_fecha = pd.to_datetime(df_existente['Date']).max()
-        print(f"✅ Archivo encontrado. Último partido registrado: {ultima_fecha.strftime('%Y-%m-%d')}")
-        # Retrocedemos 3 días por seguridad (por si algún juego suspendido se reanudó)
+        print(f"✅ Archivo encontrado con {filas_antes} partidos. Último partido registrado: {ultima_fecha.strftime('%Y-%m-%d')}")
         inicio_busqueda = (ultima_fecha - timedelta(days=3))
     else:
-        print("⚠️ No se encontró archivo previo. Se descargará desde 2020 (tomará tiempo)...")
-        ultima_fecha = pd.to_datetime("2020-01-01")
+        print("⚠️ No se encontró archivo previo. Se descargará desde 2021 (tomará tiempo)...")
+        ultima_fecha = pd.to_datetime("2021-01-01")
         df_existente = pd.DataFrame()
         inicio_busqueda = ultima_fecha
 
-    # 2. Configurar la búsqueda solo para los días que te faltan
+    # 2. Configurar la búsqueda
     hoy = date.today()
     inicio_str = inicio_busqueda.strftime('%m/%d/%Y')
     fin_str = hoy.strftime('%m/%d/%Y')
@@ -108,7 +109,6 @@ def extraer_historico_juegos():
             df_nuevos = pd.DataFrame(nuevos_juegos)
             print(f"📥 La API entregó {len(df_nuevos)} juegos en este periodo corto.")
             
-            # Fusionar los juegos viejos con los recién descargados
             if not df_existente.empty:
                 df_final = pd.concat([df_existente, df_nuevos])
             else:
@@ -116,11 +116,19 @@ def extraer_historico_juegos():
                 
             # Eliminar duplicados manteniendo el resultado final más reciente
             df_final = df_final.drop_duplicates(subset=['GameID'], keep='last')
+            filas_despues = len(df_final)
             
-            # 3. Guardado con alerta de permisos (Para detectar si Excel bloquea el guardado)
+            print(f"📊 Resumen: Tenías {filas_antes} juegos. Ahora tienes {filas_despues} juegos.")
+            
+            if filas_despues > filas_antes:
+                print(f"🚀 ¡Se han añadido {filas_despues - filas_antes} partidos completamente nuevos!")
+            else:
+                print("🔄 Se actualizaron resultados recientes, pero no hay partidos de días nuevos.")
+            
+            # 3. Guardado con alerta de permisos
             try:
                 df_final.to_csv(archivo_csv, index=False)
-                print(f"✅ ¡ÉXITO! Archivo mlb_games.csv actualizado y guardado. Partidos totales: {len(df_final)}")
+                print(f"✅ ¡ÉXITO! Archivo {archivo_csv} actualizado y sobrescrito en tu disco duro.")
             except PermissionError:
                 print("❌ ERROR CRÍTICO: El archivo mlb_games.csv está abierto en Excel u otro programa. Ciérralo y vuelve a correr el script.")
         else:
