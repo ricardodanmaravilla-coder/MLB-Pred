@@ -76,15 +76,19 @@ def extraer_historico_juegos():
         ultima_fecha = pd.to_datetime(df_existente['Date']).max()
         print(f"✅ Archivo encontrado con {filas_antes} partidos. Último: {ultima_fecha.strftime('%Y-%m-%d')}")
         
-        # Estrategia Rápida: Solo pedimos los últimos días en un solo tramo
+        # Estrategia Rápida: Solo pedimos desde 3 días antes de la última fecha hasta hoy
         inicio = ultima_fecha - timedelta(days=3)
         fin = date.today()
         tramos_descarga.append((inicio.strftime('%m/%d/%Y'), fin.strftime('%m/%d/%Y')))
     else:
-        print("⚠️ No se encontró archivo. Construyendo desde 2021 por bloques para no saturar la API...")
-        bloques = [("01/01", "03/31"), ("04/01", "05/31"), ("06/01", "07/31"), ("08/01", "09/30"), ("10/01", "12/31")]
-        
-        # Estrategia Total: Partimos los 6 años en pedazos de 2-3 meses
+        print("⚠️ No se encontró archivo. Construyendo desde 2021 por bloques MENSUALES para no saturar la API...")
+        # Bloques reducidos a 1 mes exacto para evitar Error 503
+        bloques = [
+            ("01/01", "01/31"), ("02/01", "02/29"), ("03/01", "03/31"),
+            ("04/01", "04/30"), ("05/01", "05/31"), ("06/01", "06/30"),
+            ("07/01", "07/31"), ("08/01", "08/31"), ("09/01", "09/30"),
+            ("10/01", "12/31") # Temporada baja, se puede agrupar
+        ]
         for year in TEMPORADAS:
             for b_inicio, b_fin in bloques:
                 tramos_descarga.append((f"{b_inicio}/{year}", f"{b_fin}/{year}"))
@@ -92,23 +96,29 @@ def extraer_historico_juegos():
     nuevos_juegos = []
     estados_ignorados = ['Scheduled', 'Pre-Game', 'Postponed', 'Cancelled', 'Delayed', 'Warmup', 'Preview']
     
-    # 2. Ejecutar descargas por tramos para evitar bloqueos
+    # 2. Ejecutar descargas por tramos con SISTEMA DE REINTENTOS
     for inc_str, fin_str in tramos_descarga:
         print(f"🔍 Buscando tramo: {inc_str} a {fin_str}...")
-        try:
-            schedule = statsapi.schedule(start_date=inc_str, end_date=fin_str)
-            for game in schedule:
-                status = game.get('status', 'Unknown')
-                if status not in estados_ignorados and 'away_score' in game and 'home_score' in game:
-                    nuevos_juegos.append({
-                        'GameID': game.get('game_id'), 'Date': game.get('game_date'), 'Season': str(game.get('game_date'))[:4],
-                        'Away': game.get('away_name'), 'Home': game.get('home_name'),
-                        'Away_Score': game.get('away_score', 0), 'Home_Score': game.get('home_score', 0),
-                        'Innings': game.get('current_inning', 9), 'Venue': game.get('venue_name', 'Unknown')
-                    })
-            time.sleep(0.3)
-        except Exception as e:
-            print(f"❌ Error descargando tramo {inc_str}-{fin_str}: {e}")
+        
+        for intento in range(3): # Intenta hasta 3 veces por tramo si hay error 503
+            try:
+                schedule = statsapi.schedule(start_date=inc_str, end_date=fin_str)
+                for game in schedule:
+                    status = game.get('status', 'Unknown')
+                    if status not in estados_ignorados and 'away_score' in game and 'home_score' in game:
+                        nuevos_juegos.append({
+                            'GameID': game.get('game_id'), 'Date': game.get('game_date'), 'Season': str(game.get('game_date'))[:4],
+                            'Away': game.get('away_name'), 'Home': game.get('home_name'),
+                            'Away_Score': game.get('away_score', 0), 'Home_Score': game.get('home_score', 0),
+                            'Innings': game.get('current_inning', 9), 'Venue': game.get('venue_name', 'Unknown')
+                        })
+                time.sleep(0.5)
+                break # Si funciona bien, rompe el ciclo de reintentos y pasa al siguiente mes
+            except Exception as e:
+                print(f"⚠️ Error en intento {intento + 1} para {inc_str}-{fin_str}: {e}")
+                time.sleep(2) # Pausa de 2 segundos para dejar respirar a la API
+                if intento == 2:
+                    print(f"❌ Tramo {inc_str}-{fin_str} omitido definitivamente tras 3 intentos fallidos.")
 
     # 3. Consolidación y Guardado
     if nuevos_juegos:
