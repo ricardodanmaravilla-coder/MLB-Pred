@@ -4,9 +4,10 @@ from sklearn.ensemble import RandomForestClassifier, GradientBoostingRegressor
 
 class PredictorMLMLB:
     def __init__(self):
-        self.modelo_ganador = RandomForestClassifier(n_estimators=150, max_depth=6, random_state=42)
-        self.modelo_carreras = GradientBoostingRegressor(n_estimators=150, max_depth=5, random_state=42)
-        self.modelo_handicap = GradientBoostingRegressor(n_estimators=150, max_depth=5, random_state=42)
+        # Aumentamos ligeramente la profundidad de los árboles ahora que hay 15,000 datos
+        self.modelo_ganador = RandomForestClassifier(n_estimators=150, max_depth=7, random_state=42)
+        self.modelo_carreras = GradientBoostingRegressor(n_estimators=150, max_depth=6, random_state=42)
+        self.modelo_handicap = GradientBoostingRegressor(n_estimators=150, max_depth=6, random_state=42)
         self.entrenado = False
         self.df_games = pd.DataFrame()
 
@@ -24,8 +25,9 @@ class PredictorMLMLB:
             y_runs = []
             y_diff = []
 
-            bat_dict = df_batting.set_index('Team')['wRC+'].to_dict()
-            pit_dict = df_pitching.set_index('Team')['xFIP'].to_dict()
+            # CORRECCIÓN 1: Indexar por Equipo Y Temporada para evitar usar datos del futuro en el pasado
+            bat_dict = df_batting.set_index(['Team', 'Season'])['wRC+'].to_dict()
+            pit_dict = df_pitching.set_index(['Team', 'Season'])['xFIP'].to_dict()
 
             equipos = pd.concat([self.df_games['Home'], self.df_games['Away']]).unique()
             forma_reciente = {equipo: [] for equipo in equipos}
@@ -35,14 +37,16 @@ class PredictorMLMLB:
                 vis = row.get('Away')
                 g_loc = row.get('Home_Score')
                 g_vis = row.get('Away_Score')
+                year = int(row.get('Season', 2026)) # Extraemos el año del partido
                 
-                if pd.isna(g_loc) or pd.isna(g_vis) or loc not in bat_dict or vis not in bat_dict: 
+                if pd.isna(g_loc) or pd.isna(g_vis): 
                     continue
                 
-                wrc_l = bat_dict.get(loc, 100.0)
-                wrc_v = bat_dict.get(vis, 100.0)
-                xfip_l = pit_dict.get(loc, 4.0)
-                xfip_v = pit_dict.get(vis, 4.0)
+                # Buscamos las métricas exactas de ese año (si no existe, usa el promedio de liga)
+                wrc_l = bat_dict.get((loc, year), 100.0)
+                wrc_v = bat_dict.get((vis, year), 100.0)
+                xfip_l = pit_dict.get((loc, year), 4.0)
+                xfip_v = pit_dict.get((vis, year), 4.0)
 
                 racha_l = sum(forma_reciente.get(loc, [-1])[-5:]) if len(forma_reciente.get(loc, [])) > 0 else 2.5
                 racha_v = sum(forma_reciente.get(vis, [-1])[-5:]) if len(forma_reciente.get(vis, [])) > 0 else 2.5
@@ -54,7 +58,6 @@ class PredictorMLMLB:
                     forma_reciente[loc].append(0)
                     forma_reciente[vis].append(1)
 
-                # CORRECCIÓN: Usar valores absolutos normalizados en lugar de restas
                 wrc_l_norm = float(wrc_l) / 100.0
                 wrc_v_norm = float(wrc_v) / 100.0
                 xfip_l_norm = float(xfip_l) / 4.0
@@ -62,14 +65,20 @@ class PredictorMLMLB:
                 r_l_norm = float(racha_l) / 5.0
                 r_v_norm = float(racha_v) / 5.0
 
-                feat = [wrc_l_norm, wrc_v_norm, xfip_l_norm, xfip_v_norm, r_l_norm, r_v_norm]
+                # CORRECCIÓN 2: Métricas de Choque Directo (Matchup)
+                # Si el bateo local es alto y el pitcheo visitante es malo (alto xFIP), la ventaja sube.
+                ventaja_ofensiva_loc = wrc_l_norm / xfip_v_norm
+                ventaja_ofensiva_vis = wrc_v_norm / xfip_l_norm
+
+                # Entregamos 8 variables al modelo en lugar de 6
+                feat = [wrc_l_norm, wrc_v_norm, xfip_l_norm, xfip_v_norm, r_l_norm, r_v_norm, ventaja_ofensiva_loc, ventaja_ofensiva_vis]
                 
                 X.append(feat)
                 y_win.append(1 if g_loc > g_vis else 0)
                 y_runs.append(g_loc + g_vis)
                 y_diff.append(g_loc - g_vis)
 
-            if len(X) > 100:
+            if len(X) > 1000: # Exigimos al menos 1000 juegos históricos para confiar en el modelo
                 self.modelo_ganador.fit(X, y_win)
                 self.modelo_carreras.fit(X, y_runs)
                 self.modelo_handicap.fit(X, y_diff)
@@ -99,7 +108,6 @@ class PredictorMLMLB:
                                     sum((juegos_vis['Away'] == vis_abbr) & (juegos_vis['Away_Score'] > juegos_vis['Home_Score']))
                     racha_vis = victorias_vis
 
-            # CORRECCIÓN: Entradas absolutas idénticas a la función de entrenamiento
             wrc_l_norm = float(wrc_loc) / 100.0
             wrc_v_norm = float(wrc_vis) / 100.0
             xfip_l_norm = float(xfip_loc) / 4.0
@@ -107,11 +115,14 @@ class PredictorMLMLB:
             r_l_norm = float(racha_loc) / 5.0
             r_v_norm = float(racha_vis) / 5.0
 
-            features = [[wrc_l_norm, wrc_v_norm, xfip_l_norm, xfip_v_norm, r_l_norm, r_v_norm]]
+            # Calculamos las mismas métricas de choque directo para la predicción de hoy
+            ventaja_ofensiva_loc = wrc_l_norm / xfip_v_norm
+            ventaja_ofensiva_vis = wrc_v_norm / xfip_l_norm
+
+            features = [[wrc_l_norm, wrc_v_norm, xfip_l_norm, xfip_v_norm, r_l_norm, r_v_norm, ventaja_ofensiva_loc, ventaja_ofensiva_vis]]
             
             probs = self.modelo_ganador.predict_proba(features)[0]
             
-            # Suavización más ligera para permitir alertas fuertes de Moneyline
             p_local_suavizada = (probs[1] * 0.94) + 0.03 
             p_visita_suavizada = (probs[0] * 0.94) + 0.03
 
@@ -127,4 +138,3 @@ class PredictorMLMLB:
         except Exception as e:
             print(f"Error en predicción ML: {e}")
             return {'Probabilidad_Local': 50.0, 'Probabilidad_Visita': 50.0, 'Proyeccion_Carreras': 8.5, 'Proyeccion_Handicap_Local': 0.0}
-            
