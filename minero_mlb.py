@@ -4,7 +4,7 @@ import pandas as pd
 import statsapi
 from datetime import date, timedelta
 
-TEMPORADAS = [2020, 2021, 2022, 2023, 2024, 2025, 2026]
+TEMPORADAS = [2021, 2022, 2023, 2024, 2025, 2026]
 
 def extraer_estadisticas_oficiales_mlb():
     print("⚾ [INICIO] Extrayendo Sabermetría Oficial de MLB...")
@@ -24,7 +24,6 @@ def extraer_estadisticas_oficiales_mlb():
                 if team_abbr == 'UNK' or not equipo.get('active', True):
                     continue
                     
-                # Bateo
                 stats_bat = statsapi.get('team_stats', {'teamId': team_id, 'season': year, 'group': 'hitting', 'stats': 'season'})
                 if stats_bat and 'stats' in stats_bat and stats_bat['stats']:
                     splits = stats_bat['stats'][0].get('splits', [])
@@ -36,7 +35,6 @@ def extraer_estadisticas_oficiales_mlb():
                         stat_dict['wRC+'] = float(ops_val) * 100 if ops_val else 70.0
                         bateo_data.append(stat_dict)
                 
-                # Pitcheo (Datos de Equipo / Bullpen)
                 stats_pit = statsapi.get('team_stats', {'teamId': team_id, 'season': year, 'group': 'pitching', 'stats': 'season'})
                 if stats_pit and 'stats' in stats_pit and stats_pit['stats']:
                     splits = stats_pit['stats'][0].get('splits', [])
@@ -49,7 +47,7 @@ def extraer_estadisticas_oficiales_mlb():
                         stat_dict['ERA'] = float(era_val) if era_val != '-.--' else 4.0
                         pitcheo_data.append(stat_dict)
                         
-                time.sleep(0.5)
+                time.sleep(0.3)
         except Exception as e:
             print(f"❌ Error en temporada {year}: {e}")
 
@@ -65,77 +63,78 @@ def extraer_estadisticas_oficiales_mlb():
         print("✅ Pitcheo guardado exitosamente.")
 
 def extraer_historico_juegos():
-    print("\n🗓️ Actualizando historial de juegos de forma inteligente...")
+    print("\n🗓️ Actualizando historial de juegos de forma híbrida...")
     archivo_csv = "data/mlb_games.csv"
-    
     filas_antes = 0
+    df_existente = pd.DataFrame()
+    tramos_descarga = []
     
-    # 1. Leer el archivo que ya tienes para no descargar todo desde cero
+    # 1. Decidir la estrategia de descarga (Rápida vs Reconstrucción Total)
     if os.path.exists(archivo_csv):
         df_existente = pd.read_csv(archivo_csv)
         filas_antes = len(df_existente)
         ultima_fecha = pd.to_datetime(df_existente['Date']).max()
-        print(f"✅ Archivo encontrado con {filas_antes} partidos. Último partido registrado: {ultima_fecha.strftime('%Y-%m-%d')}")
-        inicio_busqueda = (ultima_fecha - timedelta(days=3))
+        print(f"✅ Archivo encontrado con {filas_antes} partidos. Último: {ultima_fecha.strftime('%Y-%m-%d')}")
+        
+        # Estrategia Rápida: Solo pedimos los últimos días en un solo tramo
+        inicio = ultima_fecha - timedelta(days=3)
+        fin = date.today()
+        tramos_descarga.append((inicio.strftime('%m/%d/%Y'), fin.strftime('%m/%d/%Y')))
     else:
-        print("⚠️ No se encontró archivo previo. Se descargará desde 2021 (tomará tiempo)...")
-        ultima_fecha = pd.to_datetime("2021-01-01")
-        df_existente = pd.DataFrame()
-        inicio_busqueda = ultima_fecha
+        print("⚠️ No se encontró archivo. Construyendo desde 2021 por bloques para no saturar la API...")
+        bloques = [("01/01", "03/31"), ("04/01", "05/31"), ("06/01", "07/31"), ("08/01", "09/30"), ("10/01", "12/31")]
+        
+        # Estrategia Total: Partimos los 6 años en pedazos de 2-3 meses
+        for year in TEMPORADAS:
+            for b_inicio, b_fin in bloques:
+                tramos_descarga.append((f"{b_inicio}/{year}", f"{b_fin}/{year}"))
 
-    # 2. Configurar la búsqueda
-    hoy = date.today()
-    inicio_str = inicio_busqueda.strftime('%m/%d/%Y')
-    fin_str = hoy.strftime('%m/%d/%Y')
-    
-    print(f"🔍 Buscando partidos estrictamente desde {inicio_str} hasta {fin_str}...")
-    
     nuevos_juegos = []
     estados_ignorados = ['Scheduled', 'Pre-Game', 'Postponed', 'Cancelled', 'Delayed', 'Warmup', 'Preview']
     
-    try:
-        schedule = statsapi.schedule(start_date=inicio_str, end_date=fin_str)
-        for game in schedule:
-            status = game.get('status', 'Unknown')
-            if status not in estados_ignorados and 'away_score' in game and 'home_score' in game:
-                nuevos_juegos.append({
-                    'GameID': game.get('game_id'), 'Date': game.get('game_date'), 'Season': game.get('game_date')[:4],
-                    'Away': game.get('away_name'), 'Home': game.get('home_name'),
-                    'Away_Score': game.get('away_score', 0), 'Home_Score': game.get('home_score', 0),
-                    'Innings': game.get('current_inning', 9), 'Venue': game.get('venue_name', 'Unknown')
-                })
+    # 2. Ejecutar descargas por tramos para evitar bloqueos
+    for inc_str, fin_str in tramos_descarga:
+        print(f"🔍 Buscando tramo: {inc_str} a {fin_str}...")
+        try:
+            schedule = statsapi.schedule(start_date=inc_str, end_date=fin_str)
+            for game in schedule:
+                status = game.get('status', 'Unknown')
+                if status not in estados_ignorados and 'away_score' in game and 'home_score' in game:
+                    nuevos_juegos.append({
+                        'GameID': game.get('game_id'), 'Date': game.get('game_date'), 'Season': str(game.get('game_date'))[:4],
+                        'Away': game.get('away_name'), 'Home': game.get('home_name'),
+                        'Away_Score': game.get('away_score', 0), 'Home_Score': game.get('home_score', 0),
+                        'Innings': game.get('current_inning', 9), 'Venue': game.get('venue_name', 'Unknown')
+                    })
+            time.sleep(0.3)
+        except Exception as e:
+            print(f"❌ Error descargando tramo {inc_str}-{fin_str}: {e}")
+
+    # 3. Consolidación y Guardado
+    if nuevos_juegos:
+        df_nuevos = pd.DataFrame(nuevos_juegos)
+        print(f"📥 La API entregó un total de {len(df_nuevos)} juegos en esta sesión.")
         
-        if nuevos_juegos:
-            df_nuevos = pd.DataFrame(nuevos_juegos)
-            print(f"📥 La API entregó {len(df_nuevos)} juegos en este periodo corto.")
-            
-            if not df_existente.empty:
-                df_final = pd.concat([df_existente, df_nuevos])
-            else:
-                df_final = df_nuevos
-                
-            # Eliminar duplicados manteniendo el resultado final más reciente
-            df_final = df_final.drop_duplicates(subset=['GameID'], keep='last')
-            filas_despues = len(df_final)
-            
-            print(f"📊 Resumen: Tenías {filas_antes} juegos. Ahora tienes {filas_despues} juegos.")
-            
-            if filas_despues > filas_antes:
-                print(f"🚀 ¡Se han añadido {filas_despues - filas_antes} partidos completamente nuevos!")
-            else:
-                print("🔄 Se actualizaron resultados recientes, pero no hay partidos de días nuevos.")
-            
-            # 3. Guardado con alerta de permisos
-            try:
-                df_final.to_csv(archivo_csv, index=False)
-                print(f"✅ ¡ÉXITO! Archivo {archivo_csv} actualizado y sobrescrito en tu disco duro.")
-            except PermissionError:
-                print("❌ ERROR CRÍTICO: El archivo mlb_games.csv está abierto en Excel u otro programa. Ciérralo y vuelve a correr el script.")
+        if not df_existente.empty:
+            df_final = pd.concat([df_existente, df_nuevos])
         else:
-            print("🤷‍♂️ No hay partidos nuevos para agregar en estas fechas.")
+            df_final = df_nuevos
             
-    except Exception as e:
-        print(f"❌ Error conectando con la API de la MLB: {e}")
+        df_final = df_final.drop_duplicates(subset=['GameID'], keep='last')
+        filas_despues = len(df_final)
+        
+        if filas_despues > filas_antes:
+            print(f"🚀 ¡Se han añadido {filas_despues - filas_antes} partidos nuevos al archivo!")
+        else:
+            print("🔄 Se actualizaron scores recientes, sin añadir filas nuevas.")
+            
+        try:
+            df_final.to_csv(archivo_csv, index=False)
+            print(f"✅ ¡ÉXITO! Archivo {archivo_csv} guardado con {len(df_final)} partidos totales.")
+        except PermissionError:
+            print("❌ ERROR: El archivo mlb_games.csv está bloqueado por otro programa.")
+    else:
+        print("🤷‍♂️ No hay partidos nuevos extraídos de la API.")
 
 if __name__ == "__main__":
     print("--- INICIANDO SCRIPT DE MINERÍA ---")
@@ -145,4 +144,4 @@ if __name__ == "__main__":
     extraer_estadisticas_oficiales_mlb()
     extraer_historico_juegos()
     
-    print("🎯 ¡Minería de datos MLB completada con éxito!")
+    print("🎯 ¡Minería completada con éxito!")
