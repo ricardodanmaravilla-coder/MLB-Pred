@@ -69,20 +69,15 @@ def estimar_prob_ml(proyeccion, linea, tipo="over"):
     
     try:
         if tipo == "over":
-            # Distancia entre tu proyección y la línea del casino
             z = (proyeccion - linea) / sigma_carreras
         elif tipo == "under":
-            # Para el under, la lógica se invierte
             z = (linea - proyeccion) / sigma_carreras
         elif tipo in ["spread_loc", "spread_vis"]:
-            # El spread en el casino se suma a la proyección (ej. Proyección de 2.0 + Spread de -1.5 = Margen de 0.5)
             z = (proyeccion + linea) / sigma_spread 
         else:
             return 50.0
 
-        # Cálculo matemático estricto de la probabilidad en la curva normal
         prob = 0.5 * (1.0 + math.erf(z / math.sqrt(2.0)))
-        
         return max(0.0, min(100.0, round(prob * 100.0, 2)))
         
     except Exception as e:
@@ -308,37 +303,45 @@ else:
                             continue
                         
                         try:
-                            wrc_loc = float(df_bat[df_bat['Team'] == loc_abbr]['wRC+'].mean())
-                            wrc_vis = float(df_bat[df_bat['Team'] == vis_abbr]['wRC+'].mean())
+                            # CORRECCIÓN: Extracción de wRC+ más reciente (iloc[-1]) en lugar del promedio histórico
+                            team_bat_loc = df_bat[df_bat['Team'] == loc_abbr]
+                            wrc_loc = float(team_bat_loc.iloc[-1]['wRC+']) if not team_bat_loc.empty else 100.0
                             
-                            # Lectura integrada de xFIP del pitcher local
+                            team_bat_vis = df_bat[df_bat['Team'] == vis_abbr]
+                            wrc_vis = float(team_bat_vis.iloc[-1]['wRC+']) if not team_bat_vis.empty else 100.0
+                            
+                            # Lectura integrada de xFIP del pitcher local (El más reciente iloc[-1])
                             pitcher_loc_nombre = datos_partido["pitcher_local"]
                             xfip_loc = None
                             if pitcher_loc_nombre != "Por Anunciar" and not df_pit_ind.empty:
                                 match_loc = df_pit_ind[df_pit_ind['Name'].str.contains(pitcher_loc_nombre.split()[-1], case=False, na=False)]
                                 if not match_loc.empty:
-                                    xfip_loc = float(match_loc['xFIP'].values[0])
+                                    xfip_loc = float(match_loc.iloc[-1]['xFIP'])
                             
                             if xfip_loc is None:
                                 team_pit_loc = df_pit[df_pit['Team'] == loc_abbr]
                                 if team_pit_loc.empty: continue
-                                xfip_loc = float(team_pit_loc['xFIP'].mean())
+                                xfip_loc = float(team_pit_loc.iloc[-1]['xFIP'])
 
-                            # Lectura integrada de xFIP del pitcher visitante
+                            # Lectura integrada de xFIP del pitcher visitante (El más reciente iloc[-1])
                             pitcher_vis_nombre = datos_partido["pitcher_visita"]
                             xfip_vis = None
                             if pitcher_vis_nombre != "Por Anunciar" and not df_pit_ind.empty:
                                 match_vis = df_pit_ind[df_pit_ind['Name'].str.contains(pitcher_vis_nombre.split()[-1], case=False, na=False)]
                                 if not match_vis.empty:
-                                    xfip_vis = float(match_vis['xFIP'].values[0])
+                                    xfip_vis = float(match_vis.iloc[-1]['xFIP'])
                             
                             if xfip_vis is None:
                                 team_pit_vis = df_pit[df_pit['Team'] == vis_abbr]
                                 if team_pit_vis.empty: continue
-                                xfip_vis = float(team_pit_vis['xFIP'].mean())
+                                xfip_vis = float(team_pit_vis.iloc[-1]['xFIP'])
 
-                            bullpen_loc_era = float(df_pit[df_pit['Team'] == loc_abbr]['ERA'].mean())
-                            bullpen_vis_era = float(df_pit[df_pit['Team'] == vis_abbr]['ERA'].mean())
+                            # CORRECCIÓN: Bullpen ERA más reciente en lugar del promedio de 6 años
+                            team_bullpen_loc = df_pit[df_pit['Team'] == loc_abbr]
+                            bullpen_loc_era = float(team_bullpen_loc.iloc[-1]['ERA']) if not team_bullpen_loc.empty else 4.0
+                            
+                            team_bullpen_vis = df_pit[df_pit['Team'] == vis_abbr]
+                            bullpen_vis_era = float(team_bullpen_vis.iloc[-1]['ERA']) if not team_bullpen_vis.empty else 4.0
                             
                             df_parks.columns = df_parks.columns.str.strip()
                             park_data = pd.DataFrame()
@@ -376,9 +379,6 @@ else:
                             # Ejecutar Machine Learning
                             res_ml = predictor_ml.predecir_partido(loc_abbr, vis_abbr, wrc_loc, wrc_vis, xfip_loc, xfip_vis, park_factor)
 
-                            # REGLA ESTRICTA: Ambos modelos deben marcar >= 60% INDEPENDIENTEMENTE
-                            #umbral_apuesta = 60.0
-
                             # --- PROBABILIDADES MONTECARLO ---
                             prob_mc_loc = res_mc['Moneyline']['Gana Local']
                             prob_mc_vis = res_mc['Moneyline']['Gana Visita']
@@ -404,10 +404,9 @@ else:
                             prob_ml_spread_vis = estimar_prob_ml(-proy_hc_loc, spread_vis, "spread_vis") if spread_vis is not None else 50.0
 
                             # --- UMBRALES DINÁMICOS POR MERCADO ---
-                            # Dejamos de exigir 60% a todo. Ajustamos a la realidad de la MLB.
-                            umbral_ml = 55.0       # Moneyline: 54% con doble validación es altísimo en MLB
-                            umbral_totales = 59.0  # Totales: Mantenemos mayor rigor
-                            umbral_handicap = 54.0 # Hándicap (-1.5): Es muy difícil rebasar el 55%
+                            umbral_ml = 55.0       # Moneyline
+                            umbral_totales = 59.0  # Totales
+                            umbral_handicap = 54.0 # Hándicap
 
                             # --- EVALUACIÓN Y FILTRO INTELIGENTE ---
                             
@@ -479,7 +478,6 @@ else:
                             # 5. Spread Local (Lectura directa de la matriz de Montecarlo)
                             cuota_sp_loc = datos_partido.get("cuota_spread_loc")
                             if spread_loc is not None and cuota_sp_loc is not None:
-                                # Extraemos el porcentaje real calculado en la simulación de Montecarlo
                                 prob_mc_sp_loc = res_mc["Carreras"].get("Spread -1.5 Local", 50.0) if spread_loc == -1.5 else prob_mc_loc * 0.90
                                 ev_sp_loc = (prob_mc_sp_loc / 100.0) * cuota_sp_loc - 1.0
                                 
@@ -495,16 +493,13 @@ else:
                                         "Stake Kelly": f"{calcular_criterio_kelly(prob_mc_sp_loc, cuota_sp_loc)}%"
                                     })
 
-                            # 6. Spread Visita (Captura directa para el -1.5 de visitantes como Texas)
+                            # 6. Spread Visita
                             cuota_sp_vis = datos_partido.get("cuota_spread_vis")
                             if spread_vis is not None and cuota_sp_vis is not None:
-                                # Extraemos la probabilidad real de la matriz sin errores de texto
                                 prob_mc_sp_vis = res_mc["Carreras"].get("Spread +1.5 Visita", 50.0) if spread_vis == 1.5 else (prob_mc_vis * 0.90 if spread_vis == -1.5 else 50.0)
                                 
-                                # Forzamos la lectura si el modelo de Montecarlo validó el spread desfavorable (ej. -1.5 de visita)
                                 if spread_vis == -1.5:
-                                    prob_mc_sp_vis = res_mc["Carreras"].get("Spread -1.5 Local", 50.0) # Inverso matemático o lectura directa
-                                    # O tomamos directamente la probabilidad de victoria si cubre el hándicap por simulación
+                                    prob_mc_sp_vis = res_mc["Carreras"].get("Spread -1.5 Local", 50.0)
                                     prob_mc_sp_vis = res_mc.get("Spread_Visita_Prob", prob_mc_vis * 0.95)
 
                                 ev_sp_vis = (prob_mc_sp_vis / 100.0) * cuota_sp_vis - 1.0
@@ -564,8 +559,12 @@ else:
                         st.stop()
 
                     try:
-                        wrc_loc = float(df_bat[df_bat['Team'] == loc_abbr]['wRC+'].mean())
-                        wrc_vis = float(df_bat[df_bat['Team'] == vis_abbr]['wRC+'].mean())
+                        # CORRECCIÓN: Extracción de wRC+ más reciente (iloc[-1]) en lugar del promedio histórico
+                        team_bat_loc = df_bat[df_bat['Team'] == loc_abbr]
+                        wrc_loc = float(team_bat_loc.iloc[-1]['wRC+']) if not team_bat_loc.empty else 100.0
+                        
+                        team_bat_vis = df_bat[df_bat['Team'] == vis_abbr]
+                        wrc_vis = float(team_bat_vis.iloc[-1]['wRC+']) if not team_bat_vis.empty else 100.0
                     except Exception as e:
                         st.error(f"Error procesando wRC+ de bateo: {e}")
                         st.stop()
@@ -576,14 +575,14 @@ else:
                     if pitcher_loc_nombre != "Por Anunciar" and not df_pit_ind.empty:
                         match_loc = df_pit_ind[df_pit_ind['Name'].str.contains(pitcher_loc_nombre.split()[-1], case=False, na=False)]
                         if not match_loc.empty:
-                            xfip_loc = float(match_loc['xFIP'].values[0])
+                            xfip_loc = float(match_loc.iloc[-1]['xFIP']) # Tomar el más reciente
                     
                     if xfip_loc is None:
                         team_pit_loc = df_pit[df_pit['Team'] == loc_abbr]
                         if team_pit_loc.empty:
                             st.error("❌ No hay datos de pitcheo reales para el local.")
                             st.stop()
-                        xfip_loc = float(team_pit_loc['xFIP'].mean())
+                        xfip_loc = float(team_pit_loc.iloc[-1]['xFIP']) # Tomar el más reciente
 
                     # Búsqueda individual integrada de abridor visitante (Plan A: Individual, Plan B: Equipo)
                     pitcher_vis_nombre = datos_partido["pitcher_visita"]
@@ -591,17 +590,21 @@ else:
                     if pitcher_vis_nombre != "Por Anunciar" and not df_pit_ind.empty:
                         match_vis = df_pit_ind[df_pit_ind['Name'].str.contains(pitcher_vis_nombre.split()[-1], case=False, na=False)]
                         if not match_vis.empty:
-                            xfip_vis = float(match_vis['xFIP'].values[0])
+                            xfip_vis = float(match_vis.iloc[-1]['xFIP']) # Tomar el más reciente
                     
                     if xfip_vis is None:
                         team_pit_vis = df_pit[df_pit['Team'] == vis_abbr]
                         if team_pit_vis.empty:
                             st.error("❌ No hay datos de pitcheo reales para el visitante.")
                             st.stop()
-                        xfip_vis = float(team_pit_vis['xFIP'].mean())
+                        xfip_vis = float(team_pit_vis.iloc[-1]['xFIP']) # Tomar el más reciente
 
-                    bullpen_loc_era = float(df_pit[df_pit['Team'] == loc_abbr]['ERA'].mean())
-                    bullpen_vis_era = float(df_pit[df_pit['Team'] == vis_abbr]['ERA'].mean())
+                    # CORRECCIÓN: Bullpen ERA más reciente en lugar del promedio histórico
+                    team_bullpen_loc = df_pit[df_pit['Team'] == loc_abbr]
+                    bullpen_loc_era = float(team_bullpen_loc.iloc[-1]['ERA']) if not team_bullpen_loc.empty else 4.0
+                    
+                    team_bullpen_vis = df_pit[df_pit['Team'] == vis_abbr]
+                    bullpen_vis_era = float(team_bullpen_vis.iloc[-1]['ERA']) if not team_bullpen_vis.empty else 4.0
                     
                     df_parks.columns = df_parks.columns.str.strip()
                     park_data = pd.DataFrame()
