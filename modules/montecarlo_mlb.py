@@ -142,10 +142,15 @@ def simular_partido_mlb(
     prob_final_vis = 100.0 - prob_final_loc
 
     totales = c_loc_sim + c_vis_sim
-    dif_carreras = c_loc_sim - c_vis_sim
+    dif_carreras = c_loc_sim - c_vis_sim # Positivo = Gana Local, Negativo = Gana Visita
 
+    # 1. Escenarios si el Local es el Favorito (-1.5) o el Underdog (+1.5)
     prob_spread_loc_minus_1_5 = np.mean(dif_carreras >= 2) * 100
-    prob_spread_vis_plus_1_5 = np.mean(dif_carreras >= -1) * 100
+    prob_spread_loc_plus_1_5 = np.mean(dif_carreras >= -1) * 100
+
+    # 2. Escenarios si la Visita es el Favorito (-1.5) o el Underdog (+1.5)
+    prob_spread_vis_minus_1_5 = np.mean(dif_carreras <= -2) * 100
+    prob_spread_vis_plus_1_5 = np.mean(dif_carreras <= 1) * 100
 
     return {
         "Moneyline": {
@@ -156,8 +161,10 @@ def simular_partido_mlb(
             "Promedio_Total": round(np.mean(totales), 2),
             f"Over {linea_carreras_casino}": round(np.mean(totales > linea_carreras_casino) * 100, 2),
             f"Under {linea_carreras_casino}": round(np.mean(totales < linea_carreras_casino) * 100, 2),
-            "Spread -1.5 Local": round(prob_spread_loc_minus_1_5, 2),
-            "Spread +1.5 Visita": round(prob_spread_vis_plus_1_5, 2),
+            "Spread Local -1.5": round(prob_spread_loc_minus_1_5, 2),
+            "Spread Local +1.5": round(prob_spread_loc_plus_1_5, 2),
+            "Spread Visita -1.5": round(prob_spread_vis_minus_1_5, 2),
+            "Spread Visita +1.5": round(prob_spread_vis_plus_1_5, 2),
         },
         "Metadatos": {
             "Pythagenpat_Loc": round(prob_pyth_loc, 2),
