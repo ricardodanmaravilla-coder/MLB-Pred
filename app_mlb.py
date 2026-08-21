@@ -303,14 +303,12 @@ else:
                             continue
                         
                         try:
-                            # CORRECCIÓN: Extracción de wRC+ más reciente (iloc[-1]) en lugar del promedio histórico
                             team_bat_loc = df_bat[df_bat['Team'] == loc_abbr]
                             wrc_loc = float(team_bat_loc.iloc[-1]['wRC+']) if not team_bat_loc.empty else 100.0
                             
                             team_bat_vis = df_bat[df_bat['Team'] == vis_abbr]
                             wrc_vis = float(team_bat_vis.iloc[-1]['wRC+']) if not team_bat_vis.empty else 100.0
                             
-                            # Lectura integrada de xFIP del pitcher local (El más reciente iloc[-1])
                             pitcher_loc_nombre = datos_partido["pitcher_local"]
                             xfip_loc = None
                             if pitcher_loc_nombre != "Por Anunciar" and not df_pit_ind.empty:
@@ -323,7 +321,6 @@ else:
                                 if team_pit_loc.empty: continue
                                 xfip_loc = float(team_pit_loc.iloc[-1]['xFIP'])
 
-                            # Lectura integrada de xFIP del pitcher visitante (El más reciente iloc[-1])
                             pitcher_vis_nombre = datos_partido["pitcher_visita"]
                             xfip_vis = None
                             if pitcher_vis_nombre != "Por Anunciar" and not df_pit_ind.empty:
@@ -336,7 +333,6 @@ else:
                                 if team_pit_vis.empty: continue
                                 xfip_vis = float(team_pit_vis.iloc[-1]['xFIP'])
 
-                            # CORRECCIÓN: Bullpen ERA más reciente en lugar del promedio de 6 años
                             team_bullpen_loc = df_pit[df_pit['Team'] == loc_abbr]
                             bullpen_loc_era = float(team_bullpen_loc.iloc[-1]['ERA']) if not team_bullpen_loc.empty else 4.0
                             
@@ -388,8 +384,10 @@ else:
 
                             spread_loc = datos_partido.get("spread_loc")
                             spread_vis = datos_partido.get("spread_vis")
-                            prob_mc_spread_loc = carreras_dict.get(f"Spread {spread_loc} Local", prob_mc_loc * 0.90) if spread_loc is not None else 50.0
-                            prob_mc_spread_vis = carreras_dict.get(f"Spread {spread_vis} Visita", prob_mc_vis * 0.90) if spread_vis is not None else 50.0
+                            
+                            # Lectura dinámica de Montecarlo para el hándicap local y visitante
+                            prob_mc_spread_loc = carreras_dict.get(f"Spread Local {spread_loc:+.1f}", prob_mc_loc * 0.90) if spread_loc is not None else 50.0
+                            prob_mc_spread_vis = carreras_dict.get(f"Spread Visita {spread_vis:+.1f}", prob_mc_vis * 0.90) if spread_vis is not None else 50.0
 
                             # --- PROBABILIDADES MACHINE LEARNING ---
                             prob_ml_loc = res_ml['Probabilidad_Local']
@@ -475,45 +473,39 @@ else:
                                         "EV+": f"{round(ev_under*100, 2)}%",
                                         "Stake Kelly": f"{calcular_criterio_kelly(prob_comb_under, cuota_un)}%"
                                     })
-                            # 5. Spread Local (Lectura directa de la matriz de Montecarlo)
+                            
+                            # 5. Spread Local (Lectura dinámica de la matriz de Montecarlo)
                             cuota_sp_loc = datos_partido.get("cuota_spread_loc")
                             if spread_loc is not None and cuota_sp_loc is not None:
-                                prob_mc_sp_loc = res_mc["Carreras"].get("Spread -1.5 Local", 50.0) if spread_loc == -1.5 else prob_mc_loc * 0.90
-                                ev_sp_loc = (prob_mc_sp_loc / 100.0) * cuota_sp_loc - 1.0
+                                ev_sp_loc = (prob_mc_spread_loc / 100.0) * cuota_sp_loc - 1.0
                                 
-                                if prob_mc_sp_loc >= umbral_handicap and ev_sp_loc > 0:
+                                if prob_mc_spread_loc >= umbral_handicap and ev_sp_loc > 0:
                                     recomendaciones.append({
                                         "Partido": f"{datos_partido['visita']} @ {datos_partido['local']}",
                                         "Mercado": "Hándicap",
-                                        "Apuesta": f"Hándicap {spread_loc} ({datos_partido['local']})",
+                                        "Apuesta": f"Hándicap {spread_loc:+.1f} ({datos_partido['local']})",
                                         "Prob. ML": f"{round(prob_ml_spread_loc, 1)}%",
-                                        "Prob. MC": f"{round(prob_mc_sp_loc, 1)}%",
+                                        "Prob. MC": f"{round(prob_mc_spread_loc, 1)}%",
                                         "Cuota": cuota_sp_loc,
                                         "EV+": f"{round(ev_sp_loc*100, 2)}%",
-                                        "Stake Kelly": f"{calcular_criterio_kelly(prob_mc_sp_loc, cuota_sp_loc)}%"
+                                        "Stake Kelly": f"{calcular_criterio_kelly(prob_mc_spread_loc, cuota_sp_loc)}%"
                                     })
 
                             # 6. Spread Visita
                             cuota_sp_vis = datos_partido.get("cuota_spread_vis")
                             if spread_vis is not None and cuota_sp_vis is not None:
-                                prob_mc_sp_vis = res_mc["Carreras"].get("Spread +1.5 Visita", 50.0) if spread_vis == 1.5 else (prob_mc_vis * 0.90 if spread_vis == -1.5 else 50.0)
+                                ev_sp_vis = (prob_mc_spread_vis / 100.0) * cuota_sp_vis - 1.0
                                 
-                                if spread_vis == -1.5:
-                                    prob_mc_sp_vis = res_mc["Carreras"].get("Spread -1.5 Local", 50.0)
-                                    prob_mc_sp_vis = res_mc.get("Spread_Visita_Prob", prob_mc_vis * 0.95)
-
-                                ev_sp_vis = (prob_mc_sp_vis / 100.0) * cuota_sp_vis - 1.0
-                                
-                                if prob_mc_sp_vis >= umbral_handicap and ev_sp_vis > 0:
+                                if prob_mc_spread_vis >= umbral_handicap and ev_sp_vis > 0:
                                     recomendaciones.append({
                                         "Partido": f"{datos_partido['visita']} @ {datos_partido['local']}",
                                         "Mercado": "Hándicap",
-                                        "Apuesta": f"Hándicap {spread_vis} ({datos_partido['visita']})",
+                                        "Apuesta": f"Hándicap {spread_vis:+.1f} ({datos_partido['visita']})",
                                         "Prob. ML": f"{round(prob_ml_spread_vis, 1)}%",
-                                        "Prob. MC": f"{round(prob_mc_sp_vis, 1)}%",
+                                        "Prob. MC": f"{round(prob_mc_spread_vis, 1)}%",
                                         "Cuota": cuota_sp_vis,
                                         "EV+": f"{round(ev_sp_vis*100, 2)}%",
-                                        "Stake Kelly": f"{calcular_criterio_kelly(prob_mc_sp_vis, cuota_sp_vis)}%"
+                                        "Stake Kelly": f"{calcular_criterio_kelly(prob_mc_spread_vis, cuota_sp_vis)}%"
                                     })
 
                         except Exception as e:
@@ -559,7 +551,6 @@ else:
                         st.stop()
 
                     try:
-                        # CORRECCIÓN: Extracción de wRC+ más reciente (iloc[-1]) en lugar del promedio histórico
                         team_bat_loc = df_bat[df_bat['Team'] == loc_abbr]
                         wrc_loc = float(team_bat_loc.iloc[-1]['wRC+']) if not team_bat_loc.empty else 100.0
                         
@@ -569,37 +560,34 @@ else:
                         st.error(f"Error procesando wRC+ de bateo: {e}")
                         st.stop()
                     
-                    # Búsqueda individual integrada de abridor local (Plan A: Individual, Plan B: Equipo)
                     pitcher_loc_nombre = datos_partido["pitcher_local"]
                     xfip_loc = None
                     if pitcher_loc_nombre != "Por Anunciar" and not df_pit_ind.empty:
                         match_loc = df_pit_ind[df_pit_ind['Name'].str.contains(pitcher_loc_nombre.split()[-1], case=False, na=False)]
                         if not match_loc.empty:
-                            xfip_loc = float(match_loc.iloc[-1]['xFIP']) # Tomar el más reciente
+                            xfip_loc = float(match_loc.iloc[-1]['xFIP']) 
                     
                     if xfip_loc is None:
                         team_pit_loc = df_pit[df_pit['Team'] == loc_abbr]
                         if team_pit_loc.empty:
                             st.error("❌ No hay datos de pitcheo reales para el local.")
                             st.stop()
-                        xfip_loc = float(team_pit_loc.iloc[-1]['xFIP']) # Tomar el más reciente
+                        xfip_loc = float(team_pit_loc.iloc[-1]['xFIP']) 
 
-                    # Búsqueda individual integrada de abridor visitante (Plan A: Individual, Plan B: Equipo)
                     pitcher_vis_nombre = datos_partido["pitcher_visita"]
                     xfip_vis = None
                     if pitcher_vis_nombre != "Por Anunciar" and not df_pit_ind.empty:
                         match_vis = df_pit_ind[df_pit_ind['Name'].str.contains(pitcher_vis_nombre.split()[-1], case=False, na=False)]
                         if not match_vis.empty:
-                            xfip_vis = float(match_vis.iloc[-1]['xFIP']) # Tomar el más reciente
+                            xfip_vis = float(match_vis.iloc[-1]['xFIP']) 
                     
                     if xfip_vis is None:
                         team_pit_vis = df_pit[df_pit['Team'] == vis_abbr]
                         if team_pit_vis.empty:
                             st.error("❌ No hay datos de pitcheo reales para el visitante.")
                             st.stop()
-                        xfip_vis = float(team_pit_vis.iloc[-1]['xFIP']) # Tomar el más reciente
+                        xfip_vis = float(team_pit_vis.iloc[-1]['xFIP']) 
 
-                    # CORRECCIÓN: Bullpen ERA más reciente en lugar del promedio histórico
                     team_bullpen_loc = df_pit[df_pit['Team'] == loc_abbr]
                     bullpen_loc_era = float(team_bullpen_loc.iloc[-1]['ERA']) if not team_bullpen_loc.empty else 4.0
                     
@@ -715,15 +703,15 @@ else:
                             "Kelly Stake": f"{kelly_un}%"
                         })
 
-                    # Hándicap (Spreads reales desde Montecarlo)
+                    # Hándicap (Spreads reales desde Montecarlo con lectura dinámica)
                     spread_loc = cuotas_reales.get("Spread_Local")
                     cuota_sp_loc = cuotas_reales.get("Cuota_Spread_Local")
                     if spread_loc is not None and cuota_sp_loc is not None:
-                        prob_spread_loc = carreras_dict.get(f"Spread {spread_loc} Local", prob_loc * 0.90)
+                        prob_spread_loc = carreras_dict.get(f"Spread Local {spread_loc:+.1f}", prob_loc * 0.90)
                         kelly_sp_loc = calcular_criterio_kelly(prob_spread_loc, cuota_sp_loc)
                         ev_sp_loc = (prob_spread_loc / 100.0) * cuota_sp_loc - 1.0
                         veredicto_apuestas.append({
-                            "Apuesta": f"Hándicap {spread_loc} ({datos_partido['local']})",
+                            "Apuesta": f"Hándicap {spread_loc:+.1f} ({datos_partido['local']})",
                             "Prob. Real": f"{round(prob_spread_loc, 2)}%",
                             "Cuota": cuota_sp_loc,
                             "EV+": f"{round(ev_sp_loc*100, 2)}%",
@@ -733,11 +721,11 @@ else:
                     spread_vis = cuotas_reales.get("Spread_Visita")
                     cuota_sp_vis = cuotas_reales.get("Cuota_Spread_Visita")
                     if spread_vis is not None and cuota_sp_vis is not None:
-                        prob_spread_vis = carreras_dict.get(f"Spread {spread_vis} Visita", prob_vis * 0.90)
+                        prob_spread_vis = carreras_dict.get(f"Spread Visita {spread_vis:+.1f}", prob_vis * 0.90)
                         kelly_sp_vis = calcular_criterio_kelly(prob_spread_vis, cuota_sp_vis)
                         ev_sp_vis = (prob_spread_vis / 100.0) * cuota_sp_vis - 1.0
                         veredicto_apuestas.append({
-                            "Apuesta": f"Hándicap {spread_vis} ({datos_partido['visita']})",
+                            "Apuesta": f"Hándicap {spread_vis:+.1f} ({datos_partido['visita']})",
                             "Prob. Real": f"{round(prob_spread_vis, 2)}%",
                             "Cuota": cuota_sp_vis,
                             "EV+": f"{round(ev_sp_vis*100, 2)}%",
