@@ -10,12 +10,8 @@ class PredictorMLMLB:
 
     def __init__(self):
         self.modelo_ganador = RandomForestClassifier(
-            n_estimators=150,
-            max_depth=7,
-            min_samples_leaf=8,
-            class_weight="balanced_subsample",
-            random_state=42,
-            n_jobs=1,
+            n_estimators=150, max_depth=7, min_samples_leaf=8,
+            class_weight="balanced_subsample", random_state=42, n_jobs=1,
         )
         self.modelo_carreras = GradientBoostingRegressor(
             n_estimators=150, max_depth=3, learning_rate=0.04, loss="huber", random_state=42
@@ -25,6 +21,8 @@ class PredictorMLMLB:
         )
         self.entrenado = False
         self.df_games = pd.DataFrame()
+        self.bat_scale = 100.0
+        self.pit_scale = 4.10
 
     @staticmethod
     def _normalize_games(df_games):
@@ -51,9 +49,7 @@ class PredictorMLMLB:
     @staticmethod
     def _form(history, team, n=5):
         rows = history.get(team, [])[-n:]
-        if not rows:
-            return 0.5
-        return float(np.mean(rows))
+        return 0.5 if not rows else float(np.mean(rows))
 
     def entrenar(self, df_batting, df_pitching, df_games):
         try:
@@ -65,49 +61,40 @@ class PredictorMLMLB:
             self.df_games = self._normalize_games(df_games)
             bat_dict = self._stats_dict(df_batting, "wRC+")
             pit_dict = self._stats_dict(df_pitching, "xFIP")
-
             bat_vals = pd.to_numeric(df_batting["wRC+"], errors="coerce").dropna()
             pit_vals = pd.to_numeric(df_pitching["xFIP"], errors="coerce").dropna()
-            bat_default = float(bat_vals.median()) if not bat_vals.empty else 100.0
-            pit_default = float(pit_vals.median()) if not pit_vals.empty else 4.10
+            self.bat_scale = float(bat_vals.median()) if not bat_vals.empty else 100.0
+            self.pit_scale = float(pit_vals.median()) if not pit_vals.empty else 4.10
 
             X, y_win, y_runs, y_diff = [], [], [], []
             history = {}
-
             for _, row in self.df_games.iterrows():
                 loc, vis = row["Home"], row["Away"]
                 year = int(row["Season"])
                 g_loc, g_vis = float(row["Home_Score"]), float(row["Away_Score"])
-
-                # Usar temporada anterior evita que el agregado final de una temporada
-                # filtre información futura hacia juegos ocurridos dentro de esa temporada.
                 stats_year = year - 1
-                off_l = float(bat_dict.get((loc, stats_year), bat_default))
-                off_v = float(bat_dict.get((vis, stats_year), bat_default))
-                pit_l = float(pit_dict.get((loc, stats_year), pit_default))
-                pit_v = float(pit_dict.get((vis, stats_year), pit_default))
-
+                off_l = float(bat_dict.get((loc, stats_year), self.bat_scale))
+                off_v = float(bat_dict.get((vis, stats_year), self.bat_scale))
+                pit_l = float(pit_dict.get((loc, stats_year), self.pit_scale))
+                pit_v = float(pit_dict.get((vis, stats_year), self.pit_scale))
                 form_l = self._form(history, loc, 5)
                 form_v = self._form(history, vis, 5)
 
-                off_l_n = off_l / max(bat_default, 1e-6)
-                off_v_n = off_v / max(bat_default, 1e-6)
-                pit_l_n = pit_l / max(pit_default, 1e-6)
-                pit_v_n = pit_v / max(pit_default, 1e-6)
+                off_l_n = off_l / max(self.bat_scale, 1e-6)
+                off_v_n = off_v / max(self.bat_scale, 1e-6)
+                pit_l_n = pit_l / max(self.pit_scale, 1e-6)
+                pit_v_n = pit_v / max(self.pit_scale, 1e-6)
                 matchup_l = off_l_n / max(pit_v_n, 0.25)
                 matchup_v = off_v_n / max(pit_l_n, 0.25)
-
                 X.append([off_l_n, off_v_n, pit_l_n, pit_v_n, form_l, form_v, matchup_l, matchup_v])
                 y_win.append(int(g_loc > g_vis))
                 y_runs.append(g_loc + g_vis)
                 y_diff.append(g_loc - g_vis)
-
                 history.setdefault(loc, []).append(int(g_loc > g_vis))
                 history.setdefault(vis, []).append(int(g_vis > g_loc))
 
             if len(X) < 1000:
                 return False
-
             X = np.asarray(X, dtype=float)
             self.modelo_ganador.fit(X, np.asarray(y_win, dtype=int))
             self.modelo_carreras.fit(X, np.asarray(y_runs, dtype=float))
@@ -136,37 +123,22 @@ class PredictorMLMLB:
         try:
             if not self.entrenado:
                 raise RuntimeError("Modelo no entrenado")
-
             form_l = self._recent_form(loc_abbr)
             form_v = self._recent_form(vis_abbr)
-
-            # La UI histórica entrega estas dos columnas con esos nombres. Se usan como
-            # índices numéricos compatibles, sin asumir aquí que sean wRC+/xFIP verdaderos.
-            off_l_n = float(wrc_loc) / 100.0
-            off_v_n = float(wrc_vis) / 100.0
-            pit_l_n = float(xfip_loc) / 4.10
-            pit_v_n = float(xfip_vis) / 4.10
+            off_l_n = float(wrc_loc) / max(self.bat_scale, 1e-6)
+            off_v_n = float(wrc_vis) / max(self.bat_scale, 1e-6)
+            pit_l_n = float(xfip_loc) / max(self.pit_scale, 1e-6)
+            pit_v_n = float(xfip_vis) / max(self.pit_scale, 1e-6)
             matchup_l = off_l_n / max(pit_v_n, 0.25)
             matchup_v = off_v_n / max(pit_l_n, 0.25)
-
             features = np.asarray([[off_l_n, off_v_n, pit_l_n, pit_v_n, form_l, form_v, matchup_l, matchup_v]], dtype=float)
             probs = self.modelo_ganador.predict_proba(features)[0]
-            p_local = float(probs[1])
-            p_visita = float(probs[0])
-            carreras_pred = float(self.modelo_carreras.predict(features)[0])
-            handicap_pred = float(self.modelo_handicap.predict(features)[0])
-
             return {
-                "Probabilidad_Local": round(p_local * 100.0, 2),
-                "Probabilidad_Visita": round(p_visita * 100.0, 2),
-                "Proyeccion_Carreras": round(carreras_pred, 2),
-                "Proyeccion_Handicap_Local": round(handicap_pred, 2),
+                "Probabilidad_Local": round(float(probs[1]) * 100.0, 2),
+                "Probabilidad_Visita": round(float(probs[0]) * 100.0, 2),
+                "Proyeccion_Carreras": round(float(self.modelo_carreras.predict(features)[0]), 2),
+                "Proyeccion_Handicap_Local": round(float(self.modelo_handicap.predict(features)[0]), 2),
             }
         except Exception as e:
             print(f"Error en predicción ML: {e}")
-            return {
-                "Probabilidad_Local": 50.0,
-                "Probabilidad_Visita": 50.0,
-                "Proyeccion_Carreras": 8.5,
-                "Proyeccion_Handicap_Local": 0.0,
-            }
+            return {"Probabilidad_Local": 50.0, "Probabilidad_Visita": 50.0, "Proyeccion_Carreras": 8.5, "Proyeccion_Handicap_Local": 0.0}
