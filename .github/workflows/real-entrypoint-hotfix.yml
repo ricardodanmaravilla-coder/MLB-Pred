@@ -15,15 +15,19 @@ jobs:
       - run: pip install -r requirements.txt
       - name: Compile exact app
         run: python -m py_compile app_mlb.py app_mlb_v2.py modules/*.py
-      - name: Verify cache and simulation cap
+      - name: Verify lazy navigation and simulation cap
         run: |
           python - <<'PY'
           from pathlib import Path
           s = Path('app_mlb_v2.py').read_text()
           assert '@st.cache_resource' in s
-          assert 'num_simulaciones=20000' in s
-          assert 'model = PredictorMLMLB()' not in s.split('bat, pit, games, starters, parks, bullpen = load_data()')[-1]
-          print('entrypoint safeguards present')
+          assert 'num_simulaciones=10000' in s
+          button = s.index('if st.button("Analizar partido V2"')
+          model_call = s.index('model, trained = load_trained_model()')
+          assert model_call > button, 'ML must only load after Analyze button'
+          assert 'from modules.ml_mlb import PredictorMLMLB' in s
+          assert s.index('from modules.ml_mlb import PredictorMLMLB') < s.index('model = PredictorMLMLB()')
+          print('lazy navigation safeguards present')
           PY
       - name: Production Streamlit startup
         run: |
