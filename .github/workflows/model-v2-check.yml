@@ -1,0 +1,70 @@
+name: MLB Model V2 checks
+
+on:
+  push:
+    branches: [model-v2]
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Compile
+        run: python -m compileall -q app_mlb.py app_mlb_v2.py backtest_mlb.py minero_mlb.py minero_pitchers.py modules
+      - name: ML smoke test
+        run: |
+          python - <<'PY'
+          import pandas as pd
+          from modules.ml_mlb import PredictorMLMLB
+          bat=pd.read_csv('data/mlb_batting.csv')
+          pit=pd.read_csv('data/mlb_pitching.csv')
+          games=pd.read_csv('data/mlb_games.csv')
+          m=PredictorMLMLB()
+          prep=m.preparar_dataset(bat,pit,games)
+          assert len(prep)>5000, len(prep)
+          assert m.entrenar(bat,pit,games)
+          print('MLB V2 ML OK', len(prep), m.FEATURES)
+          PY
+      - name: Monte Carlo and no-vig smoke test
+        run: |
+          python - <<'PY'
+          import pandas as pd
+          from modules.montecarlo_mlb import simular_partido_mlb
+          from modules.odds_mlb import remove_vig_two_way, evaluar_dos_vias
+          games=pd.read_csv('data/mlb_games.csv')
+          r=simular_partido_mlb('New York Yankees','Boston Red Sox',ops_loc=.760,ops_vis=.735,pitcher_loc_era=3.6,pitcher_vis_era=4.1,bullpen_loc_era=3.8,bullpen_vis_era=4.2,park_factor=102,altitud_ft=54,viento_mph=0,direccion_viento='',temp_f=72,linea_carreras_casino=8.5,df_games=games,spread_loc=-1.5,spread_vis=1.5,num_simulaciones=20000)
+          assert 0<r['Moneyline']['Gana Local']<100
+          assert 'Spread Local -1.5' in r['Carreras']
+          a,b=remove_vig_two_way(1.80,2.10)
+          assert abs(a+b-100)<1e-6
+          rows=evaluar_dos_vias('A','B',60,40,1.9,2.0)
+          assert len(rows)==2
+          print('MC/no-vig OK', r['Moneyline'])
+          PY
+      - name: Streamlit startup
+        run: |
+          streamlit run app_mlb_v2.py --server.headless true --server.port 8501 >/tmp/mlbv2.log 2>&1 &
+          PID=$!
+          ok=0
+          for i in $(seq 1 35); do
+            if curl -fsS http://127.0.0.1:8501/_stcore/health >/dev/null; then ok=1; break; fi
+            sleep 1
+          done
+          if [ "$ok" -ne 1 ]; then cat /tmp/mlbv2.log; kill $PID || true; exit 1; fi
+          kill $PID || true
+      - name: Walk-forward backtest
+        run: python backtest_mlb.py data | tee backtest_mlb_metrics.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mlb-v2-backtest
+          path: |
+            backtest_mlb_metrics.txt
+            backtest_mlb_predictions.csv
