@@ -7,11 +7,7 @@ from modules.ml_mlb import PredictorMLMLB
 
 
 def walk_forward(batting_path, pitching_path, games_path, min_train=5000, step=1500):
-    """Walk-forward cronológico por bloques amplios.
-
-    Reduce tiempo de CI sin mezclar futuro/pasado: cada bloque se predice con un
-    modelo entrenado exclusivamente en juegos anteriores.
-    """
+    """Walk-forward cronológico; cada bloque solo usa juegos anteriores."""
     bat = pd.read_csv(batting_path)
     pit = pd.read_csv(pitching_path)
     games = pd.read_csv(games_path)
@@ -26,7 +22,7 @@ def walk_forward(batting_path, pitching_path, games_path, min_train=5000, step=1
         if not model.entrenar_preparado(train):
             continue
         X = test[model.FEATURES].astype(float)
-        p_home = model.modelo_ganador.predict_proba(X)[:, 1]
+        p_home = model.predict_proba_features(X)
         runs = model.modelo_carreras.predict(X)
         diff = model.modelo_handicap.predict(X)
         for i, (_, r) in enumerate(test.iterrows()):
@@ -42,11 +38,16 @@ def walk_forward(batting_path, pitching_path, games_path, min_train=5000, step=1
         return out, {}
     y = out.y_home.to_numpy(int)
     p = out.p_home.to_numpy(float)
+    home_rate = float(np.mean(y))
     metrics = {
         "n_oos": int(len(out)),
+        "home_win_rate": home_rate,
         "accuracy_moneyline": float(accuracy_score(y, p >= 0.5)),
+        "accuracy_home_baseline": max(home_rate, 1-home_rate),
         "brier_moneyline": float(brier_score_loss(y, p)),
+        "brier_constant_baseline": float(brier_score_loss(y, np.full(len(y), home_rate))),
         "logloss_moneyline": float(log_loss(y, np.column_stack([1-p, p]), labels=[0, 1])),
+        "logloss_constant_baseline": float(log_loss(y, np.column_stack([np.full(len(y),1-home_rate), np.full(len(y),home_rate)]), labels=[0, 1])),
         "mae_total_runs": float(mean_absolute_error(out.actual_runs, out.pred_runs)),
         "rmse_total_runs": float(mean_squared_error(out.actual_runs, out.pred_runs) ** 0.5),
         "mae_run_diff": float(mean_absolute_error(out.actual_diff, out.pred_diff)),
@@ -62,8 +63,6 @@ def walk_forward(batting_path, pitching_path, games_path, min_train=5000, step=1
 
 if __name__ == "__main__":
     base = sys.argv[1] if len(sys.argv) > 1 else "data"
-    rows, metrics = walk_forward(
-        f"{base}/mlb_batting.csv", f"{base}/mlb_pitching.csv", f"{base}/mlb_games.csv"
-    )
+    rows, metrics = walk_forward(f"{base}/mlb_batting.csv", f"{base}/mlb_pitching.csv", f"{base}/mlb_games.csv")
     print(metrics)
     rows.to_csv("backtest_mlb_predictions.csv", index=False)
