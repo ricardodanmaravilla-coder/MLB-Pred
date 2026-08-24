@@ -5,10 +5,6 @@ from .team_utils import normalize_team
 
 
 def calcular_factor_clima(viento_mph, direccion_viento, temp_f):
-    """Ajuste moderado del entorno de carreras.
-
-    Solo usa la dirección cuando ya viene expresada como Infield/Outfield por la UI.
-    """
     try:
         wind = float(viento_mph or 0.0)
         temp = float(temp_f or 72.0)
@@ -39,7 +35,7 @@ def _normalized_games(df_games):
 
 
 def obtener_h2h(df_games, loc_abbr, vis_abbr):
-    """Se conserva para diagnóstico; ya no participa en la probabilidad final."""
+    """Diagnóstico únicamente; H2H no entra en la probabilidad final."""
     g = _normalized_games(df_games)
     if g.empty:
         return 50.0
@@ -47,8 +43,7 @@ def obtener_h2h(df_games, loc_abbr, vis_abbr):
     rows = g[((g.HomeKey == loc) & (g.AwayKey == vis)) | ((g.HomeKey == vis) & (g.AwayKey == loc))].tail(20)
     if rows.empty:
         return 50.0
-    wins = 0
-    valid = 0
+    wins = valid = 0
     for _, r in rows.iterrows():
         try:
             hs, as_ = float(r["Home_Score"]), float(r["Away_Score"])
@@ -71,10 +66,7 @@ def obtener_carreras_recientes(df_games, equipo_abbr, n=10):
     runs = []
     for _, r in rows.iterrows():
         try:
-            if r.HomeKey == team:
-                runs.append(float(r["Home_Score"]))
-            else:
-                runs.append(float(r["Away_Score"]))
+            runs.append(float(r["Home_Score"] if r.HomeKey == team else r["Away_Score"]))
         except (KeyError, TypeError, ValueError):
             continue
     return float(np.mean(runs)) if runs else None
@@ -93,10 +85,7 @@ def simular_partido_mlb(
     viento_mph, direccion_viento, temp_f, linea_carreras_casino,
     df_games=None, num_simulaciones=50000
 ):
-    """Monte Carlo compatible con la UI histórica, sin fallbacks inventados.
-
-    La firma y las claves principales de salida se mantienen para no romper app_mlb.py.
-    """
+    """Monte Carlo compatible con la UI histórica, sin H2H ponderado ni clips 35-65."""
     if linea_carreras_casino is None or float(linea_carreras_casino) <= 0:
         raise ValueError("Línea de carreras de casino requerida y no disponible.")
 
@@ -108,7 +97,6 @@ def simular_partido_mlb(
     recent_loc = obtener_carreras_recientes(df_games, loc_key)
     recent_vis = obtener_carreras_recientes(df_games, vis_key)
 
-    # Se mantienen las escalas históricas de la app, pero se eliminan errores de identidad y parque.
     bat_loc = np.clip(float(wrc_loc) / 100.0, 0.75, 1.25)
     bat_vis = np.clip(float(wrc_vis) / 100.0, 0.75, 1.25)
     sp_loc = np.clip(float(pitcher_loc_xfip) / 4.10, 0.70, 1.30)
@@ -118,14 +106,11 @@ def simular_partido_mlb(
 
     climate = calcular_factor_clima(viento_mph, direccion_viento, temp_f)
     park = np.clip(float(park_factor) / 100.0, 0.88, 1.12)
-
-    # Un estadio ofensivo afecta a ambos equipos; no se invierte para la visita.
     pitching_vis = sp_vis * 0.60 + bp_vis * 0.40
     pitching_loc = sp_loc * 0.60 + bp_loc * 0.40
     base_loc = 4.55 * bat_loc * pitching_vis * park * climate
     base_vis = 4.45 * bat_vis * pitching_loc * park * climate
 
-    # Tendencia reciente solo se usa cuando existe; no se sustituye silenciosamente por 4.6.
     exp_loc = base_loc if recent_loc is None else 0.70 * base_loc + 0.30 * recent_loc
     exp_vis = base_vis if recent_vis is None else 0.70 * base_vis + 0.30 * recent_vis
     exp_loc = float(np.clip(exp_loc, 1.5, 8.5))
@@ -133,13 +118,10 @@ def simular_partido_mlb(
 
     sims = int(np.clip(num_simulaciones, 5000, 100000))
     dispersion = 14.5
-    p_loc = dispersion / (dispersion + exp_loc)
-    p_vis = dispersion / (dispersion + exp_vis)
     rng = np.random.default_rng()
-    c_loc = rng.negative_binomial(dispersion, p_loc, sims)
-    c_vis = rng.negative_binomial(dispersion, p_vis, sims)
+    c_loc = rng.negative_binomial(dispersion, dispersion / (dispersion + exp_loc), sims)
+    c_vis = rng.negative_binomial(dispersion, dispersion / (dispersion + exp_vis), sims)
 
-    # MLB no termina empatado: para empates simulados se usa una ventaja local mínima, no un H2H histórico.
     ties = c_loc == c_vis
     n_ties = int(np.sum(ties))
     if n_ties:
@@ -152,7 +134,6 @@ def simular_partido_mlb(
     totals = c_loc + c_vis
     diff = c_loc - c_vis
     line = float(linea_carreras_casino)
-
     runs = {
         "Promedio_Total": round(float(np.mean(totals)), 2),
         f"Over {linea_carreras_casino}": round(float(np.mean(totals > line) * 100.0), 2),
@@ -160,19 +141,17 @@ def simular_partido_mlb(
         f"Push {linea_carreras_casino}": round(float(np.mean(totals == line) * 100.0), 2),
     }
 
-    # Claves legacy y dinámicas para que la UI pueda consultar la línea real sin fabricar probabilidades.
-    for spread in (-3.5, -2.5, -1.5, 1.5, 2.5, 3.5):
+    # Cubre líneas estándar de media carrera para evitar fallbacks inventados de la UI.
+    for spread in np.arange(-5.5, 6.0, 0.5):
+        if abs(spread) < 1e-9:
+            continue
+        spread = float(spread)
         runs[f"Spread Local {spread:+.1f}"] = round(_spread_probability(diff, "local", spread), 2)
         runs[f"Spread Visita {spread:+.1f}"] = round(_spread_probability(diff, "visita", spread), 2)
-    runs["Spread Local -1.5"] = runs["Spread Local -1.5"]
-    runs["Spread Local +1.5"] = runs["Spread Local +1.5"]
-    runs["Spread Visita -1.5"] = runs["Spread Visita -1.5"]
-    runs["Spread Visita +1.5"] = runs["Spread Visita +1.5"]
 
     pyth_exp = (exp_loc + exp_vis) ** 0.285
     pyth_loc = (exp_loc ** pyth_exp) / ((exp_loc ** pyth_exp) + (exp_vis ** pyth_exp)) * 100.0
     h2h = obtener_h2h(df_games, loc_key, vis_key)
-
     return {
         "Moneyline": {"Gana Local": round(prob_loc, 2), "Gana Visita": round(prob_vis, 2)},
         "Carreras": runs,
