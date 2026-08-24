@@ -78,6 +78,23 @@ def _pasa_valor(prob_pct, cuota, mercado_no_vig=None, min_ev=0.03, min_edge=0.02
     except (TypeError, ValueError):
         return False
 
+def _score_valor(prob_pct, cuota, mercado_no_vig=None, desacuerdo_pp=0.0):
+    """Rank candidates by market-relative value, not raw probability.
+
+    This prevents naturally high-base-rate markets such as +1.5 from
+    dominating merely because their nominal win probability is larger.
+    """
+    try:
+        p = float(prob_pct) / 100.0
+        o = float(cuota)
+        ev_pct = (p * o - 1.0) * 100.0
+        edge_pp = 0.0 if mercado_no_vig is None else (p - float(mercado_no_vig)) * 100.0
+        disagreement_penalty = max(0.0, float(desacuerdo_pp)) * 0.15
+        return round((1.5 * edge_pp) + ev_pct - disagreement_penalty, 4)
+    except (TypeError, ValueError):
+        return -999.0
+
+
 def calcular_criterio_kelly(probabilidad_real, cuota_decimal, fraccion=0.25):
     """Calcula el porcentaje óptimo de bankroll a apostar usando el Criterio de Kelly Fraccionado"""
     try:
@@ -445,7 +462,7 @@ else:
 
                             # --- UMBRALES DINÁMICOS POR MERCADO ---
                             umbral_ml = 55.0       # Moneyline
-                            umbral_totales = 59.0  # Totales
+                            umbral_totales = 52.0  # Totales: consenso + valor relativo al mercado
                             umbral_handicap = 54.0 # Hándicap
 
                             # --- EVALUACIÓN Y FILTRO INTELIGENTE ---
@@ -472,7 +489,8 @@ else:
                                         "Prob. MC": f"{round(prob_mc_loc, 1)}%",
                                         "Cuota": cuota_loc,
                                         "EV+": f"{round(ev_loc*100, 2)}%",
-                                        "Stake Kelly": f"{calcular_criterio_kelly(prob_comb_loc, cuota_loc)}%"
+                                        "Stake Kelly": f"{calcular_criterio_kelly(prob_comb_loc, cuota_loc)}%",
+                                        "_Score": _score_valor(prob_comb_loc, cuota_loc, mkt_loc_scanner, abs(prob_mc_loc-prob_ml_loc))
                                     })
 
                             # 2. Moneyline Visita
@@ -488,15 +506,19 @@ else:
                                         "Prob. MC": f"{round(prob_mc_vis, 1)}%",
                                         "Cuota": cuota_vis,
                                         "EV+": f"{round(ev_vis*100, 2)}%",
-                                        "Stake Kelly": f"{calcular_criterio_kelly(prob_comb_vis, cuota_vis)}%"
+                                        "Stake Kelly": f"{calcular_criterio_kelly(prob_comb_vis, cuota_vis)}%",
+                                        "_Score": _score_valor(prob_comb_vis, cuota_vis, mkt_vis_scanner, abs(prob_mc_vis-prob_ml_vis))
                                     })
 
-                            # 3. Totales Over
+                            # 3. Totales Over: consenso + edge/EV, no un 59% absoluto casi inalcanzable.
                             cuota_ov = datos_partido.get("cuota_over")
-                            if cuota_ov is not None and prob_mc_over >= umbral_totales and prob_ml_over >= umbral_totales:
+                            if cuota_ov is not None:
                                 prob_comb_over = (prob_mc_over + prob_ml_over) / 2.0
+                                desac_over = abs(prob_mc_over - prob_ml_over)
                                 ev_over = (prob_comb_over / 100.0) * cuota_ov - 1.0
-                                if _pasa_valor(prob_comb_over, cuota_ov, mkt_over_scanner):
+                                if (prob_mc_over >= umbral_totales and prob_ml_over >= umbral_totales and
+                                    prob_comb_over >= 55.0 and desac_over <= 10.0 and
+                                    _pasa_valor(prob_comb_over, cuota_ov, mkt_over_scanner, min_ev=0.04, min_edge=0.04)):
                                     recomendaciones.append({
                                         "Partido": f"{datos_partido['visita']} @ {datos_partido['local']}",
                                         "Mercado": "Totales",
@@ -505,15 +527,19 @@ else:
                                         "Prob. MC": f"{round(prob_mc_over, 1)}%",
                                         "Cuota": cuota_ov,
                                         "EV+": f"{round(ev_over*100, 2)}%",
-                                        "Stake Kelly": f"{calcular_criterio_kelly(prob_comb_over, cuota_ov)}%"
+                                        "Stake Kelly": f"{calcular_criterio_kelly(prob_comb_over, cuota_ov)}%",
+                                        "_Score": _score_valor(prob_comb_over, cuota_ov, mkt_over_scanner, desac_over)
                                     })
 
-                            # 4. Totales Under
+                            # 4. Totales Under: mismo estándar que Over.
                             cuota_un = datos_partido.get("cuota_under")
-                            if cuota_un is not None and prob_mc_under >= umbral_totales and prob_ml_under >= umbral_totales:
+                            if cuota_un is not None:
                                 prob_comb_under = (prob_mc_under + prob_ml_under) / 2.0
+                                desac_under = abs(prob_mc_under - prob_ml_under)
                                 ev_under = (prob_comb_under / 100.0) * cuota_un - 1.0
-                                if _pasa_valor(prob_comb_under, cuota_un, mkt_under_scanner):
+                                if (prob_mc_under >= umbral_totales and prob_ml_under >= umbral_totales and
+                                    prob_comb_under >= 55.0 and desac_under <= 10.0 and
+                                    _pasa_valor(prob_comb_under, cuota_un, mkt_under_scanner, min_ev=0.04, min_edge=0.04)):
                                     recomendaciones.append({
                                         "Partido": f"{datos_partido['visita']} @ {datos_partido['local']}",
                                         "Mercado": "Totales",
@@ -522,7 +548,8 @@ else:
                                         "Prob. MC": f"{round(prob_mc_under, 1)}%",
                                         "Cuota": cuota_un,
                                         "EV+": f"{round(ev_under*100, 2)}%",
-                                        "Stake Kelly": f"{calcular_criterio_kelly(prob_comb_under, cuota_un)}%"
+                                        "Stake Kelly": f"{calcular_criterio_kelly(prob_comb_under, cuota_un)}%",
+                                        "_Score": _score_valor(prob_comb_under, cuota_un, mkt_under_scanner, desac_under)
                                     })
                             
                             # 5. Spread Local: consenso MC + ML; evita sesgo sistemático hacia +1.5.
@@ -534,7 +561,7 @@ else:
                                 
                                 if (prob_mc_spread_loc >= 56.0 and prob_ml_spread_loc >= 54.0 and
                                     prob_comb_sp_loc >= 56.0 and desac_sp_loc <= 12.0 and
-                                    _pasa_valor(prob_comb_sp_loc, cuota_sp_loc, mkt_sp_loc_scanner)):
+                                    _pasa_valor(prob_comb_sp_loc, cuota_sp_loc, mkt_sp_loc_scanner, min_ev=0.04, min_edge=0.04)):
                                     recomendaciones.append({
                                         "Partido": f"{datos_partido['visita']} @ {datos_partido['local']}",
                                         "Mercado": "Hándicap",
@@ -543,7 +570,8 @@ else:
                                         "Prob. MC": f"{round(prob_mc_spread_loc, 1)}%",
                                         "Cuota": cuota_sp_loc,
                                         "EV+": f"{round(ev_sp_loc*100, 2)}%",
-                                        "Stake Kelly": f"{calcular_criterio_kelly(prob_comb_sp_loc, cuota_sp_loc)}%"
+                                        "Stake Kelly": f"{calcular_criterio_kelly(prob_comb_sp_loc, cuota_sp_loc)}%",
+                                        "_Score": _score_valor(prob_comb_sp_loc, cuota_sp_loc, mkt_sp_loc_scanner, desac_sp_loc)
                                     })
 
                             # 6. Spread Visita: mismo estándar de consenso que el local.
@@ -555,7 +583,7 @@ else:
                                 
                                 if (prob_mc_spread_vis >= 56.0 and prob_ml_spread_vis >= 54.0 and
                                     prob_comb_sp_vis >= 56.0 and desac_sp_vis <= 12.0 and
-                                    _pasa_valor(prob_comb_sp_vis, cuota_sp_vis, mkt_sp_vis_scanner)):
+                                    _pasa_valor(prob_comb_sp_vis, cuota_sp_vis, mkt_sp_vis_scanner, min_ev=0.04, min_edge=0.04)):
                                     recomendaciones.append({
                                         "Partido": f"{datos_partido['visita']} @ {datos_partido['local']}",
                                         "Mercado": "Hándicap",
@@ -564,7 +592,8 @@ else:
                                         "Prob. MC": f"{round(prob_mc_spread_vis, 1)}%",
                                         "Cuota": cuota_sp_vis,
                                         "EV+": f"{round(ev_sp_vis*100, 2)}%",
-                                        "Stake Kelly": f"{calcular_criterio_kelly(prob_comb_sp_vis, cuota_sp_vis)}%"
+                                        "Stake Kelly": f"{calcular_criterio_kelly(prob_comb_sp_vis, cuota_sp_vis)}%",
+                                        "_Score": _score_valor(prob_comb_sp_vis, cuota_sp_vis, mkt_sp_vis_scanner, desac_sp_vis)
                                     })
 
                         except Exception as e:
@@ -572,6 +601,8 @@ else:
                     
                     if recomendaciones:
                         df_recom = pd.DataFrame(recomendaciones)
+                        if "_Score" in df_recom.columns:
+                            df_recom = df_recom.sort_values("_Score", ascending=False).head(3).drop(columns=["_Score"])
                         st.dataframe(df_recom, use_container_width=True, hide_index=True)
                     else:
                         st.info("No se encontraron partidos con EV+ y más del 60% de probabilidad en ambos modelos hoy.")
