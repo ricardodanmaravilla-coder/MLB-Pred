@@ -1,0 +1,42 @@
+name: Apply final O/U disagreement 15 once
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/apply-final-ou-15-once.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  patch-branch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Patch only O/U disagreement to 15 pp
+        run: |
+          git fetch origin final-ou-disagreement-15
+          git checkout -B final-ou-disagreement-15 origin/final-ou-disagreement-15
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('app_mlb.py')
+          s=p.read_text(encoding='utf-8')
+          orig=s
+          s=s.replace('(float(desacuerdo)<=10.0, f"Desacuerdo {float(desacuerdo):.1f} pp > 10")','(float(desacuerdo)<=15.0, f"Desacuerdo {float(desacuerdo):.1f} pp > 15")',1)
+          s=s.replace('prob_comb_over >= 54.0 and desac_over <= 10.0 and','prob_comb_over >= 54.0 and desac_over <= 15.0 and',1)
+          s=s.replace('prob_comb_under >= 54.0 and desac_under <= 10.0 and','prob_comb_under >= 54.0 and desac_under <= 15.0 and',1)
+          if s == orig:
+              raise SystemExit('No changes applied')
+          for marker in ['desacuerdo)<=15.0','desac_over <= 15.0','desac_under <= 15.0']:
+              if marker not in s:
+                  raise SystemExit(f'Missing marker {marker}')
+          p.write_text(s, encoding='utf-8')
+          PY
+          python -m py_compile app_mlb.py
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app_mlb.py
+          git commit -m 'Set O/U model disagreement limit to 15 pp'
+          git push origin HEAD:final-ou-disagreement-15
