@@ -104,7 +104,7 @@ def _diagnostico_total(prob_ml, prob_mc, prob_comb, cuota, mercado_no_vig, desac
             (float(prob_ml)>=52.0, f"ML {float(prob_ml):.1f}% < 52%"),
             (float(prob_mc)>=52.0, f"MC {float(prob_mc):.1f}% < 52%"),
             (float(prob_comb)>=54.0, f"Combinada {float(prob_comb):.1f}% < 54%"),
-            (float(desacuerdo)<=10.0, f"Desacuerdo {float(desacuerdo):.1f} pp > 10"),
+            (float(desacuerdo)<=15.0, f"Desacuerdo {float(desacuerdo):.1f} pp > 15"),
             (edge is not None and edge>=4.0, "Edge < 4 pp"),
             (ev is not None and ev>=4.0, "EV < 4%"),
         ]
@@ -553,7 +553,7 @@ else:
                                 desac_over = abs(prob_mc_over - prob_ml_over)
                                 ev_over = (prob_comb_over / 100.0) * cuota_ov - 1.0
                                 if (prob_mc_over >= umbral_totales and prob_ml_over >= umbral_totales and
-                                    prob_comb_over >= 54.0 and desac_over <= 10.0 and
+                                    prob_comb_over >= 54.0 and desac_over <= 15.0 and
                                     _pasa_valor(prob_comb_over, cuota_ov, mkt_over_scanner, min_ev=0.04, min_edge=0.04)):
                                     recomendaciones.append({
                                         "Partido": f"{datos_partido['visita']} @ {datos_partido['local']}",
@@ -574,7 +574,7 @@ else:
                                 desac_under = abs(prob_mc_under - prob_ml_under)
                                 ev_under = (prob_comb_under / 100.0) * cuota_un - 1.0
                                 if (prob_mc_under >= umbral_totales and prob_ml_under >= umbral_totales and
-                                    prob_comb_under >= 54.0 and desac_under <= 10.0 and
+                                    prob_comb_under >= 54.0 and desac_under <= 15.0 and
                                     _pasa_valor(prob_comb_under, cuota_un, mkt_under_scanner, min_ev=0.04, min_edge=0.04)):
                                     recomendaciones.append({
                                         "Partido": f"{datos_partido['visita']} @ {datos_partido['local']}",
