@@ -6,7 +6,12 @@ from sklearn.metrics import accuracy_score, brier_score_loss, log_loss, mean_abs
 from modules.ml_mlb import PredictorMLMLB
 
 
-def walk_forward(batting_path, pitching_path, games_path, min_train=3000, step=750):
+def walk_forward(batting_path, pitching_path, games_path, min_train=5000, step=1500):
+    """Walk-forward cronológico por bloques amplios.
+
+    Reduce tiempo de CI sin mezclar futuro/pasado: cada bloque se predice con un
+    modelo entrenado exclusivamente en juegos anteriores.
+    """
     bat = pd.read_csv(batting_path)
     pit = pd.read_csv(pitching_path)
     games = pd.read_csv(games_path)
