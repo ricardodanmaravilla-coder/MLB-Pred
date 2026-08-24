@@ -14,7 +14,7 @@ jobs:
           python-version: '3.11'
       - run: pip install -r requirements.txt
       - name: Compile
-        run: python -m py_compile app_mlb.py minero_mlb.py backtest_safe.py modules/*.py
+        run: python -m py_compile app_mlb.py minero_mlb.py backtest_safe.py test_streamlit_interaction.py modules/*.py
       - name: ML smoke with repository data
         run: |
           python - <<'PY'
@@ -42,8 +42,9 @@ jobs:
               0,'',72,8.5,df_games=games,num_simulaciones=6000)
           assert 0 <= r['Moneyline']['Gana Local'] <= 100
           assert abs(r['Moneyline']['Gana Local'] + r['Moneyline']['Gana Visita'] - 100) < 0.01
-          assert 'Spread Local -1.5' in r['Carreras']
-          assert 'Spread Visita +1.5' in r['Carreras']
+          for line in (-5.5, -2.5, -1.5, 0.5, 1.5, 3.5, 5.5):
+              assert f'Spread Local {line:+.1f}' in r['Carreras']
+              assert f'Spread Visita {line:+.1f}' in r['Carreras']
           assert 'Over 8.5' in r['Carreras']
           assert r['Metadatos']['H2H_Usado_En_Probabilidad'] is False
           print(r['Moneyline'], r['Carreras']['Promedio_Total'])
@@ -69,10 +70,13 @@ jobs:
           for i in {1..30}; do
             if curl -fsS http://127.0.0.1:8501/_stcore/health; then
               kill $PID || true
-              exit 0
+              break
             fi
             sleep 1
           done
+          if ! kill -0 $PID 2>/dev/null; then exit 0; fi
           cat /tmp/streamlit.log
           kill $PID || true
           exit 1
+      - name: Real Streamlit interaction smoke
+        run: python test_streamlit_interaction.py
