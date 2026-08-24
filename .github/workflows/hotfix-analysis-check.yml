@@ -1,0 +1,44 @@
+name: MLB analysis hotfix checks
+
+on:
+  push:
+    branches: [hotfix-analysis-white-screen]
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt
+      - name: Compile
+        run: python -m compileall -q app_mlb.py app_mlb_v2.py modules
+      - name: Production Streamlit startup
+        run: |
+          streamlit run app_mlb.py --server.headless true --server.port 8501 >/tmp/mlbhotfix.log 2>&1 &
+          PID=$!
+          ok=0
+          for i in $(seq 1 35); do
+            if curl -fsS http://127.0.0.1:8501/_stcore/health >/dev/null; then ok=1; break; fi
+            sleep 1
+          done
+          if [ "$ok" -ne 1 ]; then cat /tmp/mlbhotfix.log; kill $PID || true; exit 1; fi
+          kill $PID || true
+      - name: Analysis logic smoke
+        run: |
+          python - <<'PY'
+          import pandas as pd
+          from modules.ml_mlb import PredictorMLMLB
+          from modules.montecarlo_mlb import simular_partido_mlb
+          bat=pd.read_csv('data/mlb_batting.csv'); pit=pd.read_csv('data/mlb_pitching.csv'); games=pd.read_csv('data/mlb_games.csv')
+          m=PredictorMLMLB(); assert m.entrenar(bat,pit,games)
+          r=simular_partido_mlb('NYY','BOS',ops_loc=.760,ops_vis=.735,pitcher_loc_era=3.6,pitcher_vis_era=4.1,bullpen_loc_era=3.8,bullpen_vis_era=4.2,park_factor=102,linea_carreras_casino=8.5,df_games=games,num_simulaciones=50000)
+          assert r['Carreras'].get('Over 8.5') is not None
+          assert r['Moneyline'].get('Gana Local') is not None
+          print('analysis hotfix OK')
+          PY
