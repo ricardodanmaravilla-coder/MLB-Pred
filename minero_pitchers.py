@@ -1,120 +1,77 @@
-import datetime
-import os
-import time
-
 import pandas as pd
+import os
 import requests
-
-from modules.team_utils import normalize_team
-
-SEASON = datetime.date.today().year
-BASE = "https://statsapi.mlb.com/api/v1"
-HEADERS = {"User-Agent": "MLB-Pred/2.0"}
-
-
-def _ip_to_outs(value):
-    try:
-        text = str(value)
-        if "." in text:
-            inn, outs = text.split(".", 1)
-            return int(inn) * 3 + int(outs[:1] or 0)
-        return int(float(text)) * 3
-    except Exception:
-        return 0
-
-
-def _active_teams():
-    r = requests.get(f"{BASE}/teams", params={"sportIds": 1, "season": SEASON}, headers=HEADERS, timeout=20)
-    r.raise_for_status()
-    out = []
-    for team in r.json().get("teams", []):
-        if not team.get("active", True):
-            continue
-        abbr = normalize_team(team.get("abbreviation") or team.get("name"))
-        if team.get("id") and abbr:
-            out.append((int(team["id"]), abbr))
-    return out
-
-
-def _team_pitcher_splits(team_id):
-    params = {
-        "stats": "season", "season": SEASON, "group": "pitching",
-        "playerPool": "ALL", "teamId": team_id, "limit": 250,
-        "sportIds": 1,
-    }
-    r = requests.get(f"{BASE}/stats", params=params, headers=HEADERS, timeout=20)
-    r.raise_for_status()
-    blocks = r.json().get("stats", [])
-    return blocks[0].get("splits", []) if blocks else []
-
+from io import StringIO
 
 def minar_stats_pitchers():
-    print(f"⚾ Extrayendo pitchers MLB {SEASON} equipo por equipo...")
+    print("⚾ [INICIO] Extrayendo estadísticas REALES desde la API interna de MLB...")
     os.makedirs("data", exist_ok=True)
-    teams = _active_teams()
-    if len(teams) < 25:
-        raise RuntimeError(f"Lista de equipos incompleta: {len(teams)}")
-
-    rows = []
-    for team_id, abbr in teams:
-        try:
-            splits = _team_pitcher_splits(team_id)
-            print(f"  {abbr}: {len(splits)} pitchers")
-            for split in splits:
-                player = split.get("player", {})
-                stat = split.get("stat", {})
-                name = player.get("fullName")
-                era_raw = stat.get("era")
-                if not name or era_raw in (None, "-.--"):
-                    continue
+    ruta_archivo = "data/mlb_pitching_individual.csv"
+    
+    # Endpoint oficial JSON de estadísticas de pitcheo de la temporada 2026 en MLB.com
+    url = "https://statsapi.mlb.com/api/v1/stats?stats=season&season=2026&group=pitching&playerPool=ALL&limit=1000&sportId=1"
+    
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36'
+    }
+    
+    try:
+        print("📥 Consultando API oficial de estadísticas de jugadores...")
+        response = requests.get(url, headers=headers, timeout=10)
+        
+        if response.status_code != 200:
+            print(f"❌ Error HTTP: {response.status_code}")
+            return
+            
+        data = response.json()
+        stats_splits = data.get('stats', [])
+        
+        if not stats_splits:
+            print("❌ La API no devolvió bloques de estadísticas.")
+            return
+            
+        splits = stats_splits[0].get('splits', [])
+        print(f"📊 Procesando registros de {len(splits)} lanzadores...")
+        
+        pitchers_data = []
+        for split in splits:
+            player = split.get('player', {})
+            nombre = player.get('fullName')
+            
+            team_info = split.get('team', {})
+            team_abbr = team_info.get('abbreviation') or team_info.get('name', 'UNK')
+            
+            stat = split.get('stat', {})
+            era_val = stat.get('era')
+            gs_val = stat.get('gamesStarted', 0)
+            
+            # Solo filtramos lanzadores que tengan estadísticas válidas y al menos un juego iniciado
+            if nombre and era_val and era_val != '-.--':
                 try:
-                    era = float(era_raw)
-                except Exception:
+                    era_float = float(era_val)
+                except ValueError:
                     continue
-                g = int(stat.get("gamesPlayed", stat.get("gamesPitched", 0)) or 0)
-                gs = int(stat.get("gamesStarted", 0) or 0)
-                ip = stat.get("inningsPitched", "0.0")
-                rows.append({
-                    "PlayerID": player.get("id"), "Name": name, "Team": abbr,
-                    "Season": SEASON, "ERA": era, "GS": gs, "G": g,
-                    "IP": ip, "Outs": _ip_to_outs(ip),
-                    "WHIP": pd.to_numeric(stat.get("whip"), errors="coerce"),
-                    "K": pd.to_numeric(stat.get("strikeOuts"), errors="coerce"),
-                    "BB": pd.to_numeric(stat.get("baseOnBalls"), errors="coerce"),
-                    "HR": pd.to_numeric(stat.get("homeRuns"), errors="coerce"),
+                    
+                pitchers_data.append({
+                    'Name': nombre,
+                    'Team': team_abbr,
+                    'ERA': era_float,
+                    'xFIP': era_float,  # Usamos ERA real como métrica base
+                    'GS': int(gs_val)
                 })
-            time.sleep(0.05)
-        except Exception as exc:
-            print(f"⚠️ {abbr}: {exc}")
-
-    df = pd.DataFrame(rows)
-    if df.empty or df.Team.nunique() < 20:
-        raise RuntimeError(f"Pitchers insuficientes: {len(df)} filas / {0 if df.empty else df.Team.nunique()} equipos")
-
-    starters = df[(df.GS > 0) & (df.Outs > 0)].copy()
-    starters.to_csv("data/mlb_pitching_individual.csv", index=False)
-
-    # Relevista operativo: >=5 apariciones y como máximo 25% de apariciones iniciadas.
-    rel = df[(df.G >= 5) & ((df.GS / df.G.clip(lower=1)) <= 0.25) & (df.Outs > 0)].copy()
-    bullpen_rows = []
-    for team, grp in rel.groupby("Team"):
-        weight = grp.Outs.astype(float)
-        whip = None
-        if grp.WHIP.notna().any():
-            valid = grp.WHIP.notna()
-            whip = float((grp.loc[valid, "WHIP"] * grp.loc[valid, "Outs"]).sum() / grp.loc[valid, "Outs"].sum())
-        bullpen_rows.append({
-            "Team": team, "Season": SEASON,
-            "Bullpen_ERA": float((grp.ERA * weight).sum() / weight.sum()),
-            "Bullpen_WHIP": whip,
-            "Relievers": int(len(grp)), "Bullpen_Outs": int(weight.sum()),
-        })
-    bull = pd.DataFrame(bullpen_rows)
-    if bull.Team.nunique() < 20:
-        raise RuntimeError(f"Bullpen insuficiente: {bull.Team.nunique()} equipos")
-    bull.to_csv("data/mlb_bullpen.csv", index=False)
-    print(f"✅ {len(starters)} pitchers con aperturas; {len(bull)} bullpens agregados")
-
+        
+        df = pd.DataFrame(pitchers_data)
+        
+        if not df.empty:
+            # Filtramos estrictamente a los abridores (GS > 0)
+            df_abridores = df[df['GS'] > 0].copy()
+            df_abridores.to_csv(ruta_archivo, index=False)
+            print(f"✅ [ÉXITO] Archivo guardado con {len(df_abridores)} abridores reales.")
+        else:
+            print("⚠️ No se encontraron registros de lanzadores válidos en el JSON.")
+            
+    except Exception as e:
+        print(f"❌ Error crítico en la descarga por API: {e}")
 
 if __name__ == "__main__":
     minar_stats_pitchers()

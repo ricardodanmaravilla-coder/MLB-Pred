@@ -1,9 +1,10 @@
-name: Actualizar Datos MLB
+name: Actualizar Sabermetria MLB (Minero)
 
 on:
   schedule:
+    # Se ejecuta todos los días a las 11:00 AM UTC
     - cron: '0 11 * * *'
-  workflow_dispatch:
+  workflow_dispatch: # Permite ejecutarlo manualmente con un clic
 
 permissions:
   contents: write
@@ -11,22 +12,32 @@ permissions:
 jobs:
   actualizar_datos_mlb:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      - name: Instalar dependencias
-        run: pip install pandas requests MLB-StatsAPI
-      - name: Ejecutar minero MLB
-        run: python minero_mlb.py
-      - name: Guardar datos
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          git config user.name "GitHub Actions Bot"
-          git config user.email "actions@github.com"
-          git add data/mlb_batting.csv data/mlb_pitching.csv data/mlb_games.csv
-          git commit -m "Actualizacion diaria datos MLB" || echo "Sin cambios"
-          git pull origin main --rebase
-          git push origin main
+    - name: 📥 Copiar repositorio
+      uses: actions/checkout@v3
+
+    - name: 🐍 Configurar Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: 📦 Instalar dependencias
+      run: |
+        python -m pip install --upgrade pip
+        pip install pandas requests lxml MLB-StatsAPI pybaseball
+
+    - name: ⛏️ Ejecutar Minero MLB
+      run: |
+        python minero_mlb.py
+
+    - name: 🚀 Guardar y subir
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        git config --global user.name "GitHub Actions Bot"
+        git config --global user.email "actions@github.com"
+        # CORRECCIÓN: Agrega TODOS los archivos CSV generados por el minero
+        git add data/*.csv
+        git commit -m "Actualización automática diaria de Sabermetría y Juegos" || echo "Sin cambios"
+        git push origin main
