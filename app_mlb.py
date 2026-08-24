@@ -95,6 +95,25 @@ def _score_valor(prob_pct, cuota, mercado_no_vig=None, desacuerdo_pp=0.0):
         return -999.0
 
 
+def _diagnostico_total(prob_ml, prob_mc, prob_comb, cuota, mercado_no_vig, desacuerdo):
+    try:
+        p=float(prob_comb)/100.0
+        ev=(p*float(cuota)-1.0)*100.0 if cuota is not None else None
+        edge=(p-float(mercado_no_vig))*100.0 if mercado_no_vig is not None else None
+        checks=[
+            (float(prob_ml)>=52.0, f"ML {float(prob_ml):.1f}% < 52%"),
+            (float(prob_mc)>=52.0, f"MC {float(prob_mc):.1f}% < 52%"),
+            (float(prob_comb)>=54.0, f"Combinada {float(prob_comb):.1f}% < 54%"),
+            (float(desacuerdo)<=10.0, f"Desacuerdo {float(desacuerdo):.1f} pp > 10"),
+            (edge is not None and edge>=4.0, "Edge < 4 pp"),
+            (ev is not None and ev>=4.0, "EV < 4%"),
+        ]
+        fails=[msg for ok,msg in checks if not ok]
+        return {"EV_pct": None if ev is None else round(ev,2), "Edge_pp": None if edge is None else round(edge,2), "Estado": "CANDIDATO" if not fails else "NO BET", "Motivo": "Cumple filtros O/U" if not fails else "; ".join(fails)}
+    except Exception as e:
+        return {"EV_pct":None,"Edge_pp":None,"Estado":"NO BET","Motivo":f"Error diagnóstico: {e}"}
+
+
 def calcular_criterio_kelly(probabilidad_real, cuota_decimal, fraccion=0.25):
     """Calcula el porcentaje óptimo de bankroll a apostar usando el Criterio de Kelly Fraccionado"""
     try:
@@ -342,6 +361,7 @@ else:
             if st.button("🚀 Ejecutar Escáner Global de la Jornada", type="primary"):
                 with st.spinner("Escaneando duelos y procesando simulaciones avanzadas..."):
                     recomendaciones = []
+                    diagnostico_totales = []
                     
                     for llave, datos_partido in partidos_hoy.items():
                         loc_abbr = EQUIPOS_MAP.get(datos_partido["local"], "")
@@ -432,7 +452,7 @@ else:
                             )
 
                             # Ejecutar Machine Learning
-                            res_ml = predictor_ml.predecir_partido(loc_abbr, vis_abbr, wrc_loc, wrc_vis, xfip_loc, xfip_vis, park_factor)
+                            res_ml = predictor_ml.predecir_partido(loc_abbr, vis_abbr, wrc_loc, wrc_vis, bullpen_loc_era, bullpen_vis_era, park_factor)  # ML trained on team pitching, not starter ERA
 
                             # --- PROBABILIDADES MONTECARLO ---
                             prob_mc_loc = res_mc['Moneyline']['Gana Local']
@@ -475,7 +495,23 @@ else:
                                 datos_partido.get("cuota_spread_loc"), datos_partido.get("cuota_spread_vis")
                             )
 
-                            
+                            # Diagnóstico O/U: se registra aun cuando no llega al top 3.
+                            for lado, pml_t, pmc_t, cuota_t, mkt_t in [
+                                (f"Over {linea_casino}", prob_ml_over, prob_mc_over, datos_partido.get("cuota_over"), mkt_over_scanner),
+                                (f"Under {linea_casino}", prob_ml_under, prob_mc_under, datos_partido.get("cuota_under"), mkt_under_scanner),
+                            ]:
+                                if cuota_t is not None:
+                                    pcomb_t=(pml_t+pmc_t)/2.0
+                                    desac_t=abs(pml_t-pmc_t)
+                                    dg=_diagnostico_total(pml_t,pmc_t,pcomb_t,cuota_t,mkt_t,desac_t)
+                                    diagnostico_totales.append({
+                                        "Partido": f"{datos_partido['visita']} @ {datos_partido['local']}",
+                                        "O/U": lado, "ML": round(pml_t,1), "MC": round(pmc_t,1),
+                                        "Combinada": round(pcomb_t,1), "Cuota": cuota_t,
+                                        "Edge_pp": dg["Edge_pp"], "EV_pct": dg["EV_pct"],
+                                        "Estado": dg["Estado"], "Motivo": dg["Motivo"],
+                                    })
+
                             # 1. Moneyline Local
                             if prob_mc_loc >= umbral_ml and prob_ml_loc >= umbral_ml:
                                 prob_comb_loc = (prob_mc_loc + prob_ml_loc) / 2.0
@@ -517,7 +553,7 @@ else:
                                 desac_over = abs(prob_mc_over - prob_ml_over)
                                 ev_over = (prob_comb_over / 100.0) * cuota_ov - 1.0
                                 if (prob_mc_over >= umbral_totales and prob_ml_over >= umbral_totales and
-                                    prob_comb_over >= 55.0 and desac_over <= 10.0 and
+                                    prob_comb_over >= 54.0 and desac_over <= 10.0 and
                                     _pasa_valor(prob_comb_over, cuota_ov, mkt_over_scanner, min_ev=0.04, min_edge=0.04)):
                                     recomendaciones.append({
                                         "Partido": f"{datos_partido['visita']} @ {datos_partido['local']}",
@@ -538,7 +574,7 @@ else:
                                 desac_under = abs(prob_mc_under - prob_ml_under)
                                 ev_under = (prob_comb_under / 100.0) * cuota_un - 1.0
                                 if (prob_mc_under >= umbral_totales and prob_ml_under >= umbral_totales and
-                                    prob_comb_under >= 55.0 and desac_under <= 10.0 and
+                                    prob_comb_under >= 54.0 and desac_under <= 10.0 and
                                     _pasa_valor(prob_comb_under, cuota_un, mkt_under_scanner, min_ev=0.04, min_edge=0.04)):
                                     recomendaciones.append({
                                         "Partido": f"{datos_partido['visita']} @ {datos_partido['local']}",
@@ -605,7 +641,13 @@ else:
                             df_recom = df_recom.sort_values("_Score", ascending=False).head(3).drop(columns=["_Score"])
                         st.dataframe(df_recom, use_container_width=True, hide_index=True)
                     else:
-                        st.info("No se encontraron partidos con EV+ y más del 60% de probabilidad en ambos modelos hoy.")
+                        st.info("No se encontraron apuestas que superen los filtros de valor del scanner hoy.")
+
+                    if diagnostico_totales:
+                        st.markdown("### 🧪 Mejor oportunidad O/U analizada")
+                        df_tot_diag=pd.DataFrame(diagnostico_totales)
+                        df_tot_diag["_rank"]=df_tot_diag["Edge_pp"].fillna(-999)+df_tot_diag["EV_pct"].fillna(-999)
+                        st.dataframe(df_tot_diag.sort_values("_rank",ascending=False).head(3).drop(columns=["_rank"]), use_container_width=True, hide_index=True)
         else:
             st.subheader("1. Cartelera Oficial Sincronizada")
             seleccion = st.selectbox("Selecciona un duelo:", list(partidos_hoy.keys()))
