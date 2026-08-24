@@ -13,7 +13,21 @@ from modules.ml_mlb import PredictorMLMLB
 # --- CONFIGURACIÓN ---
 st.set_page_config(page_title="MLB Quant Analytics", layout="wide", page_icon="⚾")
 
-ODDS_API_KEY = "f9ffe1d7530a88b08e853659466c46ff"
+# Prefer a private runtime secret. Keep the legacy value only as a temporary
+# compatibility fallback so the stable app does not lose live odds during migration.
+def _get_odds_api_key():
+    key = os.getenv("ODDS_API_KEY", "").strip()
+    if key:
+        return key
+    try:
+        key = str(st.secrets.get("ODDS_API_KEY", "")).strip()
+        if key:
+            return key
+    except Exception:
+        pass
+    return "f9ffe1d7530a88b08e853659466c46ff"
+
+ODDS_API_KEY = _get_odds_api_key()
 
 EQUIPOS_MAP = {
     "New York Yankees": "NYY", "Boston Red Sox": "BOS", "Los Angeles Dodgers": "LAD",
@@ -39,6 +53,30 @@ def american_to_decimal(am_odds):
         else: return round((100.0 / abs(am_odds)) + 1, 2)
     except:
         return None
+
+def _prob_no_vig_dos_vias(cuota_a, cuota_b):
+    try:
+        a, b = float(cuota_a), float(cuota_b)
+        if a <= 1 or b <= 1:
+            return None, None
+        ia, ib = 1.0 / a, 1.0 / b
+        total = ia + ib
+        return ia / total, ib / total
+    except (TypeError, ValueError, ZeroDivisionError):
+        return None, None
+
+def _pasa_valor(prob_pct, cuota, mercado_no_vig=None, min_ev=0.03, min_edge=0.025):
+    try:
+        p = float(prob_pct) / 100.0
+        o = float(cuota)
+        ev = p * o - 1.0
+        if ev < min_ev:
+            return False
+        if mercado_no_vig is not None and (p - float(mercado_no_vig)) < min_edge:
+            return False
+        return True
+    except (TypeError, ValueError):
+        return False
 
 def calcular_criterio_kelly(probabilidad_real, cuota_decimal, fraccion=0.25):
     """Calcula el porcentaje óptimo de bankroll a apostar usando el Criterio de Kelly Fraccionado"""
@@ -369,7 +407,7 @@ else:
                                 viento_mph=8, direccion_viento="None", temp_f=72,
                                 linea_carreras_casino=linea_casino,
                                 df_games=df_games,
-                                num_simulaciones=1000000
+                                num_simulaciones=50000
                             )
 
                             # Ejecutar Machine Learning
@@ -407,12 +445,21 @@ else:
                             umbral_handicap = 54.0 # Hándicap
 
                             # --- EVALUACIÓN Y FILTRO INTELIGENTE ---
+                            # Mercado sin vig para filtrar valor real, sin cambiar las probabilidades del modelo.
+                            mkt_loc_scanner, mkt_vis_scanner = _prob_no_vig_dos_vias(cuota_loc, cuota_vis)
+                            mkt_over_scanner, mkt_under_scanner = _prob_no_vig_dos_vias(
+                                datos_partido.get("cuota_over"), datos_partido.get("cuota_under")
+                            )
+                            mkt_sp_loc_scanner, mkt_sp_vis_scanner = _prob_no_vig_dos_vias(
+                                datos_partido.get("cuota_spread_loc"), datos_partido.get("cuota_spread_vis")
+                            )
+
                             
                             # 1. Moneyline Local
                             if prob_mc_loc >= umbral_ml and prob_ml_loc >= umbral_ml:
                                 prob_comb_loc = (prob_mc_loc + prob_ml_loc) / 2.0
                                 ev_loc = (prob_comb_loc / 100.0) * cuota_loc - 1.0
-                                if ev_loc > 0:
+                                if _pasa_valor(prob_comb_loc, cuota_loc, mkt_loc_scanner):
                                     recomendaciones.append({
                                         "Partido": f"{datos_partido['visita']} @ {datos_partido['local']}",
                                         "Mercado": "Moneyline",
@@ -428,7 +475,7 @@ else:
                             if prob_mc_vis >= umbral_ml and prob_ml_vis >= umbral_ml:
                                 prob_comb_vis = (prob_mc_vis + prob_ml_vis) / 2.0
                                 ev_vis = (prob_comb_vis / 100.0) * cuota_vis - 1.0
-                                if ev_vis > 0:
+                                if _pasa_valor(prob_comb_vis, cuota_vis, mkt_vis_scanner):
                                     recomendaciones.append({
                                         "Partido": f"{datos_partido['visita']} @ {datos_partido['local']}",
                                         "Mercado": "Moneyline",
@@ -445,7 +492,7 @@ else:
                             if cuota_ov is not None and prob_mc_over >= umbral_totales and prob_ml_over >= umbral_totales:
                                 prob_comb_over = (prob_mc_over + prob_ml_over) / 2.0
                                 ev_over = (prob_comb_over / 100.0) * cuota_ov - 1.0
-                                if ev_over > 0:
+                                if _pasa_valor(prob_comb_over, cuota_ov, mkt_over_scanner):
                                     recomendaciones.append({
                                         "Partido": f"{datos_partido['visita']} @ {datos_partido['local']}",
                                         "Mercado": "Totales",
@@ -462,7 +509,7 @@ else:
                             if cuota_un is not None and prob_mc_under >= umbral_totales and prob_ml_under >= umbral_totales:
                                 prob_comb_under = (prob_mc_under + prob_ml_under) / 2.0
                                 ev_under = (prob_comb_under / 100.0) * cuota_un - 1.0
-                                if ev_under > 0:
+                                if _pasa_valor(prob_comb_under, cuota_un, mkt_under_scanner):
                                     recomendaciones.append({
                                         "Partido": f"{datos_partido['visita']} @ {datos_partido['local']}",
                                         "Mercado": "Totales",
@@ -479,7 +526,7 @@ else:
                             if spread_loc is not None and cuota_sp_loc is not None:
                                 ev_sp_loc = (prob_mc_spread_loc / 100.0) * cuota_sp_loc - 1.0
                                 
-                                if prob_mc_spread_loc >= umbral_handicap and ev_sp_loc > 0:
+                                if prob_mc_spread_loc >= umbral_handicap and _pasa_valor(prob_mc_spread_loc, cuota_sp_loc, mkt_sp_loc_scanner):
                                     recomendaciones.append({
                                         "Partido": f"{datos_partido['visita']} @ {datos_partido['local']}",
                                         "Mercado": "Hándicap",
@@ -496,7 +543,7 @@ else:
                             if spread_vis is not None and cuota_sp_vis is not None:
                                 ev_sp_vis = (prob_mc_spread_vis / 100.0) * cuota_sp_vis - 1.0
                                 
-                                if prob_mc_spread_vis >= umbral_handicap and ev_sp_vis > 0:
+                                if prob_mc_spread_vis >= umbral_handicap and _pasa_valor(prob_mc_spread_vis, cuota_sp_vis, mkt_sp_vis_scanner):
                                     recomendaciones.append({
                                         "Partido": f"{datos_partido['visita']} @ {datos_partido['local']}",
                                         "Mercado": "Hándicap",
@@ -633,7 +680,7 @@ else:
                         viento_mph=viento, direccion_viento=dir_viento, temp_f=temp,
                         linea_carreras_casino=linea_casino,
                         df_games=df_games,
-                        num_simulaciones=500000
+                        num_simulaciones=50000
                     )
                     
                     cuotas_reales = {
