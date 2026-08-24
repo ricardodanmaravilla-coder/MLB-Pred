@@ -31,6 +31,7 @@ jobs:
           prep=m.preparar_dataset(bat,pit,games)
           assert len(prep)>5000, len(prep)
           assert m.entrenar(bat,pit,games)
+          assert m.calibrado
           print('MLB V2 ML OK', len(prep), m.FEATURES)
           PY
       - name: Monte Carlo and no-vig smoke test
@@ -45,13 +46,12 @@ jobs:
           assert 'Spread Local -1.5' in r['Carreras']
           a,b=remove_vig_two_way(1.80,2.10)
           assert abs(a+b-100)<1e-6
-          rows=evaluar_dos_vias('A','B',60,40,1.9,2.0)
-          assert len(rows)==2
+          assert len(evaluar_dos_vias('A','B',60,40,1.9,2.0))==2
           print('MC/no-vig OK', r['Moneyline'])
           PY
-      - name: Streamlit startup
+      - name: Production Streamlit startup
         run: |
-          streamlit run app_mlb_v2.py --server.headless true --server.port 8501 >/tmp/mlbv2.log 2>&1 &
+          streamlit run app_mlb.py --server.headless true --server.port 8501 >/tmp/mlbv2.log 2>&1 &
           PID=$!
           ok=0
           for i in $(seq 1 35); do
