@@ -67,14 +67,19 @@ jobs:
         run: |
           streamlit run app_mlb.py --server.headless true --server.port 8501 > /tmp/streamlit.log 2>&1 &
           PID=$!
+          READY=0
           for i in {1..30}; do
             if curl -fsS http://127.0.0.1:8501/_stcore/health; then
-              kill $PID || true
+              READY=1
               break
             fi
             sleep 1
           done
-          if ! kill -0 $PID 2>/dev/null; then exit 0; fi
+          if [ "$READY" -eq 1 ]; then
+            kill $PID || true
+            wait $PID 2>/dev/null || true
+            exit 0
+          fi
           cat /tmp/streamlit.log
           kill $PID || true
           exit 1
