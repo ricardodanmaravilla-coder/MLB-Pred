@@ -1,0 +1,33 @@
+name: Apply totals consensus patch once
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/apply-totals-consensus-once.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  patch-branch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Checkout branch and apply guarded patch
+        run: |
+          git fetch origin fix-totals-consensus
+          git checkout -B fix-totals-consensus origin/fix-totals-consensus
+          python tools/patch_totals_consensus.py
+          python -m py_compile app_mlb.py
+      - name: Commit exact app patch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app_mlb.py
+          git commit -m 'Align MLB totals ML inputs and add O/U diagnostics' || exit 0
+          git push origin HEAD:fix-totals-consensus
