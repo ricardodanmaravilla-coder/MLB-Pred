@@ -13,7 +13,7 @@ from modules.ml_mlb import PredictorMLMLB
 # --- CONFIGURACIÓN ---
 st.set_page_config(page_title="MLB Quant Analytics", layout="wide", page_icon="⚾")
 
-ODDS_API_KEY = "4725b4a69b90b1310a23134c58f3de9c"
+ODDS_API_KEY = "f9ffe1d7530a88b08e853659466c46ff"
 
 EQUIPOS_MAP = {
     "New York Yankees": "NYY", "Boston Red Sox": "BOS", "Los Angeles Dodgers": "LAD",
