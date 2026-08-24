@@ -14,7 +14,7 @@ jobs:
           python-version: '3.11'
       - run: pip install -r requirements.txt
       - name: Compile
-        run: python -m py_compile app_mlb.py minero_mlb.py modules/*.py
+        run: python -m py_compile app_mlb.py minero_mlb.py backtest_safe.py modules/*.py
       - name: ML smoke with repository data
         run: |
           python - <<'PY'
@@ -25,10 +25,6 @@ jobs:
           games = pd.read_csv('data/mlb_games.csv')
           model = PredictorMLMLB()
           assert model.entrenar(bat, pit, games)
-          b = bat.iloc[-1]
-          p = pit[pit['Team'].astype(str) == str(b['Team'])]
-          if p.empty:
-              p = pit.iloc[[-1]]
           r = model.predecir_partido('NYY', 'BOS', 72.0, 71.0, 4.1, 4.2)
           assert 0 <= r['Probabilidad_Local'] <= 100
           assert 0 <= r['Probabilidad_Visita'] <= 100
@@ -64,6 +60,8 @@ jobs:
           assert 'Edge' in df.columns
           print(df.to_string(index=False))
           PY
+      - name: Chronological holdout backtest
+        run: python backtest_safe.py | tee backtest_safe_output.txt
       - name: Stable Streamlit startup
         run: |
           streamlit run app_mlb.py --server.headless true --server.port 8501 > /tmp/streamlit.log 2>&1 &
