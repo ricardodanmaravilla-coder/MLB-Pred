@@ -1,23 +1,26 @@
 import numpy as np
 import pandas as pd
-from sklearn.ensemble import RandomForestClassifier, GradientBoostingRegressor
+from sklearn.ensemble import GradientBoostingRegressor
+from sklearn.linear_model import LogisticRegression
+from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import make_pipeline
 
 from .team_utils import normalize_team
 
 
 class PredictorMLMLB:
-    """Predictor compatible con la UI estable, con entrenamiento prepartido coherente."""
+    """Modelo MLB compatible con la UI estable usando solo features reproducibles prepartido."""
 
     def __init__(self):
-        self.modelo_ganador = RandomForestClassifier(
-            n_estimators=150, max_depth=7, min_samples_leaf=8,
-            class_weight="balanced_subsample", random_state=42, n_jobs=1,
+        self.modelo_ganador = make_pipeline(
+            StandardScaler(),
+            LogisticRegression(C=0.35, max_iter=2000, solver="lbfgs", random_state=42),
         )
         self.modelo_carreras = GradientBoostingRegressor(
-            n_estimators=150, max_depth=3, learning_rate=0.04, loss="huber", random_state=42
+            n_estimators=140, max_depth=2, learning_rate=0.035, loss="huber", random_state=42
         )
         self.modelo_handicap = GradientBoostingRegressor(
-            n_estimators=150, max_depth=3, learning_rate=0.04, loss="huber", random_state=42
+            n_estimators=140, max_depth=2, learning_rate=0.035, loss="huber", random_state=42
         )
         self.entrenado = False
         self.df_games = pd.DataFrame()
@@ -47,9 +50,33 @@ class PredictorMLMLB:
         return x.set_index(["Team", "Season"])[value_col].to_dict()
 
     @staticmethod
-    def _form(history, team, n=5):
+    def _state(history, team, n):
         rows = history.get(team, [])[-n:]
-        return 0.5 if not rows else float(np.mean(rows))
+        if not rows:
+            return 0.5, 4.5, 4.5, 0.0
+        wins = np.mean([r[0] for r in rows])
+        rf = np.mean([r[1] for r in rows])
+        ra = np.mean([r[2] for r in rows])
+        return float(wins), float(rf), float(ra), float(rf - ra)
+
+    def _feature_row(self, history, loc, vis, off_l, off_v, pit_l, pit_v):
+        w5_l, rf5_l, ra5_l, rd5_l = self._state(history, loc, 5)
+        w5_v, rf5_v, ra5_v, rd5_v = self._state(history, vis, 5)
+        w20_l, rf20_l, ra20_l, rd20_l = self._state(history, loc, 20)
+        w20_v, rf20_v, ra20_v, rd20_v = self._state(history, vis, 20)
+
+        off_l_n = float(off_l) / max(self.bat_scale, 1e-6)
+        off_v_n = float(off_v) / max(self.bat_scale, 1e-6)
+        pit_l_n = float(pit_l) / max(self.pit_scale, 1e-6)
+        pit_v_n = float(pit_v) / max(self.pit_scale, 1e-6)
+
+        return [
+            w5_l, w5_v, w20_l, w20_v,
+            rf5_l, rf5_v, ra5_l, ra5_v,
+            rd5_l, rd5_v, rd20_l, rd20_v,
+            off_l_n, off_v_n, pit_l_n, pit_v_n,
+            1.0,
+        ]
 
     def entrenar(self, df_batting, df_pitching, df_games):
         try:
@@ -72,26 +99,20 @@ class PredictorMLMLB:
                 loc, vis = row["Home"], row["Away"]
                 year = int(row["Season"])
                 g_loc, g_vis = float(row["Home_Score"]), float(row["Away_Score"])
+
                 stats_year = year - 1
                 off_l = float(bat_dict.get((loc, stats_year), self.bat_scale))
                 off_v = float(bat_dict.get((vis, stats_year), self.bat_scale))
                 pit_l = float(pit_dict.get((loc, stats_year), self.pit_scale))
                 pit_v = float(pit_dict.get((vis, stats_year), self.pit_scale))
-                form_l = self._form(history, loc, 5)
-                form_v = self._form(history, vis, 5)
 
-                off_l_n = off_l / max(self.bat_scale, 1e-6)
-                off_v_n = off_v / max(self.bat_scale, 1e-6)
-                pit_l_n = pit_l / max(self.pit_scale, 1e-6)
-                pit_v_n = pit_v / max(self.pit_scale, 1e-6)
-                matchup_l = off_l_n / max(pit_v_n, 0.25)
-                matchup_v = off_v_n / max(pit_l_n, 0.25)
-                X.append([off_l_n, off_v_n, pit_l_n, pit_v_n, form_l, form_v, matchup_l, matchup_v])
+                X.append(self._feature_row(history, loc, vis, off_l, off_v, pit_l, pit_v))
                 y_win.append(int(g_loc > g_vis))
                 y_runs.append(g_loc + g_vis)
                 y_diff.append(g_loc - g_vis)
-                history.setdefault(loc, []).append(int(g_loc > g_vis))
-                history.setdefault(vis, []).append(int(g_vis > g_loc))
+
+                history.setdefault(loc, []).append((int(g_loc > g_vis), g_loc, g_vis))
+                history.setdefault(vis, []).append((int(g_vis > g_loc), g_vis, g_loc))
 
             if len(X) < 1000:
                 return False
@@ -106,32 +127,24 @@ class PredictorMLMLB:
             self.entrenado = False
             return False
 
-    def _recent_form(self, team):
-        if self.df_games.empty:
-            return 0.5
-        key = normalize_team(team)
-        rows = self.df_games[(self.df_games["Home"] == key) | (self.df_games["Away"] == key)].tail(5)
-        if rows.empty:
-            return 0.5
-        wins = 0
-        for _, r in rows.iterrows():
-            if (r["Home"] == key and r["Home_Score"] > r["Away_Score"]) or (r["Away"] == key and r["Away_Score"] > r["Home_Score"]):
-                wins += 1
-        return wins / len(rows)
+    def _history_from_games(self):
+        history = {}
+        for _, r in self.df_games.iterrows():
+            h, a = r["Home"], r["Away"]
+            hs, as_ = float(r["Home_Score"]), float(r["Away_Score"])
+            history.setdefault(h, []).append((int(hs > as_), hs, as_))
+            history.setdefault(a, []).append((int(as_ > hs), as_, hs))
+        return history
 
     def predecir_partido(self, loc_abbr, vis_abbr, wrc_loc, wrc_vis, xfip_loc, xfip_vis, pf=None):
         try:
             if not self.entrenado:
                 raise RuntimeError("Modelo no entrenado")
-            form_l = self._recent_form(loc_abbr)
-            form_v = self._recent_form(vis_abbr)
-            off_l_n = float(wrc_loc) / max(self.bat_scale, 1e-6)
-            off_v_n = float(wrc_vis) / max(self.bat_scale, 1e-6)
-            pit_l_n = float(xfip_loc) / max(self.pit_scale, 1e-6)
-            pit_v_n = float(xfip_vis) / max(self.pit_scale, 1e-6)
-            matchup_l = off_l_n / max(pit_v_n, 0.25)
-            matchup_v = off_v_n / max(pit_l_n, 0.25)
-            features = np.asarray([[off_l_n, off_v_n, pit_l_n, pit_v_n, form_l, form_v, matchup_l, matchup_v]], dtype=float)
+            loc, vis = normalize_team(loc_abbr), normalize_team(vis_abbr)
+            history = self._history_from_games()
+            features = np.asarray([
+                self._feature_row(history, loc, vis, float(wrc_loc), float(wrc_vis), float(xfip_loc), float(xfip_vis))
+            ], dtype=float)
             probs = self.modelo_ganador.predict_proba(features)[0]
             return {
                 "Probabilidad_Local": round(float(probs[1]) * 100.0, 2),
