@@ -1,140 +1,172 @@
-import pandas as pd
 import numpy as np
+import pandas as pd
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingRegressor
 
+from .team_utils import normalize_team
+
+
 class PredictorMLMLB:
+    """Predictor compatible con la UI estable, con entrenamiento prepartido coherente."""
+
     def __init__(self):
-        # Aumentamos ligeramente la profundidad de los árboles ahora que hay 15,000 datos
-        self.modelo_ganador = RandomForestClassifier(n_estimators=150, max_depth=7, random_state=42)
-        self.modelo_carreras = GradientBoostingRegressor(n_estimators=150, max_depth=6, random_state=42)
-        self.modelo_handicap = GradientBoostingRegressor(n_estimators=150, max_depth=6, random_state=42)
+        self.modelo_ganador = RandomForestClassifier(
+            n_estimators=150,
+            max_depth=7,
+            min_samples_leaf=8,
+            class_weight="balanced_subsample",
+            random_state=42,
+            n_jobs=1,
+        )
+        self.modelo_carreras = GradientBoostingRegressor(
+            n_estimators=150, max_depth=3, learning_rate=0.04, loss="huber", random_state=42
+        )
+        self.modelo_handicap = GradientBoostingRegressor(
+            n_estimators=150, max_depth=3, learning_rate=0.04, loss="huber", random_state=42
+        )
         self.entrenado = False
         self.df_games = pd.DataFrame()
+
+    @staticmethod
+    def _normalize_games(df_games):
+        g = df_games.copy()
+        g["Date"] = pd.to_datetime(g.get("Date"), errors="coerce")
+        g["Home"] = g["Home"].map(normalize_team)
+        g["Away"] = g["Away"].map(normalize_team)
+        g["Home_Score"] = pd.to_numeric(g["Home_Score"], errors="coerce")
+        g["Away_Score"] = pd.to_numeric(g["Away_Score"], errors="coerce")
+        if "Season" not in g.columns:
+            g["Season"] = g["Date"].dt.year
+        g["Season"] = pd.to_numeric(g["Season"], errors="coerce")
+        return g.dropna(subset=["Date", "Home", "Away", "Home_Score", "Away_Score", "Season"]).sort_values("Date").reset_index(drop=True)
+
+    @staticmethod
+    def _stats_dict(df, value_col):
+        x = df.copy()
+        x["Team"] = x["Team"].map(normalize_team)
+        x["Season"] = pd.to_numeric(x["Season"], errors="coerce")
+        x[value_col] = pd.to_numeric(x[value_col], errors="coerce")
+        x = x.dropna(subset=["Team", "Season", value_col])
+        return x.set_index(["Team", "Season"])[value_col].to_dict()
+
+    @staticmethod
+    def _form(history, team, n=5):
+        rows = history.get(team, [])[-n:]
+        if not rows:
+            return 0.5
+        return float(np.mean(rows))
 
     def entrenar(self, df_batting, df_pitching, df_games):
         try:
             if df_batting.empty or df_pitching.empty or df_games.empty:
                 return False
-                
-            self.df_games = df_games.copy()
-            self.df_games['Date'] = pd.to_datetime(self.df_games['Date'], errors='coerce')
-            self.df_games = self.df_games.sort_values('Date')
+            if "wRC+" not in df_batting.columns or "xFIP" not in df_pitching.columns:
+                return False
 
-            X = []
-            y_win = []
-            y_runs = []
-            y_diff = []
+            self.df_games = self._normalize_games(df_games)
+            bat_dict = self._stats_dict(df_batting, "wRC+")
+            pit_dict = self._stats_dict(df_pitching, "xFIP")
 
-            # CORRECCIÓN 1: Indexar por Equipo Y Temporada para evitar usar datos del futuro en el pasado
-            bat_dict = df_batting.set_index(['Team', 'Season'])['wRC+'].to_dict()
-            pit_dict = df_pitching.set_index(['Team', 'Season'])['xFIP'].to_dict()
+            bat_vals = pd.to_numeric(df_batting["wRC+"], errors="coerce").dropna()
+            pit_vals = pd.to_numeric(df_pitching["xFIP"], errors="coerce").dropna()
+            bat_default = float(bat_vals.median()) if not bat_vals.empty else 100.0
+            pit_default = float(pit_vals.median()) if not pit_vals.empty else 4.10
 
-            equipos = pd.concat([self.df_games['Home'], self.df_games['Away']]).unique()
-            forma_reciente = {equipo: [] for equipo in equipos}
+            X, y_win, y_runs, y_diff = [], [], [], []
+            history = {}
 
-            for idx, row in self.df_games.iterrows():
-                loc = row.get('Home')
-                vis = row.get('Away')
-                g_loc = row.get('Home_Score')
-                g_vis = row.get('Away_Score')
-                year = int(row.get('Season', 2026)) # Extraemos el año del partido
-                
-                if pd.isna(g_loc) or pd.isna(g_vis): 
-                    continue
-                
-                # Buscamos las métricas exactas de ese año (si no existe, usa el promedio de liga)
-                wrc_l = bat_dict.get((loc, year), 100.0)
-                wrc_v = bat_dict.get((vis, year), 100.0)
-                xfip_l = pit_dict.get((loc, year), 4.0)
-                xfip_v = pit_dict.get((vis, year), 4.0)
+            for _, row in self.df_games.iterrows():
+                loc, vis = row["Home"], row["Away"]
+                year = int(row["Season"])
+                g_loc, g_vis = float(row["Home_Score"]), float(row["Away_Score"])
 
-                racha_l = sum(forma_reciente.get(loc, [-1])[-5:]) if len(forma_reciente.get(loc, [])) > 0 else 2.5
-                racha_v = sum(forma_reciente.get(vis, [-1])[-5:]) if len(forma_reciente.get(vis, [])) > 0 else 2.5
-                
-                if g_loc > g_vis:
-                    forma_reciente[loc].append(1)
-                    forma_reciente[vis].append(0)
-                else:
-                    forma_reciente[loc].append(0)
-                    forma_reciente[vis].append(1)
+                # Usar temporada anterior evita que el agregado final de una temporada
+                # filtre información futura hacia juegos ocurridos dentro de esa temporada.
+                stats_year = year - 1
+                off_l = float(bat_dict.get((loc, stats_year), bat_default))
+                off_v = float(bat_dict.get((vis, stats_year), bat_default))
+                pit_l = float(pit_dict.get((loc, stats_year), pit_default))
+                pit_v = float(pit_dict.get((vis, stats_year), pit_default))
 
-                wrc_l_norm = float(wrc_l) / 100.0
-                wrc_v_norm = float(wrc_v) / 100.0
-                xfip_l_norm = float(xfip_l) / 4.0
-                xfip_v_norm = float(xfip_v) / 4.0
-                r_l_norm = float(racha_l) / 5.0
-                r_v_norm = float(racha_v) / 5.0
+                form_l = self._form(history, loc, 5)
+                form_v = self._form(history, vis, 5)
 
-                # CORRECCIÓN 2: Métricas de Choque Directo (Matchup)
-                # Si el bateo local es alto y el pitcheo visitante es malo (alto xFIP), la ventaja sube.
-                ventaja_ofensiva_loc = wrc_l_norm / xfip_v_norm
-                ventaja_ofensiva_vis = wrc_v_norm / xfip_l_norm
+                off_l_n = off_l / max(bat_default, 1e-6)
+                off_v_n = off_v / max(bat_default, 1e-6)
+                pit_l_n = pit_l / max(pit_default, 1e-6)
+                pit_v_n = pit_v / max(pit_default, 1e-6)
+                matchup_l = off_l_n / max(pit_v_n, 0.25)
+                matchup_v = off_v_n / max(pit_l_n, 0.25)
 
-                # Entregamos 8 variables al modelo en lugar de 6
-                feat = [wrc_l_norm, wrc_v_norm, xfip_l_norm, xfip_v_norm, r_l_norm, r_v_norm, ventaja_ofensiva_loc, ventaja_ofensiva_vis]
-                
-                X.append(feat)
-                y_win.append(1 if g_loc > g_vis else 0)
+                X.append([off_l_n, off_v_n, pit_l_n, pit_v_n, form_l, form_v, matchup_l, matchup_v])
+                y_win.append(int(g_loc > g_vis))
                 y_runs.append(g_loc + g_vis)
                 y_diff.append(g_loc - g_vis)
 
-            if len(X) > 1000: # Exigimos al menos 1000 juegos históricos para confiar en el modelo
-                self.modelo_ganador.fit(X, y_win)
-                self.modelo_carreras.fit(X, y_runs)
-                self.modelo_handicap.fit(X, y_diff)
-                self.entrenado = True
-                return True
-                
+                history.setdefault(loc, []).append(int(g_loc > g_vis))
+                history.setdefault(vis, []).append(int(g_vis > g_loc))
+
+            if len(X) < 1000:
+                return False
+
+            X = np.asarray(X, dtype=float)
+            self.modelo_ganador.fit(X, np.asarray(y_win, dtype=int))
+            self.modelo_carreras.fit(X, np.asarray(y_runs, dtype=float))
+            self.modelo_handicap.fit(X, np.asarray(y_diff, dtype=float))
+            self.entrenado = True
+            return True
         except Exception as e:
             print(f"Error entrenando ML MLB: {e}")
-            
-        return False
+            self.entrenado = False
+            return False
+
+    def _recent_form(self, team):
+        if self.df_games.empty:
+            return 0.5
+        key = normalize_team(team)
+        rows = self.df_games[(self.df_games["Home"] == key) | (self.df_games["Away"] == key)].tail(5)
+        if rows.empty:
+            return 0.5
+        wins = 0
+        for _, r in rows.iterrows():
+            if (r["Home"] == key and r["Home_Score"] > r["Away_Score"]) or (r["Away"] == key and r["Away_Score"] > r["Home_Score"]):
+                wins += 1
+        return wins / len(rows)
 
     def predecir_partido(self, loc_abbr, vis_abbr, wrc_loc, wrc_vis, xfip_loc, xfip_vis, pf=None):
         try:
-            racha_loc = 2.5
-            racha_vis = 2.5
-            
-            if not self.df_games.empty:
-                juegos_loc = self.df_games[(self.df_games['Home'] == loc_abbr) | (self.df_games['Away'] == loc_abbr)].tail(5)
-                if not juegos_loc.empty:
-                    victorias_loc = sum((juegos_loc['Home'] == loc_abbr) & (juegos_loc['Home_Score'] > juegos_loc['Away_Score'])) + \
-                                    sum((juegos_loc['Away'] == loc_abbr) & (juegos_loc['Away_Score'] > juegos_loc['Home_Score']))
-                    racha_loc = victorias_loc
-                
-                juegos_vis = self.df_games[(self.df_games['Home'] == vis_abbr) | (self.df_games['Away'] == vis_abbr)].tail(5)
-                if not juegos_vis.empty:
-                    victorias_vis = sum((juegos_vis['Home'] == vis_abbr) & (juegos_vis['Home_Score'] > juegos_vis['Away_Score'])) + \
-                                    sum((juegos_vis['Away'] == vis_abbr) & (juegos_vis['Away_Score'] > juegos_vis['Home_Score']))
-                    racha_vis = victorias_vis
+            if not self.entrenado:
+                raise RuntimeError("Modelo no entrenado")
 
-            wrc_l_norm = float(wrc_loc) / 100.0
-            wrc_v_norm = float(wrc_vis) / 100.0
-            xfip_l_norm = float(xfip_loc) / 4.0
-            xfip_v_norm = float(xfip_vis) / 4.0
-            r_l_norm = float(racha_loc) / 5.0
-            r_v_norm = float(racha_vis) / 5.0
+            form_l = self._recent_form(loc_abbr)
+            form_v = self._recent_form(vis_abbr)
 
-            # Calculamos las mismas métricas de choque directo para la predicción de hoy
-            ventaja_ofensiva_loc = wrc_l_norm / xfip_v_norm
-            ventaja_ofensiva_vis = wrc_v_norm / xfip_l_norm
+            # La UI histórica entrega estas dos columnas con esos nombres. Se usan como
+            # índices numéricos compatibles, sin asumir aquí que sean wRC+/xFIP verdaderos.
+            off_l_n = float(wrc_loc) / 100.0
+            off_v_n = float(wrc_vis) / 100.0
+            pit_l_n = float(xfip_loc) / 4.10
+            pit_v_n = float(xfip_vis) / 4.10
+            matchup_l = off_l_n / max(pit_v_n, 0.25)
+            matchup_v = off_v_n / max(pit_l_n, 0.25)
 
-            features = [[wrc_l_norm, wrc_v_norm, xfip_l_norm, xfip_v_norm, r_l_norm, r_v_norm, ventaja_ofensiva_loc, ventaja_ofensiva_vis]]
-            
+            features = np.asarray([[off_l_n, off_v_n, pit_l_n, pit_v_n, form_l, form_v, matchup_l, matchup_v]], dtype=float)
             probs = self.modelo_ganador.predict_proba(features)[0]
-            
-            p_local_suavizada = (probs[1] * 0.94) + 0.03 
-            p_visita_suavizada = (probs[0] * 0.94) + 0.03
+            p_local = float(probs[1])
+            p_visita = float(probs[0])
+            carreras_pred = float(self.modelo_carreras.predict(features)[0])
+            handicap_pred = float(self.modelo_handicap.predict(features)[0])
 
-            carreras_pred = self.modelo_carreras.predict(features)[0] 
-            handicap_pred = self.modelo_handicap.predict(features)[0] 
-            
             return {
-                'Probabilidad_Local': round(p_local_suavizada * 100, 2),
-                'Probabilidad_Visita': round(p_visita_suavizada * 100, 2),
-                'Proyeccion_Carreras': round(float(carreras_pred), 2), 
-                'Proyeccion_Handicap_Local': round(float(handicap_pred), 2) 
+                "Probabilidad_Local": round(p_local * 100.0, 2),
+                "Probabilidad_Visita": round(p_visita * 100.0, 2),
+                "Proyeccion_Carreras": round(carreras_pred, 2),
+                "Proyeccion_Handicap_Local": round(handicap_pred, 2),
             }
         except Exception as e:
             print(f"Error en predicción ML: {e}")
-            return {'Probabilidad_Local': 50.0, 'Probabilidad_Visita': 50.0, 'Proyeccion_Carreras': 8.5, 'Proyeccion_Handicap_Local': 0.0}
+            return {
+                "Probabilidad_Local": 50.0,
+                "Probabilidad_Visita": 50.0,
+                "Proyeccion_Carreras": 8.5,
+                "Proyeccion_Handicap_Local": 0.0,
+            }
