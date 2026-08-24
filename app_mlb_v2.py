@@ -1,7 +1,6 @@
 import datetime
 import os
 
-import numpy as np
 import pandas as pd
 import requests
 import streamlit as st
@@ -13,10 +12,13 @@ from modules.team_utils import normalize_team
 
 st.set_page_config(page_title="MLB Quant Analytics V2", layout="wide", page_icon="⚾")
 st.title("⚾ MLB Quant Analytics — Model V2")
-st.caption("MLB StatsAPI · OPS/ERA reales · forma prepartido · Monte Carlo · ML · mercado no-vig")
+st.caption("MLB StatsAPI · OPS/ERA reales · ML calibrado · Monte Carlo · mercado no-vig")
 
-ODDS_API_KEY = os.environ.get("ODDS_API_KEY", "")
-SEASON = datetime.date.today().year
+try:
+    SECRET_ODDS = st.secrets.get("ODDS_API_KEY", "")
+except Exception:
+    SECRET_ODDS = ""
+ODDS_API_KEY = os.environ.get("ODDS_API_KEY", "") or SECRET_ODDS
 
 
 @st.cache_data(ttl=3600)
@@ -37,229 +39,213 @@ def load_data():
 def schedule_today():
     day = datetime.date.today().isoformat()
     url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={day}&hydrate=probablePitcher,team"
-    r = requests.get(url, timeout=12)
-    r.raise_for_status()
-    rows = []
+    r = requests.get(url, timeout=12); r.raise_for_status()
+    out = []
     for block in r.json().get("dates", []):
         for game in block.get("games", []):
-            home_obj = game.get("teams", {}).get("home", {})
-            away_obj = game.get("teams", {}).get("away", {})
-            home_name = home_obj.get("team", {}).get("name")
-            away_name = away_obj.get("team", {}).get("name")
-            h = normalize_team(home_name)
-            a = normalize_team(away_name)
-            if not h or not a:
-                continue
-            rows.append({
-                "game_id": game.get("gamePk"), "home_name": home_name, "away_name": away_name,
-                "home": h, "away": a,
-                "home_pitcher": home_obj.get("probablePitcher", {}).get("fullName"),
-                "away_pitcher": away_obj.get("probablePitcher", {}).get("fullName"),
-                "game_date": game.get("gameDate"),
-            })
-    return rows
+            hobj = game.get("teams", {}).get("home", {}); aobj = game.get("teams", {}).get("away", {})
+            hname = hobj.get("team", {}).get("name"); aname = aobj.get("team", {}).get("name")
+            h, a = normalize_team(hname), normalize_team(aname)
+            if h and a:
+                out.append({
+                    "game_id": game.get("gamePk"), "home_name": hname, "away_name": aname,
+                    "home": h, "away": a,
+                    "home_pitcher": hobj.get("probablePitcher", {}).get("fullName"),
+                    "away_pitcher": aobj.get("probablePitcher", {}).get("fullName"),
+                    "game_date": game.get("gameDate"),
+                })
+    return out
 
 
 @st.cache_data(ttl=300)
 def odds_today():
     if not ODDS_API_KEY:
         return []
-    url = "https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/"
-    params = {"apiKey": ODDS_API_KEY, "regions": "us", "markets": "h2h,totals,spreads", "oddsFormat": "american"}
-    r = requests.get(url, params=params, timeout=12)
-    if r.status_code != 200:
-        return []
-    return r.json()
+    r = requests.get(
+        "https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/",
+        params={"apiKey": ODDS_API_KEY, "regions": "us", "markets": "h2h,totals,spreads", "oddsFormat": "american"},
+        timeout=12,
+    )
+    return r.json() if r.status_code == 200 else []
 
 
 def find_odds(game, odds):
-    matches = []
-    for item in odds:
-        if normalize_team(item.get("home_team")) == game["home"] and normalize_team(item.get("away_team")) == game["away"]:
-            matches.append(item)
-    if not matches:
+    item = next((x for x in odds if normalize_team(x.get("home_team")) == game["home"] and normalize_team(x.get("away_team")) == game["away"]), None)
+    if not item:
         return {}
-    item = matches[0]
-    # Se elige un bookmaker único por snapshot; nunca se mezclan lados de casas distintas.
+    # Una sola casa por snapshot. No se mezclan lados/mercados accidentalmente.
     for book in item.get("bookmakers", []):
         out = {"bookmaker": book.get("title", book.get("key", "N/A"))}
         for market in book.get("markets", []):
-            key = market.get("key")
-            outcomes = market.get("outcomes", [])
+            outcomes = market.get("outcomes", []); key = market.get("key")
             if key == "h2h":
                 for o in outcomes:
-                    team = normalize_team(o.get("name"))
-                    if team == game["home"]: out["ml_home"] = american_to_decimal(o.get("price"))
-                    if team == game["away"]: out["ml_away"] = american_to_decimal(o.get("price"))
+                    t = normalize_team(o.get("name"))
+                    if t == game["home"]: out["ml_home"] = american_to_decimal(o.get("price"))
+                    elif t == game["away"]: out["ml_away"] = american_to_decimal(o.get("price"))
             elif key == "totals":
-                over = next((o for o in outcomes if o.get("name") == "Over"), None)
-                under = next((o for o in outcomes if o.get("name") == "Under"), None)
-                if over and under and over.get("point") == under.get("point"):
-                    out["total_line"] = float(over["point"])
-                    out["total_over"] = american_to_decimal(over.get("price"))
-                    out["total_under"] = american_to_decimal(under.get("price"))
+                ov = next((o for o in outcomes if o.get("name") == "Over"), None)
+                un = next((o for o in outcomes if o.get("name") == "Under"), None)
+                if ov and un and ov.get("point") == un.get("point"):
+                    out.update(total_line=float(ov["point"]), total_over=american_to_decimal(ov.get("price")), total_under=american_to_decimal(un.get("price")))
             elif key == "spreads":
                 for o in outcomes:
-                    team = normalize_team(o.get("name"))
-                    if team == game["home"]:
-                        out["spread_home"] = float(o.get("point")); out["spread_home_odd"] = american_to_decimal(o.get("price"))
-                    if team == game["away"]:
-                        out["spread_away"] = float(o.get("point")); out["spread_away_odd"] = american_to_decimal(o.get("price"))
+                    t = normalize_team(o.get("name"))
+                    if t == game["home"]:
+                        out.update(spread_home=float(o["point"]), spread_home_odd=american_to_decimal(o.get("price")))
+                    elif t == game["away"]:
+                        out.update(spread_away=float(o["point"]), spread_away_odd=american_to_decimal(o.get("price")))
         if out.get("ml_home") and out.get("ml_away"):
             return out
     return {}
 
 
-def latest_team_row(df, team):
+def latest_row(df, team):
     rows = df[df.Team == normalize_team(team)].copy()
-    if rows.empty:
-        return None
+    if rows.empty: return None
     if "Season" in rows.columns:
-        rows["Season"] = pd.to_numeric(rows.Season, errors="coerce")
-        rows = rows.sort_values("Season")
+        rows["Season"] = pd.to_numeric(rows.Season, errors="coerce"); rows = rows.sort_values("Season")
     return rows.iloc[-1]
 
 
-def team_ops(df_bat, team):
-    r = latest_team_row(df_bat, team)
-    if r is None:
-        return None
-    return float(pd.to_numeric(r.get("ops"), errors="coerce"))
-
-
-def team_era(df_pit, team):
-    r = latest_team_row(df_pit, team)
-    if r is None:
-        return None
-    return float(pd.to_numeric(r.get("ERA", r.get("era")), errors="coerce"))
+def get_num(row, *keys):
+    if row is None: return None
+    for key in keys:
+        if key in row.index:
+            x = pd.to_numeric(row.get(key), errors="coerce")
+            if pd.notna(x): return float(x)
+    return None
 
 
 def starter_era(starters, name, team, fallback):
-    if starters.empty or not name:
-        return fallback, True
+    if starters.empty or not name: return fallback, True
     rows = starters[(starters.Team == normalize_team(team)) & (starters.Name.astype(str).str.casefold() == str(name).casefold())]
-    if rows.empty:
-        return fallback, True
-    return float(pd.to_numeric(rows.iloc[-1].ERA, errors="coerce")), False
+    return (float(rows.iloc[-1].ERA), False) if not rows.empty else (fallback, True)
 
 
 def bullpen_era(bullpen, team, fallback):
-    if bullpen.empty:
-        return fallback, True
+    if bullpen.empty: return fallback, True
     rows = bullpen[bullpen.Team == normalize_team(team)]
-    if rows.empty:
-        return fallback, True
-    return float(pd.to_numeric(rows.iloc[-1].Bullpen_ERA, errors="coerce")), False
+    return (float(rows.iloc[-1].Bullpen_ERA), False) if not rows.empty else (fallback, True)
 
 
 def park_info(parks, team):
     rows = parks[parks.Team == normalize_team(team)]
-    if rows.empty:
-        return 100.0, 0.0
-    return float(rows.iloc[-1].Park_Factor), float(rows.iloc[-1].Altitud)
+    return (100.0, 0.0) if rows.empty else (float(rows.iloc[-1].Park_Factor), float(rows.iloc[-1].Altitud))
 
 
-def combine(a, b, wa=0.55):
-    return wa * float(a) + (1.0-wa) * float(b)
+def blend(p_ml, p_mc):
+    return 0.55 * float(p_ml) + 0.45 * float(p_mc)
+
+
+def consensus_filter(rows, p_ml_a, p_mc_a, p_ml_b, p_mc_b, min_model=54.0, max_disagreement=10.0):
+    pairs = [(p_ml_a, p_mc_a), (p_ml_b, p_mc_b)]
+    for i, (pml, pmc) in enumerate(pairs):
+        extra = []
+        if min(float(pml), float(pmc)) < min_model: extra.append(f"modelo individual <{min_model:.0f}%")
+        if abs(float(pml)-float(pmc)) > max_disagreement: extra.append(f"desacuerdo >{max_disagreement:.0f} pp")
+        if extra and i < len(rows):
+            rows[i]["Estado"] = "NO BET"
+            rows[i]["Motivo"] = (rows[i].get("Motivo", "") + "; " + "; ".join(extra)).strip("; ")
+    return rows
 
 
 bat, pit, games, starters, parks, bullpen = load_data()
-model = PredictorMLMLB()
-trained = model.entrenar(bat, pit, games)
-
+model = PredictorMLMLB(); trained = model.entrenar(bat, pit, games)
 st.sidebar.metric("Juegos históricos", f"{len(games):,}")
-st.sidebar.write(f"ML entrenado: **{'Sí' if trained else 'No'}**")
-st.sidebar.write(f"Odds API: **{'configurada' if ODDS_API_KEY else 'sin secret ODDS_API_KEY'}**")
-st.sidebar.info("V2 no llama wRC+ a OPS ni xFIP a ERA. Si falta abridor/bullpen real, lo marca como proxy.")
+st.sidebar.write(f"ML calibrado: **{'Sí' if trained and model.calibrado else 'No'}**")
+st.sidebar.write(f"ODDS_API_KEY: **{'configurada' if ODDS_API_KEY else 'faltante'}**")
+st.sidebar.info("Backtest OOS calibrado: 10,825 juegos. El modelo supera ligeramente el baseline; V2 usa filtros conservadores.")
 
 try:
-    games_today = schedule_today()
+    slate = schedule_today()
 except Exception as exc:
-    st.error(f"Error MLB StatsAPI: {exc}")
-    games_today = []
+    st.error(f"MLB StatsAPI: {exc}"); slate = []
+market_feed = odds_today()
 
-all_odds = odds_today()
-if not games_today:
+if not slate:
     st.info("No hay juegos MLB programados para hoy.")
 else:
-    label = lambda g: f"{g['away_name']} @ {g['home_name']}"
-    idx = st.selectbox("Partido", range(len(games_today)), format_func=lambda i: label(games_today[i]))
-    game = games_today[idx]
-    market = find_odds(game, all_odds)
+    labels = [f"{g['away_name']} @ {g['home_name']}" for g in slate]
+    choice = st.selectbox("Partido", range(len(slate)), format_func=lambda i: labels[i])
+    game = slate[choice]; market = find_odds(game, market_feed)
 
     if st.button("Analizar partido V2", type="primary"):
         if not trained:
-            st.error("ML no entrenó. Revisa datasets.")
-            st.stop()
-        ops_h, ops_a = team_ops(bat, game["home"]), team_ops(bat, game["away"])
-        era_team_h, era_team_a = team_era(pit, game["home"]), team_era(pit, game["away"])
-        if None in (ops_h, ops_a, era_team_h, era_team_a):
-            st.error("Datos de equipo incompletos: NO BET")
-            st.stop()
-        sp_h, sp_h_proxy = starter_era(starters, game["home_pitcher"], game["home"], era_team_h)
-        sp_a, sp_a_proxy = starter_era(starters, game["away_pitcher"], game["away"], era_team_a)
-        bp_h, bp_h_proxy = bullpen_era(bullpen, game["home"], era_team_h)
-        bp_a, bp_a_proxy = bullpen_era(bullpen, game["away"], era_team_a)
+            st.error("El modelo no pudo entrenar: NO BET"); st.stop()
+        br_h, br_a = latest_row(bat, game["home"]), latest_row(bat, game["away"])
+        pr_h, pr_a = latest_row(pit, game["home"]), latest_row(pit, game["away"])
+        ops_h, ops_a = get_num(br_h, "ops"), get_num(br_a, "ops")
+        era_h, era_a = get_num(pr_h, "ERA", "era"), get_num(pr_a, "ERA", "era")
+        if None in (ops_h, ops_a, era_h, era_a):
+            st.error("Datos de equipo incompletos: NO BET"); st.stop()
+        sp_h, sp_h_proxy = starter_era(starters, game["home_pitcher"], game["home"], era_h)
+        sp_a, sp_a_proxy = starter_era(starters, game["away_pitcher"], game["away"], era_a)
+        bp_h, bp_h_proxy = bullpen_era(bullpen, game["home"], era_h)
+        bp_a, bp_a_proxy = bullpen_era(bullpen, game["away"], era_a)
         pf, altitude = park_info(parks, game["home"])
+        proxy = sp_h_proxy or sp_a_proxy or bp_h_proxy or bp_a_proxy
+        line = float(market.get("total_line", 8.5))
 
-        if not market.get("total_line"):
-            st.warning("Sin línea real de total: se muestran ML/Monte Carlo, pero no se evalúa O/U.")
-        line = market.get("total_line", 8.5)
         mc = simular_partido_mlb(
             game["home"], game["away"], ops_loc=ops_h, ops_vis=ops_a,
-            pitcher_loc_era=sp_h, pitcher_vis_era=sp_a,
-            bullpen_loc_era=bp_h, bullpen_vis_era=bp_a,
-            park_factor=pf, altitud_ft=altitude,
-            viento_mph=0, direccion_viento="", temp_f=72,
+            pitcher_loc_era=sp_h, pitcher_vis_era=sp_a, bullpen_loc_era=bp_h, bullpen_vis_era=bp_a,
+            park_factor=pf, altitud_ft=altitude, viento_mph=0, direccion_viento="", temp_f=72,
             linea_carreras_casino=line, df_games=games,
             spread_loc=market.get("spread_home"), spread_vis=market.get("spread_away"),
         )
-        ml = model.predecir_partido(game["home"], game["away"], ops_h, ops_a, era_team_h, era_team_a, pf)
-        ml["Prob_Over"] = model.prob_total(ml["Proyeccion_Carreras"], line, "over")
-        ml["Prob_Under"] = model.prob_total(ml["Proyeccion_Carreras"], line, "under")
+        ml = model.predecir_partido(game["home"], game["away"], ops_h, ops_a, era_h, era_a, pf)
+        ml_over = model.prob_total(ml["Proyeccion_Carreras"], line, "over")
+        ml_under = model.prob_total(ml["Proyeccion_Carreras"], line, "under")
 
-        st.subheader(label(game))
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("OPS local", f"{ops_h:.3f}")
-        c2.metric("OPS visita", f"{ops_a:.3f}")
-        c3.metric("ERA abridor local", f"{sp_h:.2f}")
-        c4.metric("ERA abridor visita", f"{sp_a:.2f}")
-        st.caption(f"Abridores: {game['home_pitcher'] or 'TBA'} / {game['away_pitcher'] or 'TBA'} · Park factor {pf:.0f}")
-        if sp_h_proxy or sp_a_proxy or bp_h_proxy or bp_a_proxy:
-            st.warning("Hay datos proxy (abridor o bullpen). Se muestran probabilidades, pero V2 no debe tratarlas como pick de máxima confianza.")
+        st.subheader(labels[choice])
+        a,b,c,d = st.columns(4)
+        a.metric("OPS local", f"{ops_h:.3f}"); b.metric("OPS visita", f"{ops_a:.3f}")
+        c.metric("ERA abridor local", f"{sp_h:.2f}"); d.metric("ERA abridor visita", f"{sp_a:.2f}")
+        st.caption(f"Abridores: {game['home_pitcher'] or 'TBA'} / {game['away_pitcher'] or 'TBA'} · Park factor {pf:.0f} · Bookmaker {market.get('bookmaker','N/A')}")
+        if proxy:
+            st.warning("Falta al menos un dato real de abridor/bullpen. Probabilidades visibles, pero cualquier VALUE BET se degrada a SEÑAL — DATOS PROXY.")
 
-        rows = [
-            {"Mercado":"Local ML", "MC":mc["Moneyline"]["Gana Local"], "ML":ml["Probabilidad_Local"], "Ensemble":round(combine(ml["Probabilidad_Local"], mc["Moneyline"]["Gana Local"]),1)},
-            {"Mercado":"Visitante ML", "MC":mc["Moneyline"]["Gana Visita"], "ML":ml["Probabilidad_Visita"], "Ensemble":round(combine(ml["Probabilidad_Visita"], mc["Moneyline"]["Gana Visita"]),1)},
-        ]
-        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-        st.write("Carreras esperadas Monte Carlo", mc["Expectativas"])
-        st.metric("Total ML proyectado", ml["Proyeccion_Carreras"])
+        st.markdown("### Moneyline")
+        money = pd.DataFrame([
+            {"Lado":"Local", "ML":ml["Probabilidad_Local"], "MC":mc["Moneyline"]["Gana Local"], "Ensemble":round(blend(ml["Probabilidad_Local"],mc["Moneyline"]["Gana Local"]),1)},
+            {"Lado":"Visitante", "ML":ml["Probabilidad_Visita"], "MC":mc["Moneyline"]["Gana Visita"], "Ensemble":round(blend(ml["Probabilidad_Visita"],mc["Moneyline"]["Gana Visita"]),1)},
+        ])
+        st.dataframe(money, use_container_width=True, hide_index=True)
 
         diagnostics = []
         if market.get("ml_home") and market.get("ml_away"):
-            ph = combine(ml["Probabilidad_Local"], mc["Moneyline"]["Gana Local"])
-            pa = combine(ml["Probabilidad_Visita"], mc["Moneyline"]["Gana Visita"])
-            diagnostics += evaluar_dos_vias("Moneyline Local", "Moneyline Visitante", ph, pa,
-                                            market["ml_home"], market["ml_away"], min_prob=54, min_edge=3, min_ev=2)
-        if market.get("total_over") and market.get("total_under") and ml.get("Prob_Over") is not None:
-            po = combine(ml["Prob_Over"], mc["Carreras"][f"Over {float(line)}"])
-            pu = combine(ml["Prob_Under"], mc["Carreras"][f"Under {float(line)}"])
-            push = mc["Carreras"].get(f"Push {float(line)}", 0.0)
-            diagnostics += evaluar_dos_vias(f"Over {line}", f"Under {line}", po, pu,
-                                            market["total_over"], market["total_under"], push, push,
-                                            min_prob=56, min_edge=4, min_ev=3)
+            ph, pa = blend(ml["Probabilidad_Local"],mc["Moneyline"]["Gana Local"]), blend(ml["Probabilidad_Visita"],mc["Moneyline"]["Gana Visita"])
+            r = evaluar_dos_vias("Moneyline Local","Moneyline Visitante",ph,pa,market["ml_home"],market["ml_away"],min_prob=55,min_edge=4,min_ev=3)
+            diagnostics += consensus_filter(r, ml["Probabilidad_Local"],mc["Moneyline"]["Gana Local"],ml["Probabilidad_Visita"],mc["Moneyline"]["Gana Visita"])
 
-        st.markdown("### Mercado y valor")
+        st.markdown("### Total de carreras")
+        st.write({"Línea": market.get("total_line"), "ML proyectado": ml["Proyeccion_Carreras"], "MC promedio": mc["Carreras"]["Promedio_Total"], "ML Over%": None if ml_over is None else round(ml_over,1), "MC Over%": mc["Carreras"].get(f"Over {line}")})
+        if market.get("total_over") and market.get("total_under") and ml_over is not None and ml_under is not None:
+            po, pu = blend(ml_over,mc["Carreras"][f"Over {line}"]), blend(ml_under,mc["Carreras"][f"Under {line}"])
+            push = mc["Carreras"].get(f"Push {line}",0.0)
+            r = evaluar_dos_vias(f"Over {line}",f"Under {line}",po,pu,market["total_over"],market["total_under"],push,push,min_prob=57,min_edge=5,min_ev=4)
+            diagnostics += consensus_filter(r, ml_over,mc["Carreras"][f"Over {line}"],ml_under,mc["Carreras"][f"Under {line}"],min_model=55,max_disagreement=12)
+
+        st.markdown("### Run line — diagnóstico")
+        if market.get("spread_home") is not None:
+            st.write({
+                "Local": market["spread_home"], "MC Local cover%": mc["Carreras"].get(f"Spread Local {market['spread_home']:+.1f}"),
+                "Visitante": market.get("spread_away"), "MC Visitante cover%": mc["Carreras"].get(f"Spread Visita {market.get('spread_away',0):+.1f}") if market.get("spread_away") is not None else None,
+                "Nota": "No se publica pick run line hasta validar el modelo OOS específico de spread."
+            })
+
+        st.markdown("### Diagnóstico de valor")
         if diagnostics:
             diag = pd.DataFrame(diagnostics)
-            if sp_h_proxy or sp_a_proxy or bp_h_proxy or bp_a_proxy:
+            if proxy:
                 diag.loc[diag.Estado == "VALUE BET", "Estado"] = "SEÑAL — DATOS PROXY"
             st.dataframe(diag, use_container_width=True, hide_index=True)
         else:
-            st.info("Sin cuotas completas de una misma casa; no se calcula value bet.")
+            st.info("Sin cuotas completas de una misma casa: no se calcula value bet.")
+
         with st.expander("Detalle técnico"):
-            st.write("Bookmaker", market.get("bookmaker"))
-            st.write("Cuotas", market)
-            st.write("Monte Carlo", mc)
-            st.write("ML", ml)
+            st.write("Cuotas", market); st.write("Monte Carlo", mc); st.write("ML", {**ml,"Prob_Over":ml_over,"Prob_Under":ml_under})
+
+st.markdown("---")
+st.caption("V2 elimina wRC+/xFIP falsos, H2H arbitrario, clips 35–65%, spreads inventados y API keys dentro del código. El clima direccional permanece neutral hasta incorporar orientación/forecast de estadio verificable.")
