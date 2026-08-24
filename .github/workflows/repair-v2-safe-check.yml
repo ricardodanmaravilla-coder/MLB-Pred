@@ -1,0 +1,80 @@
+name: MLB repair-v2-safe checks
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt
+      - name: Compile
+        run: python -m py_compile app_mlb.py minero_mlb.py modules/*.py
+      - name: ML smoke with repository data
+        run: |
+          python - <<'PY'
+          import pandas as pd
+          from modules.ml_mlb import PredictorMLMLB
+          bat = pd.read_csv('data/mlb_batting.csv')
+          pit = pd.read_csv('data/mlb_pitching.csv')
+          games = pd.read_csv('data/mlb_games.csv')
+          model = PredictorMLMLB()
+          assert model.entrenar(bat, pit, games)
+          b = bat.iloc[-1]
+          p = pit[pit['Team'].astype(str) == str(b['Team'])]
+          if p.empty:
+              p = pit.iloc[[-1]]
+          r = model.predecir_partido('NYY', 'BOS', 72.0, 71.0, 4.1, 4.2)
+          assert 0 <= r['Probabilidad_Local'] <= 100
+          assert 0 <= r['Probabilidad_Visita'] <= 100
+          assert abs(r['Probabilidad_Local'] + r['Probabilidad_Visita'] - 100) < 0.2
+          print(r)
+          PY
+      - name: Monte Carlo identity and markets smoke
+        run: |
+          python - <<'PY'
+          import pandas as pd
+          from modules.montecarlo_mlb import simular_partido_mlb
+          games = pd.read_csv('data/mlb_games.csv')
+          r = simular_partido_mlb(
+              'New York Yankees','Boston Red Sox',4.0,4.2,72.0,71.0,4.1,4.3,100.0,0,
+              0,'',72,8.5,df_games=games,num_simulaciones=6000)
+          assert 0 <= r['Moneyline']['Gana Local'] <= 100
+          assert abs(r['Moneyline']['Gana Local'] + r['Moneyline']['Gana Visita'] - 100) < 0.01
+          assert 'Spread Local -1.5' in r['Carreras']
+          assert 'Spread Visita +1.5' in r['Carreras']
+          assert 'Over 8.5' in r['Carreras']
+          assert r['Metadatos']['H2H_Usado_En_Probabilidad'] is False
+          print(r['Moneyline'], r['Carreras']['Promedio_Total'])
+          PY
+      - name: No-vig odds smoke
+        run: |
+          python - <<'PY'
+          from modules.odds_mlb import analizar_apuestas_mlb
+          mc = {'Moneyline': {'Gana Local': 58.0, 'Gana Visita': 42.0}, 'Carreras': {'Over 8.5': 55.0, 'Under 8.5': 45.0, 'Push 8.5': 0.0}}
+          ml = {'Probabilidad_Local': 56.0, 'Probabilidad_Visita': 44.0}
+          odds = {'Moneyline_Local': 1.9, 'Moneyline_Visita': 2.05, 'Cuota_Over': 1.95, 'Cuota_Under': 1.95}
+          df = analizar_apuestas_mlb(mc, ml, odds, 8.5)
+          assert 'Prob Mercado No-Vig' in df.columns
+          assert 'Edge' in df.columns
+          print(df.to_string(index=False))
+          PY
+      - name: Stable Streamlit startup
+        run: |
+          streamlit run app_mlb.py --server.headless true --server.port 8501 > /tmp/streamlit.log 2>&1 &
+          PID=$!
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:8501/_stcore/health; then
+              kill $PID || true
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/streamlit.log
+          kill $PID || true
+          exit 1
