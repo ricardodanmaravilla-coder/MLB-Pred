@@ -14,7 +14,7 @@ jobs:
           python-version: '3.11'
       - run: pip install -r requirements.txt
       - name: Compile
-        run: python -m py_compile app_mlb.py minero_mlb.py backtest_safe.py test_streamlit_interaction.py modules/*.py
+        run: python -m py_compile app_mlb.py minero_mlb.py backtest_safe.py backtest_markets.py test_streamlit_interaction.py modules/*.py
       - name: ML smoke with repository data
         run: |
           python - <<'PY'
@@ -70,6 +70,8 @@ jobs:
           PY
       - name: Chronological holdout backtest
         run: python backtest_safe.py | tee backtest_safe_output.txt
+      - name: Market calibration backtest
+        run: python backtest_markets.py | tee backtest_markets_output.txt
       - name: Stable Streamlit startup
         run: |
           streamlit run app_mlb.py --server.headless true --server.port 8501 > /tmp/streamlit.log 2>&1 &
