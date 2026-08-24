@@ -26,6 +26,7 @@ class PredictorMLMLB:
         self.df_games = pd.DataFrame()
         self.bat_scale = 100.0
         self.pit_scale = 4.10
+        self.current_history = {}
 
     @staticmethod
     def _normalize_games(df_games):
@@ -120,6 +121,7 @@ class PredictorMLMLB:
             self.modelo_ganador.fit(X, np.asarray(y_win, dtype=int))
             self.modelo_carreras.fit(X, np.asarray(y_runs, dtype=float))
             self.modelo_handicap.fit(X, np.asarray(y_diff, dtype=float))
+            self.current_history = history
             self.entrenado = True
             return True
         except Exception as e:
@@ -127,23 +129,13 @@ class PredictorMLMLB:
             self.entrenado = False
             return False
 
-    def _history_from_games(self):
-        history = {}
-        for _, r in self.df_games.iterrows():
-            h, a = r["Home"], r["Away"]
-            hs, as_ = float(r["Home_Score"]), float(r["Away_Score"])
-            history.setdefault(h, []).append((int(hs > as_), hs, as_))
-            history.setdefault(a, []).append((int(as_ > hs), as_, hs))
-        return history
-
     def predecir_partido(self, loc_abbr, vis_abbr, wrc_loc, wrc_vis, xfip_loc, xfip_vis, pf=None):
         try:
             if not self.entrenado:
                 raise RuntimeError("Modelo no entrenado")
             loc, vis = normalize_team(loc_abbr), normalize_team(vis_abbr)
-            history = self._history_from_games()
             features = np.asarray([
-                self._feature_row(history, loc, vis, float(wrc_loc), float(wrc_vis), float(xfip_loc), float(xfip_vis))
+                self._feature_row(self.current_history, loc, vis, float(wrc_loc), float(wrc_vis), float(xfip_loc), float(xfip_vis))
             ], dtype=float)
             probs = self.modelo_ganador.predict_proba(features)[0]
             return {
