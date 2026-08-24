@@ -29,6 +29,8 @@ jobs:
           assert 0 <= r['Probabilidad_Local'] <= 100
           assert 0 <= r['Probabilidad_Visita'] <= 100
           assert abs(r['Probabilidad_Local'] + r['Probabilidad_Visita'] - 100) < 0.2
+          assert r['Sigma_Carreras'] > 0
+          assert r['Sigma_Handicap'] > 0
           print(r)
           PY
       - name: Monte Carlo identity and markets smoke
@@ -46,8 +48,13 @@ jobs:
               assert f'Spread Local {line:+.1f}' in r['Carreras']
               assert f'Spread Visita {line:+.1f}' in r['Carreras']
           assert 'Over 8.5' in r['Carreras']
-          assert r['Metadatos']['H2H_Usado_En_Probabilidad'] is False
-          print(r['Moneyline'], r['Carreras']['Promedio_Total'])
+          meta = r['Metadatos']
+          assert meta['H2H_Usado_En_Probabilidad'] is True
+          assert 0.0 <= meta['H2H_Peso'] <= 0.10
+          assert meta['H2H_Muestra'] >= 0
+          assert 0.88 <= meta['Factor_Clima'] <= 1.12
+          assert 1.0 <= meta['Factor_Altitud_Residual'] <= 1.008
+          print(r['Moneyline'], r['Carreras']['Promedio_Total'], meta)
           PY
       - name: No-vig odds smoke
         run: |
