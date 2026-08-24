@@ -92,7 +92,7 @@ def calcular_criterio_kelly(probabilidad_real, cuota_decimal, fraccion=0.25):
     except:
         return 0.0
 
-def estimar_prob_ml(proyeccion, linea, tipo="over"):
+def estimar_prob_ml(proyeccion, linea, tipo="over", sigma=None):
     """
     Convierte la proyección del Machine Learning en probabilidad real (%)
     utilizando la Función de Distribución Acumulada (CDF) Normal.
@@ -100,18 +100,16 @@ def estimar_prob_ml(proyeccion, linea, tipo="over"):
     if proyeccion is None or linea is None:
         return 50.0
 
-    # Desviación estándar (RMSE) estimada empíricamente para MLB. 
-    # (Si mides el error real de tu modelo, ajusta estos valores)
-    sigma_carreras = 2.45  # El error promedio prediciendo Totales
-    sigma_spread = 1.75    # El error promedio prediciendo el Hándicap (Diferencial)
-    
+    # Sigma comes from chronological out-of-sample residuals when available.
     try:
+        sigma = float(sigma) if sigma is not None else (3.5 if tipo in ["over", "under"] else 4.2)
+        sigma = max(1.0, sigma)
         if tipo == "over":
-            z = (proyeccion - linea) / sigma_carreras
+            z = (proyeccion - linea) / sigma
         elif tipo == "under":
-            z = (linea - proyeccion) / sigma_carreras
+            z = (linea - proyeccion) / sigma
         elif tipo in ["spread_loc", "spread_vis"]:
-            z = (proyeccion + linea) / sigma_spread 
+            z = (proyeccion + linea) / sigma
         else:
             return 50.0
 
@@ -397,6 +395,12 @@ else:
                             park_factor = float(park_data[col_pf].values[0])
                             altitud = float(park_data[col_alt].values[0])
                             
+                            # Clima real del estadio para el scanner; fallback solo si la consulta no responde.
+                            temp_scan, viento_scan, dir_scan = obtener_clima_estadio(datos_partido["local"])
+                            temp_scan = 72 if temp_scan is None else temp_scan
+                            viento_scan = 8 if viento_scan is None else viento_scan
+                            dir_scan = "None" if not dir_scan else dir_scan
+
                             # Ejecutar Simulación de Montecarlo
                             res_mc = simular_partido_mlb(
                                 local=datos_partido['local'], visita=datos_partido['visita'],
@@ -404,7 +408,7 @@ else:
                                 wrc_loc=wrc_loc, wrc_vis=wrc_vis,
                                 bullpen_loc_era=bullpen_loc_era, bullpen_vis_era=bullpen_vis_era,
                                 park_factor=park_factor, altitud_ft=altitud,
-                                viento_mph=8, direccion_viento="None", temp_f=72,
+                                viento_mph=viento_scan, direccion_viento=dir_scan, temp_f=temp_scan,
                                 linea_carreras_casino=linea_casino,
                                 df_games=df_games,
                                 num_simulaciones=50000
@@ -424,20 +428,20 @@ else:
                             spread_vis = datos_partido.get("spread_vis")
                             
                             # Lectura dinámica de Montecarlo para el hándicap local y visitante
-                            prob_mc_spread_loc = carreras_dict.get(f"Spread Local {spread_loc:+.1f}", prob_mc_loc * 0.90) if spread_loc is not None else 50.0
-                            prob_mc_spread_vis = carreras_dict.get(f"Spread Visita {spread_vis:+.1f}", prob_mc_vis * 0.90) if spread_vis is not None else 50.0
+                            prob_mc_spread_loc = carreras_dict.get(f"Spread Local {spread_loc:+.1f}", 50.0) if spread_loc is not None else 50.0
+                            prob_mc_spread_vis = carreras_dict.get(f"Spread Visita {spread_vis:+.1f}", 50.0) if spread_vis is not None else 50.0
 
                             # --- PROBABILIDADES MACHINE LEARNING ---
                             prob_ml_loc = res_ml['Probabilidad_Local']
                             prob_ml_vis = res_ml['Probabilidad_Visita']
 
                             proy_carreras = res_ml.get('Proyeccion_Carreras', linea_casino)
-                            prob_ml_over = estimar_prob_ml(proy_carreras, linea_casino, "over")
-                            prob_ml_under = estimar_prob_ml(proy_carreras, linea_casino, "under")
+                            prob_ml_over = estimar_prob_ml(proy_carreras, linea_casino, "over", res_ml.get("Sigma_Carreras"))
+                            prob_ml_under = estimar_prob_ml(proy_carreras, linea_casino, "under", res_ml.get("Sigma_Carreras"))
 
                             proy_hc_loc = res_ml.get('Proyeccion_Handicap_Local', 0)
-                            prob_ml_spread_loc = estimar_prob_ml(proy_hc_loc, spread_loc, "spread_loc") if spread_loc is not None else 50.0
-                            prob_ml_spread_vis = estimar_prob_ml(-proy_hc_loc, spread_vis, "spread_vis") if spread_vis is not None else 50.0
+                            prob_ml_spread_loc = estimar_prob_ml(proy_hc_loc, spread_loc, "spread_loc", res_ml.get("Sigma_Handicap")) if spread_loc is not None else 50.0
+                            prob_ml_spread_vis = estimar_prob_ml(-proy_hc_loc, spread_vis, "spread_vis", res_ml.get("Sigma_Handicap")) if spread_vis is not None else 50.0
 
                             # --- UMBRALES DINÁMICOS POR MERCADO ---
                             umbral_ml = 55.0       # Moneyline
@@ -521,12 +525,16 @@ else:
                                         "Stake Kelly": f"{calcular_criterio_kelly(prob_comb_under, cuota_un)}%"
                                     })
                             
-                            # 5. Spread Local (Lectura dinámica de la matriz de Montecarlo)
+                            # 5. Spread Local: consenso MC + ML; evita sesgo sistemático hacia +1.5.
                             cuota_sp_loc = datos_partido.get("cuota_spread_loc")
                             if spread_loc is not None and cuota_sp_loc is not None:
-                                ev_sp_loc = (prob_mc_spread_loc / 100.0) * cuota_sp_loc - 1.0
+                                prob_comb_sp_loc = (prob_mc_spread_loc + prob_ml_spread_loc) / 2.0
+                                desac_sp_loc = abs(prob_mc_spread_loc - prob_ml_spread_loc)
+                                ev_sp_loc = (prob_comb_sp_loc / 100.0) * cuota_sp_loc - 1.0
                                 
-                                if prob_mc_spread_loc >= umbral_handicap and _pasa_valor(prob_mc_spread_loc, cuota_sp_loc, mkt_sp_loc_scanner):
+                                if (prob_mc_spread_loc >= 56.0 and prob_ml_spread_loc >= 54.0 and
+                                    prob_comb_sp_loc >= 56.0 and desac_sp_loc <= 12.0 and
+                                    _pasa_valor(prob_comb_sp_loc, cuota_sp_loc, mkt_sp_loc_scanner)):
                                     recomendaciones.append({
                                         "Partido": f"{datos_partido['visita']} @ {datos_partido['local']}",
                                         "Mercado": "Hándicap",
@@ -535,15 +543,19 @@ else:
                                         "Prob. MC": f"{round(prob_mc_spread_loc, 1)}%",
                                         "Cuota": cuota_sp_loc,
                                         "EV+": f"{round(ev_sp_loc*100, 2)}%",
-                                        "Stake Kelly": f"{calcular_criterio_kelly(prob_mc_spread_loc, cuota_sp_loc)}%"
+                                        "Stake Kelly": f"{calcular_criterio_kelly(prob_comb_sp_loc, cuota_sp_loc)}%"
                                     })
 
-                            # 6. Spread Visita
+                            # 6. Spread Visita: mismo estándar de consenso que el local.
                             cuota_sp_vis = datos_partido.get("cuota_spread_vis")
                             if spread_vis is not None and cuota_sp_vis is not None:
-                                ev_sp_vis = (prob_mc_spread_vis / 100.0) * cuota_sp_vis - 1.0
+                                prob_comb_sp_vis = (prob_mc_spread_vis + prob_ml_spread_vis) / 2.0
+                                desac_sp_vis = abs(prob_mc_spread_vis - prob_ml_spread_vis)
+                                ev_sp_vis = (prob_comb_sp_vis / 100.0) * cuota_sp_vis - 1.0
                                 
-                                if prob_mc_spread_vis >= umbral_handicap and _pasa_valor(prob_mc_spread_vis, cuota_sp_vis, mkt_sp_vis_scanner):
+                                if (prob_mc_spread_vis >= 56.0 and prob_ml_spread_vis >= 54.0 and
+                                    prob_comb_sp_vis >= 56.0 and desac_sp_vis <= 12.0 and
+                                    _pasa_valor(prob_comb_sp_vis, cuota_sp_vis, mkt_sp_vis_scanner)):
                                     recomendaciones.append({
                                         "Partido": f"{datos_partido['visita']} @ {datos_partido['local']}",
                                         "Mercado": "Hándicap",
@@ -552,7 +564,7 @@ else:
                                         "Prob. MC": f"{round(prob_mc_spread_vis, 1)}%",
                                         "Cuota": cuota_sp_vis,
                                         "EV+": f"{round(ev_sp_vis*100, 2)}%",
-                                        "Stake Kelly": f"{calcular_criterio_kelly(prob_mc_spread_vis, cuota_sp_vis)}%"
+                                        "Stake Kelly": f"{calcular_criterio_kelly(prob_comb_sp_vis, cuota_sp_vis)}%"
                                     })
 
                         except Exception as e:
