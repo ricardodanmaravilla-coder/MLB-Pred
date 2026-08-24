@@ -1,0 +1,41 @@
+name: MLB real entrypoint hotfix checks
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt
+      - name: Compile exact app
+        run: python -m py_compile app_mlb.py app_mlb_v2.py modules/*.py
+      - name: Verify cache and simulation cap
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          s = Path('app_mlb_v2.py').read_text()
+          assert '@st.cache_resource' in s
+          assert 'num_simulaciones=20000' in s
+          assert 'model = PredictorMLMLB()' not in s.split('bat, pit, games, starters, parks, bullpen = load_data()')[-1]
+          print('entrypoint safeguards present')
+          PY
+      - name: Production Streamlit startup
+        run: |
+          streamlit run app_mlb.py --server.headless true --server.port 8501 > /tmp/streamlit.log 2>&1 &
+          PID=$!
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:8501/_stcore/health; then
+              kill $PID || true
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/streamlit.log
+          kill $PID || true
+          exit 1
