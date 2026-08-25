@@ -3,6 +3,7 @@ import os
 import time
 from datetime import date, timedelta
 
+import numpy as np
 import pandas as pd
 import statsapi
 
@@ -14,130 +15,111 @@ TEMPORADAS = [2021, 2022, 2023, 2024, 2025, 2026]
 
 def _safe_float(value, default=None):
     try:
-        if value in (None, "", "-.--"):
-            return default
+        if value in (None, "", "-.--"): return default
         return float(value)
-    except (TypeError, ValueError):
-        return default
+    except (TypeError, ValueError): return default
 
 
-def _statsapi_team_fallback():
-    bateo_data, pitcheo_data = [], []
+def _innings_to_float(value):
+    try:
+        text=str(value or '0'); whole,_,frac=text.partition('.'); outs=int(frac[:1] or 0)
+        if outs not in (0,1,2): return float(text)
+        return float(int(whole)+outs/3.0)
+    except Exception:return 0.0
+
+
+def _official_team_data():
+    bateo_data,pitcheo_data=[],[]
     for year in TEMPORADAS:
-        print(f"📊 MLB StatsAPI fallback {year}...")
+        print(f"📊 MLB StatsAPI oficial {year}...")
         try:
-            equipos = statsapi.get("teams", {"season": year, "sportId": 1})["teams"]
+            equipos=statsapi.get("teams",{"season":year,"sportId":1})["teams"]
             for equipo in equipos:
-                team_id = equipo["id"]
-                team_abbr = normalize_team(equipo.get("abbreviation", "UNK"))
-                if not team_abbr or not equipo.get("active", True):
-                    continue
-                stats_bat = statsapi.get("team_stats", {"teamId": team_id, "season": year, "group": "hitting", "stats": "season"})
-                if stats_bat and stats_bat.get("stats"):
-                    splits = stats_bat["stats"][0].get("splits", [])
+                team_id=equipo["id"]; team_abbr=normalize_team(equipo.get("abbreviation","UNK"))
+                if not team_abbr or not equipo.get("active",True):continue
+                sb=statsapi.get("team_stats",{"teamId":team_id,"season":year,"group":"hitting","stats":"season"})
+                if sb and sb.get("stats"):
+                    splits=sb["stats"][0].get("splits",[])
                     if splits:
-                        stat = dict(splits[0].get("stat", {})); stat["Team"] = team_abbr; stat["Season"] = year
-                        ops = _safe_float(stat.get("ops")); stat["OPS"] = ops; stat["OPS_Index"] = None if ops is None else ops * 100.0
-                        stat["wRC+"] = stat["OPS_Index"]; stat["wRC+_Source"] = "LEGACY_OPS_X100_NOT_REAL_WRCPLUS"
-                        stat["DataSource"] = "MLB_STATSAPI_FALLBACK"; bateo_data.append(stat)
-                stats_pit = statsapi.get("team_stats", {"teamId": team_id, "season": year, "group": "pitching", "stats": "season"})
-                if stats_pit and stats_pit.get("stats"):
-                    splits = stats_pit["stats"][0].get("splits", [])
+                        stat=dict(splits[0].get("stat",{})); stat["Team"]=team_abbr; stat["Season"]=year; stat["DataSource"]="MLB_STATSAPI_OFFICIAL"
+                        ops=_safe_float(stat.get("ops")); obp=_safe_float(stat.get("obp")); slg=_safe_float(stat.get("slg")); avg=_safe_float(stat.get("avg")); pa=_safe_float(stat.get("plateAppearances"),0) or 0
+                        bb=_safe_float(stat.get("baseOnBalls"),0) or 0; k=_safe_float(stat.get("strikeOuts"),0) or 0
+                        stat["OPS"]=ops; stat["OPS_Index_Raw"]=None if ops is None else ops*100.; stat["ISO"]=None if slg is None or avg is None else slg-avg
+                        stat["BB%_Official"]=None if pa<=0 else bb/pa*100.; stat["K%_Official"]=None if pa<=0 else k/pa*100.
+                        bateo_data.append(stat)
+                sp=statsapi.get("team_stats",{"teamId":team_id,"season":year,"group":"pitching","stats":"season"})
+                if sp and sp.get("stats"):
+                    splits=sp["stats"][0].get("splits",[])
                     if splits:
-                        stat = dict(splits[0].get("stat", {})); stat["Team"] = team_abbr; stat["Season"] = year
-                        era = _safe_float(stat.get("era")); stat["ERA"] = era; stat["xFIP"] = era
-                        stat["xFIP_Source"] = "LEGACY_ERA_PROXY_NOT_REAL_XFIP"; stat["DataSource"] = "MLB_STATSAPI_FALLBACK"
-                        pitcheo_data.append(stat)
-                time.sleep(0.12)
-        except Exception as exc:
-            print(f"❌ Error StatsAPI {year}: {exc}")
-    return pd.DataFrame(bateo_data), pd.DataFrame(pitcheo_data)
+                        stat=dict(splits[0].get("stat",{})); stat["Team"]=team_abbr; stat["Season"]=year; stat["DataSource"]="MLB_STATSAPI_OFFICIAL"
+                        stat["ERA"]=_safe_float(stat.get("era")); stat["IP_Float"]=_innings_to_float(stat.get("inningsPitched")); pitcheo_data.append(stat)
+                time.sleep(.08)
+        except Exception as exc: print(f"❌ Error StatsAPI {year}: {exc}")
+    bat=pd.DataFrame(bateo_data); pit=pd.DataFrame(pitcheo_data)
+    if not bat.empty:
+        # Park-neutrality is not claimed. This is a transparent league-relative OPS
+        # strength index built from official OBP/SLG, centered at 100 each season.
+        bat['obp_num']=pd.to_numeric(bat.get('obp'),errors='coerce'); bat['slg_num']=pd.to_numeric(bat.get('slg'),errors='coerce')
+        for yr,idx in bat.groupby('Season').groups.items():
+            rows=bat.loc[idx]; lg_obp=float(rows['obp_num'].median()); lg_slg=float(rows['slg_num'].median())
+            if lg_obp>0 and lg_slg>0: bat.loc[idx,'Offense_Index']=((rows['obp_num']/lg_obp)+(rows['slg_num']/lg_slg)-1.)*100.
+        bat['OPS_Index']=bat['Offense_Index'].combine_first(pd.to_numeric(bat.get('OPS_Index_Raw'),errors='coerce'))
+        bat['wRC+']=bat['OPS_Index']; bat['wRC+_Source']='MLB_OFFICIAL_OBP_SLG_INDEX_NOT_WRCPLUS'
+    if not pit.empty:
+        for c in ('homeRuns','baseOnBalls','hitByPitch','strikeOuts','battersFaced'):
+            pit[c+'_num']=pd.to_numeric(pit.get(c),errors='coerce').fillna(0.)
+        pit['IP_Float']=pd.to_numeric(pit['IP_Float'],errors='coerce').fillna(0.)
+        pit['ERA']=pd.to_numeric(pit['ERA'],errors='coerce')
+        for yr,idx in pit.groupby('Season').groups.items():
+            rows=pit.loc[idx]; ip=float(rows['IP_Float'].sum()); hr=float(rows['homeRuns_num'].sum()); bb=float(rows['baseOnBalls_num'].sum()); hbp=float(rows['hitByPitch_num'].sum()); k=float(rows['strikeOuts_num'].sum())
+            lg_era=float(np.average(rows['ERA'].dropna(),weights=rows.loc[rows['ERA'].notna(),'IP_Float'].clip(lower=.1))) if rows['ERA'].notna().any() else 4.10
+            raw=(13*hr+3*(bb+hbp)-2*k)/ip if ip>0 else 0.; const=lg_era-raw; pit.loc[idx,'FIP_Constant']=const
+            rip=rows['IP_Float'].replace(0,np.nan); pit.loc[idx,'FIP']=(13*rows['homeRuns_num']+3*(rows['baseOnBalls_num']+rows['hitByPitch_num'])-2*rows['strikeOuts_num'])/rip+const
+            bf=rows['battersFaced_num'].replace(0,np.nan); pit.loc[idx,'K-BB%']=(rows['strikeOuts_num']-rows['baseOnBalls_num'])/bf*100.; pit.loc[idx,'HR/9']=rows['homeRuns_num']/rip*9.
+        pit['xFIP']=pit['FIP']; pit['xFIP_Source']='MLB_OFFICIAL_FIP_USED_NOT_XFIP'
+    return bat,pit
 
 
 def extraer_estadisticas_oficiales_mlb():
-    """Use real FanGraphs advanced team metrics; fall back safely to MLB StatsAPI."""
-    print("⚾ [INICIO] Extrayendo métricas avanzadas MLB/FanGraphs...")
-    os.makedirs("data", exist_ok=True)
-    fg_bat, fg_pit, fg_rel = fetch_team_fangraphs(min(TEMPORADAS), max(TEMPORADAS))
-    fallback_bat, fallback_pit = _statsapi_team_fallback()
-
-    if not fg_bat.empty and {'Team', 'Season', 'wRC+'}.issubset(fg_bat.columns):
-        bat = fg_bat.copy()
-        bat['Team'] = bat['Team'].map(normalize_team)
-        bat['wRC+_Source'] = 'FANGRAPHS_REAL_WRCPLUS'
-        if 'OPS' in bat.columns:
-            bat['OPS_Index'] = pd.to_numeric(bat['OPS'], errors='coerce') * 100.0
-        bat.to_csv("data/mlb_batting.csv", index=False)
-        print(f"✅ Bateo FanGraphs real: {len(bat)} filas; wRC+/wOBA/ISO/K%/BB% cuando disponibles.")
-    elif not fallback_bat.empty:
-        fallback_bat.to_csv("data/mlb_batting.csv", index=False)
-        print("⚠️ FanGraphs no disponible; bateo guardado con fallback StatsAPI.")
-
-    if not fg_pit.empty and {'Team', 'Season', 'xFIP'}.issubset(fg_pit.columns):
-        pit = fg_pit.copy(); pit['Team'] = pit['Team'].map(normalize_team); pit['xFIP_Source'] = 'FANGRAPHS_REAL_XFIP'
-        pit.to_csv("data/mlb_pitching.csv", index=False)
-        print(f"✅ Pitcheo FanGraphs real: {len(pit)} filas; xFIP/FIP/K-BB%/WHIP/HR9 cuando disponibles.")
-    elif not fallback_pit.empty:
-        fallback_pit.to_csv("data/mlb_pitching.csv", index=False)
-        print("⚠️ FanGraphs no disponible; pitcheo guardado con fallback ERA.")
-
-    if not fg_rel.empty and {'Team', 'Season'}.issubset(fg_rel.columns):
-        rel = fg_rel.copy(); rel['Team'] = rel['Team'].map(normalize_team); rel['Source'] = 'FANGRAPHS_REAL_RELIEVERS'
-        if 'xFIP' in rel.columns:
-            rel['ERA_Estimator'] = pd.to_numeric(rel['xFIP'], errors='coerce').combine_first(pd.to_numeric(rel.get('FIP'), errors='coerce')).combine_first(pd.to_numeric(rel.get('ERA'), errors='coerce'))
-        rel.to_csv('data/mlb_bullpen_advanced.csv', index=False)
-        print(f"✅ Bullpen FanGraphs avanzado: {len(rel)} filas.")
+    print("⚾ [INICIO] Extrayendo y derivando métricas oficiales MLB..."); os.makedirs("data",exist_ok=True)
+    bat,pit=_official_team_data()
+    # FanGraphs remains an opt-in enrichment, never a production dependency.
+    if os.getenv('ENABLE_FANGRAPHS','').strip()=='1':
+        fg_bat,fg_pit,_=fetch_team_fangraphs(min(TEMPORADAS),max(TEMPORADAS))
+        if not fg_bat.empty and {'Team','Season','wRC+'}.issubset(fg_bat.columns):
+            fg_bat['Team']=fg_bat['Team'].map(normalize_team); bat=fg_bat; bat['wRC+_Source']='FANGRAPHS_REAL_WRCPLUS'; print('✅ FanGraphs wRC+ habilitado.')
+        if not fg_pit.empty and {'Team','Season','xFIP'}.issubset(fg_pit.columns):
+            fg_pit['Team']=fg_pit['Team'].map(normalize_team); pit=fg_pit; pit['xFIP_Source']='FANGRAPHS_REAL_XFIP'; print('✅ FanGraphs xFIP habilitado.')
+    if bat.empty or pit.empty: raise RuntimeError('No se pudieron construir métricas oficiales de equipos')
+    bat.to_csv('data/mlb_batting.csv',index=False); pit.to_csv('data/mlb_pitching.csv',index=False)
+    print(f"✅ Bateo oficial: {len(bat)} filas; índice ofensivo/ISO/K%/BB%."); print(f"✅ Pitcheo oficial: {len(pit)} filas; FIP/K-BB%/HR9/WHIP.")
 
 
 def _monthly_ranges(year):
-    ranges = []
-    for month in range(1, 10):
-        last = calendar.monthrange(year, month)[1]
-        ranges.append((f"{month:02d}/01/{year}", f"{month:02d}/{last:02d}/{year}"))
-    ranges.append((f"10/01/{year}", f"12/31/{year}"))
-    return ranges
-
+    ranges=[]
+    for month in range(1,10): last=calendar.monthrange(year,month)[1]; ranges.append((f"{month:02d}/01/{year}",f"{month:02d}/{last:02d}/{year}"))
+    ranges.append((f"10/01/{year}",f"12/31/{year}")); return ranges
 
 def extraer_historico_juegos():
-    print("\n🗓️ Actualizando historial de juegos...")
-    archivo_csv = "data/mlb_games.csv"; filas_antes = 0; df_existente = pd.DataFrame(); tramos_descarga = []
+    print("\n🗓️ Actualizando historial de juegos..."); archivo_csv="data/mlb_games.csv"; filas_antes=0; df_existente=pd.DataFrame(); tramos_descarga=[]
     if os.path.exists(archivo_csv):
-        df_existente = pd.read_csv(archivo_csv); filas_antes = len(df_existente)
-        ultima_fecha = pd.to_datetime(df_existente["Date"], errors="coerce").max()
-        if pd.notna(ultima_fecha):
-            inicio = ultima_fecha - timedelta(days=3); fin = date.today()
-            tramos_descarga.append((inicio.strftime("%m/%d/%Y"), fin.strftime("%m/%d/%Y")))
+        df_existente=pd.read_csv(archivo_csv); filas_antes=len(df_existente); ultima_fecha=pd.to_datetime(df_existente["Date"],errors="coerce").max()
+        if pd.notna(ultima_fecha): inicio=ultima_fecha-timedelta(days=3); fin=date.today(); tramos_descarga.append((inicio.strftime("%m/%d/%Y"),fin.strftime("%m/%d/%Y")))
     if not tramos_descarga:
-        for year in TEMPORADAS: tramos_descarga.extend(_monthly_ranges(year))
-
-    nuevos_juegos = []; estados_ignorados = {"Scheduled", "Pre-Game", "Postponed", "Cancelled", "Delayed", "Warmup", "Preview"}
-    for inc_str, fin_str in tramos_descarga:
+        for year in TEMPORADAS:tramos_descarga.extend(_monthly_ranges(year))
+    nuevos=[]; ignorados={"Scheduled","Pre-Game","Postponed","Cancelled","Delayed","Warmup","Preview"}
+    for inc,fin in tramos_descarga:
         for intento in range(3):
             try:
-                schedule = statsapi.schedule(start_date=inc_str, end_date=fin_str)
-                for game in schedule:
-                    status = game.get("status", "Unknown")
-                    if status in estados_ignorados or "away_score" not in game or "home_score" not in game: continue
-                    game_date = game.get("game_date")
-                    nuevos_juegos.append({
-                        "GameID": game.get("game_id"), "Date": game_date, "Season": str(game_date)[:4],
-                        "GameType": game.get("game_type") or game.get("gameType"), "Away": game.get("away_name"), "Home": game.get("home_name"),
-                        "Away_Score": game.get("away_score", 0), "Home_Score": game.get("home_score", 0),
-                        "Away_Starter": game.get("away_probable_pitcher") or game.get("away_pitcher"),
-                        "Home_Starter": game.get("home_probable_pitcher") or game.get("home_pitcher"),
-                        "Innings": game.get("current_inning", 9), "Venue": game.get("venue_name", "Unknown"),
-                    })
-                time.sleep(0.3); break
-            except Exception as exc:
-                print(f"⚠️ Intento {intento + 1}: {exc}"); time.sleep(2)
-    if not nuevos_juegos: return
-    df_nuevos = pd.DataFrame(nuevos_juegos)
-    df_final = pd.concat([df_existente, df_nuevos], ignore_index=True) if not df_existente.empty else df_nuevos
-    if 'GameID' in df_final.columns: df_final = df_final.drop_duplicates(subset=["GameID"], keep="last")
-    df_final.to_csv(archivo_csv, index=False)
-    print(f"✅ {archivo_csv}: {len(df_final)} partidos ({len(df_final) - filas_antes:+d}).")
+                for game in statsapi.schedule(start_date=inc,end_date=fin):
+                    if game.get('status','Unknown') in ignorados or 'away_score' not in game or 'home_score' not in game:continue
+                    gd=game.get('game_date'); nuevos.append({'GameID':game.get('game_id'),'Date':gd,'Season':str(gd)[:4],'GameType':game.get('game_type') or game.get('gameType'),'Away':game.get('away_name'),'Home':game.get('home_name'),'Away_Score':game.get('away_score',0),'Home_Score':game.get('home_score',0),'Away_Starter':game.get('away_probable_pitcher') or game.get('away_pitcher'),'Home_Starter':game.get('home_probable_pitcher') or game.get('home_pitcher'),'Innings':game.get('current_inning',9),'Venue':game.get('venue_name','Unknown')})
+                time.sleep(.3);break
+            except Exception as exc:print(f"⚠️ Intento {intento+1}: {exc}");time.sleep(2)
+    if not nuevos:return
+    df_n=pd.DataFrame(nuevos); df_f=pd.concat([df_existente,df_n],ignore_index=True) if not df_existente.empty else df_n
+    if 'GameID' in df_f.columns:df_f=df_f.drop_duplicates(subset=['GameID'],keep='last')
+    df_f.to_csv(archivo_csv,index=False);print(f"✅ {archivo_csv}: {len(df_f)} partidos ({len(df_f)-filas_antes:+d}).")
 
-
-if __name__ == "__main__":
-    os.makedirs("data", exist_ok=True)
-    extraer_estadisticas_oficiales_mlb(); extraer_historico_juegos(); print("🎯 Minería completada.")
+if __name__=='__main__':
+    os.makedirs('data',exist_ok=True);extraer_estadisticas_oficiales_mlb();extraer_historico_juegos();print('🎯 Minería completada.')
