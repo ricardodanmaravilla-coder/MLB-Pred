@@ -359,12 +359,12 @@ def obtener_clima_estadio(nombre_equipo):
             wind_mph = int(curr.get('windspeedMiles'))
             wind_dir = curr.get('winddir16Point', '')
             
-            dir_str = "None"
-            if wind_dir in ['N', 'NNE', 'NNW', 'NE']: dir_str = "Infield (Hacia Adentro)"
-            elif wind_dir in ['S', 'SSW', 'SSE', 'SW']: dir_str = "Outfield (Hacia Afuera)"
-            elif wind_dir in ['E', 'ENE', 'ESE']: dir_str = "Lateral (Derecha a Izquierda)"
-            elif wind_dir in ['W', 'WNW', 'WSW']: dir_str = "Lateral (Izquierda a Derecha)"
-            
+            # A compass direction cannot be translated to in/outfield without the
+            # physical orientation of this specific ballpark. Preserve the raw
+            # compass reading for diagnostics, but Monte Carlo will not apply a
+            # directional wind multiplier unless the user explicitly supplies
+            # an infield/outfield direction in the individual-game controls.
+            dir_str = f"Compass {wind_dir}" if wind_dir else "None"
             return temp_f, wind_mph, dir_str
     except:
         pass
