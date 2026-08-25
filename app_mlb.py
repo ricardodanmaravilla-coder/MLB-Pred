@@ -196,6 +196,25 @@ def _starter_run_prevention(df, pitcher_name):
         return None
 
 
+def _starter_expected_innings(df, pitcher_name, default=5.2):
+    """Expected starter workload from season IP/GS, safely bounded."""
+    try:
+        if not pitcher_name or pitcher_name == 'Por Anunciar' or df is None or df.empty or 'Name' not in df.columns:
+            return float(default)
+        names=df['Name'].astype(str); match=df[names.str.casefold()==str(pitcher_name).casefold()]
+        if match.empty:
+            last=str(pitcher_name).split()[-1].casefold(); alt=df[names.str.split().str[-1].str.casefold()==last]
+            if alt['Name'].nunique()!=1: return float(default)
+            match=alt
+        ip=pd.to_numeric(match.get('IP'),errors='coerce') if 'IP' in match.columns else pd.Series(dtype=float)
+        gs=pd.to_numeric(match.get('GS'),errors='coerce') if 'GS' in match.columns else pd.Series(dtype=float)
+        if len(ip) and len(gs) and pd.notna(ip.iloc[-1]) and pd.notna(gs.iloc[-1]) and float(gs.iloc[-1])>0:
+            return float(np.clip(float(ip.iloc[-1])/float(gs.iloc[-1]),3.5,6.8))
+        return float(default)
+    except Exception:
+        return float(default)
+
+
 @st.cache_data(ttl=3600)
 def _load_bullpen_proxy():
     try:
@@ -470,6 +489,7 @@ else:
                             
                             pitcher_loc_nombre = datos_partido["pitcher_local"]
                             xfip_loc = _starter_run_prevention(df_pit_ind, pitcher_loc_nombre)
+                            starter_ip_loc = _starter_expected_innings(df_pit_ind, pitcher_loc_nombre)
                             
                             if xfip_loc is None:
                                 team_pit_loc = df_pit[df_pit['Team'] == loc_abbr]
@@ -480,6 +500,7 @@ else:
 
                             pitcher_vis_nombre = datos_partido["pitcher_visita"]
                             xfip_vis = _starter_run_prevention(df_pit_ind, pitcher_vis_nombre)
+                            starter_ip_vis = _starter_expected_innings(df_pit_ind, pitcher_vis_nombre)
                             
                             if xfip_vis is None:
                                 team_pit_vis = df_pit[df_pit['Team'] == vis_abbr]
@@ -519,7 +540,8 @@ else:
                                 viento_mph=viento_scan, direccion_viento=dir_scan, temp_f=temp_scan,
                                 linea_carreras_casino=linea_casino,
                                 df_games=df_games,
-                                num_simulaciones=50000
+                                num_simulaciones=50000,
+                                starter_ip_loc=starter_ip_loc, starter_ip_vis=starter_ip_vis
                             )
 
                             # ML histórico: misma definición de features que en entrenamiento
@@ -694,6 +716,7 @@ else:
                     
                     pitcher_loc_nombre = datos_partido["pitcher_local"]
                     xfip_loc = _starter_run_prevention(df_pit_ind, pitcher_loc_nombre)
+                    starter_ip_loc = _starter_expected_innings(df_pit_ind, pitcher_loc_nombre)
                     
                     if xfip_loc is None:
                         team_pit_loc = df_pit[df_pit['Team'] == loc_abbr]
@@ -704,6 +727,7 @@ else:
 
                     pitcher_vis_nombre = datos_partido["pitcher_visita"]
                     xfip_vis = _starter_run_prevention(df_pit_ind, pitcher_vis_nombre)
+                    starter_ip_vis = _starter_expected_innings(df_pit_ind, pitcher_vis_nombre)
                     
                     if xfip_vis is None:
                         team_pit_vis = df_pit[df_pit['Team'] == vis_abbr]
@@ -742,7 +766,8 @@ else:
                         viento_mph=viento, direccion_viento=dir_viento, temp_f=temp,
                         linea_carreras_casino=linea_casino,
                         df_games=df_games,
-                        num_simulaciones=50000
+                        num_simulaciones=50000,
+                        starter_ip_loc=starter_ip_loc, starter_ip_vis=starter_ip_vis
                     )
                     
                     cuotas_reales = {
