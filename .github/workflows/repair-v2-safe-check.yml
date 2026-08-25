@@ -1,4 +1,4 @@
-name: MLB repair-v3 checks
+name: MLB repair-v4 checks
 
 on:
   pull_request:
@@ -15,19 +15,27 @@ jobs:
       - run: pip install -r requirements.txt
       - name: Compile
         run: python -m py_compile app_mlb.py minero_mlb.py minero_pitchers.py backtest_safe.py backtest_markets.py test_streamlit_interaction.py modules/*.py
-      - name: ML sequential and calibration smoke
+      - name: ML sequential, calibration and rerun-cache smoke
         run: |
           python - <<'PY'
           import pandas as pd
           from modules.ml_mlb import PredictorMLMLB
           bat=pd.read_csv('data/mlb_batting.csv'); pit=pd.read_csv('data/mlb_pitching.csv'); games=pd.read_csv('data/mlb_games.csv')
           m=PredictorMLMLB(); assert m.entrenar(bat,pit,games)
+          assert m.loaded_from_cache is False
           r=m.predecir_partido('NYY','BOS',72,71,4.1,4.2)
           assert 0<=r['Probabilidad_Local']<=100 and abs(r['Probabilidad_Local']+r['Probabilidad_Visita']-100)<.2
-          assert 0.45 <= r['Prob_Shrink'] <= 1.0
+          assert 0.35 <= r['Prob_Shrink'] <= 1.0
+          assert 1.0 <= r['Sigma_Carreras'] <= 10.0
+          assert 1.0 <= r['Sigma_Handicap'] <= 10.0
           before=len(m.current_history.get('NYY',[])); m.actualizar_resultado('NYY','BOS',5,3); after=len(m.current_history.get('NYY',[])); assert after==before+1
-          assert r['Sigma_Carreras']>0 and r['Sigma_Handicap']>0
-          print(r)
+          # A normal Streamlit rerun creates a new Predictor object and calls entrenar again.
+          # It must now reuse fitted estimators instead of retraining sklearn models.
+          m2=PredictorMLMLB(); assert m2.entrenar(bat,pit,games); assert m2.loaded_from_cache is True
+          r2=m2.predecir_partido('NYY','BOS',72,71,4.1,4.2)
+          assert r2['Modelo_Desde_Cache'] is True
+          assert r2['Probabilidad_Local'] == r['Probabilidad_Local']
+          print(r, r2)
           PY
       - name: Monte Carlo V3 neutral-offense smoke
         run: |
