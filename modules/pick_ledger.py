@@ -17,12 +17,13 @@ import requests
 from .google_sheets_ledger import sync_rows as sync_google_rows
 
 
+DEFAULT_BANKROLL_MXN = 5000.0
 LEDGER_COLUMNS = [
     'snapshot_utc','game_date','game_pk','away','home','market','selection','line','odds',
     'prob_ml','prob_mc','prob_combined','market_no_vig','edge_pp','ev_pct',
     'disagreement_pp','score','starter_away','starter_home','park_factor',
     'temperature_f','wind_mph','wind_direction','model_version','result_status',
-    'result_value','profit_units'
+    'result_value','profit_units','kelly_pct','bankroll_mxn','stake_mxn','profit_mxn'
 ]
 
 
@@ -38,6 +39,76 @@ def _secret(name, default=''):
         return value
     except Exception:
         return default
+
+
+def _number(value, default=None):
+    try:
+        if value is None or (isinstance(value, float) and pd.isna(value)):
+            return default
+        text = str(value).replace('%', '').replace('$', '').replace(',', '').strip()
+        if not text:
+            return default
+        return float(text)
+    except (TypeError, ValueError):
+        return default
+
+
+def bankroll_mxn():
+    value = _number(_secret('BANKROLL_MXN', DEFAULT_BANKROLL_MXN), DEFAULT_BANKROLL_MXN)
+    return float(value if value and value > 0 else DEFAULT_BANKROLL_MXN)
+
+
+def _implied_push_probability(probability_pct, odds, ev_pct):
+    """Recover push probability from push-aware EV when the scanner did not persist it.
+
+    EV = p*(odds-1) - loss_prob = p*odds + push_prob - 1.
+    This keeps Kelly identical to the scanner for integer totals/run lines while
+    naturally returning zero for two-way markets and half-point lines.
+    """
+    p = _number(probability_pct)
+    o = _number(odds)
+    ev = _number(ev_pct)
+    if p is None or o is None or ev is None or o <= 1:
+        return 0.0
+    p = max(0.0, min(1.0, p / 100.0))
+    push = 1.0 + (ev / 100.0) - (p * o)
+    return max(0.0, min(1.0 - p, push))
+
+
+def quarter_kelly_pct(probability_pct, odds, ev_pct=None):
+    p = _number(probability_pct)
+    o = _number(odds)
+    if p is None or o is None or o <= 1:
+        return 0.0
+    p = max(0.0, min(1.0, p / 100.0))
+    push = _implied_push_probability(probability_pct, odds, ev_pct) if ev_pct is not None else 0.0
+    q = max(0.0, 1.0 - p - push)
+    decisions = p + q
+    b = o - 1.0
+    if decisions <= 0 or b <= 0:
+        return 0.0
+    full_kelly = (b * p - q) / (b * decisions)
+    return round(max(0.0, full_kelly * 0.25) * 100.0, 2)
+
+
+def enrich_tracking_row(row):
+    """Add deterministic staking fields without changing any prediction decision."""
+    d = dict(row or {})
+    bank = _number(d.get('bankroll_mxn'))
+    if bank is None or bank <= 0:
+        bank = bankroll_mxn()
+    kelly = _number(d.get('kelly_pct'))
+    if kelly is None:
+        kelly = quarter_kelly_pct(d.get('prob_combined'), d.get('odds'), d.get('ev_pct'))
+    stake = _number(d.get('stake_mxn'))
+    if stake is None:
+        stake = round(bank * max(0.0, kelly) / 100.0, 2)
+    d['kelly_pct'] = round(max(0.0, kelly), 2)
+    d['bankroll_mxn'] = round(bank, 2)
+    d['stake_mxn'] = round(max(0.0, stake), 2)
+    if d.get('profit_mxn') in ('', None):
+        d['profit_mxn'] = None
+    return d
 
 
 def _github_config():
@@ -148,9 +219,10 @@ def append_snapshot(rows, path='data/picks_ledger.csv'):
     now = datetime.now(timezone.utc).isoformat()
     clean = []
     for row in rows:
-        d = {c: row.get(c) for c in LEDGER_COLUMNS}
+        source = enrich_tracking_row(row)
+        d = {c: source.get(c) for c in LEDGER_COLUMNS}
         d['snapshot_utc'] = d.get('snapshot_utc') or now
-        d['model_version'] = d.get('model_version') or 'v5'
+        d['model_version'] = d.get('model_version') or 'v6'
         d['result_status'] = d.get('result_status') or 'pending'
         clean.append(d)
     new = pd.DataFrame(clean, columns=LEDGER_COLUMNS)
