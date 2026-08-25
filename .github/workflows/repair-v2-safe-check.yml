@@ -14,8 +14,8 @@ jobs:
           python-version: '3.11'
       - run: pip install -r requirements.txt
       - name: Compile
-        run: python -m py_compile app_mlb.py minero_mlb.py backtest_safe.py backtest_markets.py test_streamlit_interaction.py modules/*.py
-      - name: ML sequential smoke
+        run: python -m py_compile app_mlb.py minero_mlb.py minero_pitchers.py backtest_safe.py backtest_markets.py test_streamlit_interaction.py modules/*.py
+      - name: ML sequential and calibration smoke
         run: |
           python - <<'PY'
           import pandas as pd
@@ -24,18 +24,20 @@ jobs:
           m=PredictorMLMLB(); assert m.entrenar(bat,pit,games)
           r=m.predecir_partido('NYY','BOS',72,71,4.1,4.2)
           assert 0<=r['Probabilidad_Local']<=100 and abs(r['Probabilidad_Local']+r['Probabilidad_Visita']-100)<.2
+          assert r['Calibracion']=='PLATT_CHRONOLOGICAL'
           before=len(m.current_history.get('NYY',[])); m.actualizar_resultado('NYY','BOS',5,3); after=len(m.current_history.get('NYY',[])); assert after==before+1
           assert r['Sigma_Carreras']>0 and r['Sigma_Handicap']>0
           print(r)
           PY
-      - name: Monte Carlo V3 smoke
+      - name: Monte Carlo V3 neutral-offense smoke
         run: |
           python - <<'PY'
           import pandas as pd
           from modules.montecarlo_mlb import simular_partido_mlb
           g=pd.read_csv('data/mlb_games.csv')
-          r=simular_partido_mlb('New York Yankees','Boston Red Sox',4.0,4.2,72,71,4.1,4.3,100,0,0,'',72,8.5,df_games=g,num_simulaciones=6000)
+          r=simular_partido_mlb('New York Yankees','Boston Red Sox',4.0,4.2,100,100,4.1,4.3,100,0,0,'',72,8.5,df_games=g,num_simulaciones=8000)
           assert abs(r['Moneyline']['Gana Local']+r['Moneyline']['Gana Visita']-100)<.01
+          assert 7.5 <= r['Carreras']['Promedio_Total'] <= 11.0, r['Carreras']['Promedio_Total']
           for line in (-5.5,-2.5,-1.5,.5,1.5,3.5,5.5):
             assert f'Spread Local {line:+.1f}' in r['Carreras'] and f'Spread Visita {line:+.1f}' in r['Carreras']
           meta=r['Metadatos']
@@ -46,15 +48,28 @@ jobs:
           assert 0.88<=meta['Factor_Clima']<=1.12 and 1.0<=meta['Factor_Altitud_Residual']<=1.008
           print(r['Moneyline'],r['Carreras']['Promedio_Total'],meta)
           PY
+      - name: Persisted bullpen sanity
+        run: |
+          python - <<'PY'
+          import pandas as pd
+          b=pd.read_csv('data/mlb_bullpen.csv')
+          assert len(b) == 30, len(b)
+          assert b['Team'].nunique() == 30
+          assert 'OAK' in set(b['Team']) and 'ATH' not in set(b['Team'])
+          assert b['ERA'].between(1.5,8.0).all()
+          print(b[['Team','ERA','IP']].to_string(index=False))
+          PY
       - name: Scanner engine smoke
         run: |
           python - <<'PY'
           from modules.scanner_engine import no_vig_two_way,total_candidate,runline_candidate,top_candidates
           a,b=no_vig_two_way(1.91,1.91); assert abs(a-.5)<1e-6 and abs(b-.5)<1e-6
+          weak_over=total_candidate('Over 8.5',53,58,1.95,a); assert not weak_over.accepted
           t=total_candidate('Over 8.5',56,58,1.95,a); assert t.accepted and t.edge_pp is not None
+          u=total_candidate('Under 8.5',52.5,57,1.95,a); assert u.accepted
           r=runline_candidate('Away +1.5',54,56,1.70,.62); assert not r.accepted
           assert top_candidates([t,r],3)[0].selection=='Over 8.5'
-          print(t.to_dict(),r.to_dict())
+          print(t.to_dict(),u.to_dict(),r.to_dict())
           PY
       - name: No-vig odds smoke
         run: |
