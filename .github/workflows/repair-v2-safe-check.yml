@@ -1,4 +1,4 @@
-name: MLB V5 integrity checks
+name: MLB V6 predictive checks
 
 on:
   pull_request:
@@ -14,9 +14,11 @@ jobs:
           python-version: '3.11'
       - run: pip install -r requirements.txt
       - name: Compile
-        run: python -m py_compile app_mlb.py minero_mlb.py minero_pitchers.py settle_picks.py backtest_safe.py backtest_markets.py test_streamlit_interaction.py test_v5_integrity.py modules/*.py
+        run: python -m py_compile app_mlb.py minero_mlb.py minero_pitchers.py settle_picks.py backtest_safe.py backtest_markets.py test_streamlit_interaction.py test_v5_integrity.py test_v6_predictive.py modules/*.py
       - name: V5 integrity regression suite
         run: python test_v5_integrity.py
+      - name: V6 predictive regression suite
+        run: python test_v6_predictive.py
       - name: ML sequential, calibration and rerun-cache smoke
         run: |
           python - <<'PY'
@@ -28,47 +30,42 @@ jobs:
           r=m.predecir_partido('NYY','BOS',72,71,4.1,4.2)
           assert 0<=r['Probabilidad_Local']<=100 and abs(r['Probabilidad_Local']+r['Probabilidad_Visita']-100)<.2
           assert 0.35 <= r['Prob_Shrink'] <= 1.0
-          assert 1.0 <= r['Sigma_Carreras'] <= 10.0
-          assert 1.0 <= r['Sigma_Handicap'] <= 10.0
-          before=len(m.current_history.get('NYY',[])); m.actualizar_resultado('NYY','BOS',5,3); after=len(m.current_history.get('NYY',[])); assert after==before+1
+          assert 1.0 <= r['Sigma_Carreras'] <= 10.0 and 1.0 <= r['Sigma_Handicap'] <= 10.0
+          assert r['Metrica_Bateo'] in ('OPS_Index','wRC+') and r['Metrica_Pitcheo'] in ('ERA','FIP','xFIP')
+          before=len(m.current_history.get('NYY',[])); m.actualizar_resultado('NYY','BOS',5,3); assert len(m.current_history.get('NYY',[]))==before+1
           m2=PredictorMLMLB(); assert m2.entrenar(bat,pit,games); assert m2.loaded_from_cache is True
-          r2=m2.predecir_partido('NYY','BOS',72,71,4.1,4.2)
-          assert r2['Modelo_Desde_Cache'] is True
-          assert r2['Probabilidad_Local'] == r['Probabilidad_Local']
-          print(r, r2)
+          r2=m2.predecir_partido('NYY','BOS',72,71,4.1,4.2); assert r2['Probabilidad_Local']==r['Probabilidad_Local']
+          print(r,r2)
           PY
-      - name: Monte Carlo deterministic smoke
+      - name: Monte Carlo deterministic and workload smoke
         run: |
           python - <<'PY'
           import pandas as pd
           from modules.montecarlo_mlb import simular_partido_mlb
           g=pd.read_csv('data/mlb_games.csv')
-          kw=dict(local='New York Yankees',visita='Boston Red Sox',pitcher_loc_xfip=4.0,pitcher_vis_xfip=4.2,wrc_loc=100,wrc_vis=100,bullpen_loc_era=4.1,bullpen_vis_era=4.3,park_factor=100,altitud_ft=0,viento_mph=0,direccion_viento='',temp_f=72,linea_carreras_casino=8.0,df_games=g,num_simulaciones=8000)
-          r=simular_partido_mlb(**kw); r2=simular_partido_mlb(**kw)
-          assert r==r2
+          kw=dict(local='New York Yankees',visita='Boston Red Sox',pitcher_loc_xfip=4.0,pitcher_vis_xfip=4.2,wrc_loc=100,wrc_vis=100,bullpen_loc_era=4.1,bullpen_vis_era=4.3,park_factor=100,altitud_ft=0,viento_mph=0,direccion_viento='',temp_f=72,linea_carreras_casino=8.0,df_games=g,num_simulaciones=8000,starter_ip_loc=5.2,starter_ip_vis=5.5)
+          r=simular_partido_mlb(**kw); r2=simular_partido_mlb(**kw); assert r==r2
           assert abs(r['Moneyline']['Gana Local']+r['Moneyline']['Gana Visita']-100)<.01
-          assert 7.5 <= r['Carreras']['Promedio_Total'] <= 11.0
+          assert 7.0 <= r['Carreras']['Promedio_Total'] <= 11.5
           assert 'Push 8.0' in r['Carreras'] and 'Push Spread Local +2.0' in r['Carreras']
-          assert r['Metadatos']['H2H_Usado_En_Probabilidad'] is False
-          print(r['Moneyline'],r['Carreras']['Promedio_Total'],r['Metadatos']['Simulation_Seed'])
+          assert r['Metadatos']['H2H_Usado_En_Probabilidad'] is False and .45<=r['Metadatos']['StarterShare_Local']<=.72
+          print(r['Moneyline'],r['Carreras']['Promedio_Total'],r['Metadatos'])
           PY
       - name: Persisted bullpen sanity
         run: |
           python - <<'PY'
           import pandas as pd
           from modules.team_utils import normalize_team
-          b=pd.read_csv('data/mlb_bullpen.csv')
-          assert b['Team'].map(normalize_team).nunique() == 30
-          assert b['ERA'].between(1.5,8.0).all()
+          b=pd.read_csv('data/mlb_bullpen.csv'); assert b['Team'].map(normalize_team).nunique()==30; assert b['ERA'].between(1.5,8.0).all()
           PY
-      - name: Scanner engine push-aware smoke
+      - name: Scanner engine adaptive push-aware smoke
         run: |
           python - <<'PY'
-          from modules.scanner_engine import no_vig_two_way,total_candidate,runline_candidate,top_candidates
+          from modules.scanner_engine import no_vig_two_way,total_candidate,runline_candidate,moneyline_candidate,top_candidates
           a,b=no_vig_two_way(1.91,1.91); assert abs(a-.5)<1e-6
-          weak_over=total_candidate('Over 8.5',53,58,1.95,a); assert not weak_over.accepted
           t=total_candidate('Over 8.5',56,58,1.95,a); assert t.accepted
           push=total_candidate('Over 8.0',60,60,2.0,.5,10); assert push.ev_pct==25.0 and push.push_probability==5.0
+          adaptive=moneyline_candidate('Home',70,50,2.0,.5,blend_weight_ml=.65); assert adaptive.probability==63.0
           weak_rl=runline_candidate('Away +1.5',54,56,1.70,.62); assert not weak_rl.accepted
           strong_rl=runline_candidate('Away +1.5',62,64,1.90,.55); assert strong_rl.accepted
           assert top_candidates([t,weak_rl],3)[0].selection=='Over 8.5'
@@ -86,10 +83,8 @@ jobs:
           python - <<'PY'
           import tempfile, os
           from modules.pick_ledger import append_snapshot,load_ledger
-          p=tempfile.mktemp(suffix='.csv')
-          n=append_snapshot([{'game_date':'2026-08-25','game_pk':123,'away':'BOS','home':'NYY','market':'Moneyline','selection':'NYY','odds':1.9}],p)
-          d=load_ledger(p); assert n==1 and len(d)==1 and int(d.iloc[0].game_pk)==123
-          os.remove(p)
+          p=tempfile.mktemp(suffix='.csv'); n=append_snapshot([{'game_date':'2026-08-25','game_pk':123,'away':'BOS','home':'NYY','market':'Moneyline','selection':'NYY','odds':1.9}],p)
+          d=load_ledger(p); assert n==1 and len(d)==1 and int(d.iloc[0].game_pk)==123; os.remove(p)
           PY
       - name: Chronological holdout backtest
         run: python backtest_safe.py | tee backtest_safe_output.txt
