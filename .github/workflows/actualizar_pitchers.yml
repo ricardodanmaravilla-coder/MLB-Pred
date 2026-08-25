@@ -1,9 +1,9 @@
-name: Actualizar Pitchers Reales (Minero)
+name: Actualizar Pitchers y Bullpen MLB
 
 on:
   schedule:
-    - cron: '0 11 * * *' # Todos los días a las 11:00 AM UTC
-  workflow_dispatch:      # Permite ejecutarlo manualmente
+    - cron: '0 11 * * *'
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -11,33 +11,31 @@ permissions:
 jobs:
   minar_pitchers:
     runs-on: ubuntu-latest
-
     steps:
-    - name: 📥 Copiar repositorio
-      uses: actions/checkout@v3
+      - name: 📥 Copiar repositorio
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-    - name: 🐍 Configurar Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.10'
+      - name: 🐍 Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
-    - name: 📦 Instalar dependencias
-      run: |
-        python -m pip install --upgrade pip
-        pip install pandas lxml beautifulsoup4 requests
+      - name: 📦 Instalar dependencias
+        run: pip install pandas requests
 
-    - name: ⛏️ Ejecutar Minero Pitchers
-      run: |
-        python minero_pitchers.py
-        ls -R data/  # Verifica si el archivo se creó y cuánto pesa
+      - name: ⛏️ Ejecutar minero pitchers/bullpen
+        run: |
+          python minero_pitchers.py
+          test -s data/mlb_pitching_individual.csv
+          test -s data/mlb_bullpen.csv
 
-    - name: 🚀 Subir datos al repositorio
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      run: |
-        git config user.name "GitHub Actions Bot"
-        git config user.email "actions@github.com"
-        git add data/mlb_pitching_individual.csv
-        git commit -m "🤖 Actualización de lanzadores individuales reales" || echo "Sin cambios"
-        git pull origin main --rebase --strategy-option theirs
-        git push origin main
+      - name: 🚀 Subir datos al repositorio
+        run: |
+          git config user.name "GitHub Actions Bot"
+          git config user.email "actions@github.com"
+          git add data/mlb_pitching_individual.csv data/mlb_bullpen.csv
+          git commit -m "🤖 Actualización pitchers y bullpen MLB" || exit 0
+          git pull origin main --rebase
+          git push origin HEAD:main
