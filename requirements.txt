@@ -1,7 +1,7 @@
-streamlit
-pandas
-requests
-pybaseball
-MLB-StatsAPI
-scikit-learn
-numpy
+streamlit>=1.40,<2
+pandas>=2.1,<3
+requests>=2.31,<3
+pybaseball>=2.2,<3
+MLB-StatsAPI>=1.7,<2
+scikit-learn>=1.4,<2
+numpy>=1.26,<3
