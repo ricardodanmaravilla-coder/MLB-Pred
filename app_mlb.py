@@ -492,22 +492,16 @@ else:
                             starter_ip_loc = _starter_expected_innings(df_pit_ind, pitcher_loc_nombre)
                             
                             if xfip_loc is None:
-                                team_pit_loc = df_pit[df_pit['Team'] == loc_abbr]
-                                if team_pit_loc.empty:
-                                    errores_datos.append({"Partido": f"{datos_partido['visita']} @ {datos_partido['local']}", "Error": "Sin pitching local para fallback"})
-                                    continue
-                                xfip_loc = float(team_pit_loc.iloc[-1]['xFIP'])
+                                errores_datos.append({"Partido": f"{datos_partido['visita']} @ {datos_partido['local']}", "Error": f"Abridor local sin métrica individual fiable: {pitcher_loc_nombre}"})
+                                continue
 
                             pitcher_vis_nombre = datos_partido["pitcher_visita"]
                             xfip_vis = _starter_run_prevention(df_pit_ind, pitcher_vis_nombre)
                             starter_ip_vis = _starter_expected_innings(df_pit_ind, pitcher_vis_nombre)
                             
                             if xfip_vis is None:
-                                team_pit_vis = df_pit[df_pit['Team'] == vis_abbr]
-                                if team_pit_vis.empty:
-                                    errores_datos.append({"Partido": f"{datos_partido['visita']} @ {datos_partido['local']}", "Error": "Sin pitching visitante para fallback"})
-                                    continue
-                                xfip_vis = float(team_pit_vis.iloc[-1]['xFIP'])
+                                errores_datos.append({"Partido": f"{datos_partido['visita']} @ {datos_partido['local']}", "Error": f"Abridor visitante sin métrica individual fiable: {pitcher_vis_nombre}"})
+                                continue
 
                             team_bullpen_loc = df_pit[df_pit['Team'] == loc_abbr]
                             team_era_loc = float(team_bullpen_loc.iloc[-1]['ERA']) if not team_bullpen_loc.empty else 4.0
@@ -719,22 +713,16 @@ else:
                     starter_ip_loc = _starter_expected_innings(df_pit_ind, pitcher_loc_nombre)
                     
                     if xfip_loc is None:
-                        team_pit_loc = df_pit[df_pit['Team'] == loc_abbr]
-                        if team_pit_loc.empty:
-                            st.error("❌ No hay datos de pitcheo reales para el local.")
-                            st.stop()
-                        xfip_loc = float(team_pit_loc.iloc[-1]['xFIP']) 
+                        st.error(f"❌ Abridor local sin métrica individual fiable: {pitcher_loc_nombre}. No se emite apuesta con un proxy de equipo.")
+                        st.stop()
 
                     pitcher_vis_nombre = datos_partido["pitcher_visita"]
                     xfip_vis = _starter_run_prevention(df_pit_ind, pitcher_vis_nombre)
                     starter_ip_vis = _starter_expected_innings(df_pit_ind, pitcher_vis_nombre)
                     
                     if xfip_vis is None:
-                        team_pit_vis = df_pit[df_pit['Team'] == vis_abbr]
-                        if team_pit_vis.empty:
-                            st.error("❌ No hay datos de pitcheo reales para el visitante.")
-                            st.stop()
-                        xfip_vis = float(team_pit_vis.iloc[-1]['xFIP']) 
+                        st.error(f"❌ Abridor visitante sin métrica individual fiable: {pitcher_vis_nombre}. No se emite apuesta con un proxy de equipo.")
+                        st.stop()
 
                     team_bullpen_loc = df_pit[df_pit['Team'] == loc_abbr]
                     team_era_loc = float(team_bullpen_loc.iloc[-1]['ERA']) if not team_bullpen_loc.empty else 4.0
