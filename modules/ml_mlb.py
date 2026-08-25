@@ -6,7 +6,7 @@ from copy import deepcopy
 
 import numpy as np
 import pandas as pd
-from sklearn.ensemble import GradientBoostingRegressor
+from sklearn.ensemble import GradientBoostingClassifier, GradientBoostingRegressor
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import make_pipeline
@@ -47,26 +47,34 @@ def _calibrate_sigma(pred,actual,market='spread'):
         for line in (7.5,8.5,9.5):outcomes += [(actual>line).astype(float),(actual<line).astype(float)];projections += [pred-line,line-pred]
     for mult in np.linspace(.85,1.75,37):
         sigma=base*float(mult);scores=[]
-        for y,margin in zip(outcomes,projections):probs=np.array([_normal_cdf(v/sigma) for v in margin]);scores.append(float(np.mean((probs-y)**2)))
+        for y,margin in zip(outcomes,projections):scores.append(float(np.mean((np.array([_normal_cdf(v/sigma) for v in margin])-y)**2)))
         score=float(np.mean(scores))
         if score<best_score:best_score,best_sigma=score,sigma
     return float(max(1.,best_sigma))
 
+def _shrink(p,alpha):return np.clip(.5+float(alpha)*(np.asarray(p,float)-.5),.01,.99)
+def _best_alpha(prob,y):
+    best=(1.,float('inf'))
+    for alpha in np.linspace(.35,1.,66):
+        score=float(np.mean((_shrink(prob,alpha)-y)**2))
+        if score<best[1]:best=(float(alpha),score)
+    return best
+
 class PredictorMLMLB:
     def __init__(self):
-        self.modelo_ganador=self._new_classifier();self.modelo_carreras=GradientBoostingRegressor(n_estimators=140,max_depth=2,learning_rate=.035,loss='huber',random_state=42);self.modelo_handicap=GradientBoostingRegressor(n_estimators=140,max_depth=2,learning_rate=.035,loss='huber',random_state=42);self.entrenado=False;self.bat_scale=100.;self.pit_scale=4.10;self.current_history={};self.current_h2h={};self.sigma_runs=3.5;self.sigma_diff=4.2;self.prob_shrink=1.;self.loaded_from_cache=False;self.batting_metric=None;self.pitching_metric=None
+        self.modelo_ganador=self._new_classifier();self.modelo_ganador_nonlinear=self._new_nonlinear_classifier();self.modelo_carreras=GradientBoostingRegressor(n_estimators=140,max_depth=2,learning_rate=.035,loss='huber',random_state=42);self.modelo_handicap=GradientBoostingRegressor(n_estimators=140,max_depth=2,learning_rate=.035,loss='huber',random_state=42);self.entrenado=False;self.bat_scale=100.;self.pit_scale=4.10;self.current_history={};self.current_h2h={};self.sigma_runs=3.5;self.sigma_diff=4.2;self.prob_shrink=1.;self.nonlinear_weight=0.;self.loaded_from_cache=False;self.batting_metric=None;self.pitching_metric=None;self.ensemble_validation_gain=0.
     @staticmethod
     def _new_classifier():return make_pipeline(StandardScaler(),LogisticRegression(C=.35,max_iter=2000,solver='lbfgs',random_state=42))
+    @staticmethod
+    def _new_nonlinear_classifier():return GradientBoostingClassifier(n_estimators=110,max_depth=2,learning_rate=.035,subsample=.85,min_samples_leaf=20,random_state=42)
     @staticmethod
     def _stats_dict(df,col):
         x=df.copy();x['Team']=x['Team'].map(normalize_team);x['Season']=pd.to_numeric(x['Season'],errors='coerce');x[col]=pd.to_numeric(x[col],errors='coerce');return x.dropna(subset=['Team','Season',col]).set_index(['Team','Season'])[col].to_dict()
     def _feature_row(self,hist,h2h,loc,vis,off_l,off_v,pit_l,pit_v):
         w5l,rf5l,ra5l,rd5l=team_state(hist,loc,5);w5v,rf5v,ra5v,rd5v=team_state(hist,vis,5);w20l,rf20l,ra20l,rd20l=team_state(hist,loc,20);w20v,rf20v,ra20v,rd20v=team_state(hist,vis,20);hwin,hrd,hn=h2h_state(h2h,loc,vis,12)
         return [w5l,w5v,w20l,w20v,rf5l,rf5v,ra5l,ra5v,rd5l,rd5v,rd20l,rd20v,hwin,hrd,min(hn,12)/12.,float(off_l)/max(self.bat_scale,1e-6),float(off_v)/max(self.bat_scale,1e-6),float(pit_l)/max(self.pit_scale,1e-6),float(pit_v)/max(self.pit_scale,1e-6),1.]
-    @staticmethod
-    def _shrink_probability(raw_prob,alpha):return float(np.clip(.5+float(alpha)*(float(raw_prob)-.5),.01,.99))
     def _restore_cached(self,cached):
-        for k in ('modelo_ganador','modelo_carreras','modelo_handicap','bat_scale','pit_scale','sigma_runs','sigma_diff','prob_shrink','batting_metric','pitching_metric'):setattr(self,k,cached[k])
+        for k in ('modelo_ganador','modelo_ganador_nonlinear','modelo_carreras','modelo_handicap','bat_scale','pit_scale','sigma_runs','sigma_diff','prob_shrink','nonlinear_weight','batting_metric','pitching_metric','ensemble_validation_gain'):setattr(self,k,cached[k])
         self.current_history=deepcopy(cached['current_history']);self.current_h2h=deepcopy(cached['current_h2h']);self.entrenado=True;self.loaded_from_cache=True
     def entrenar(self,df_batting,df_pitching,df_games):
         try:
@@ -82,11 +90,22 @@ class PredictorMLMLB:
             for _,r in games.iterrows():
                 loc,vis=r.Home,r.Away;year=int(r.Season);hs,as_=float(r.Home_Score),float(r.Away_Score);sy=year-1;ol=float(bd.get((loc,sy),self.bat_scale));ov=float(bd.get((vis,sy),self.bat_scale));pl=float(pdict.get((loc,sy),self.pit_scale));pv=float(pdict.get((vis,sy),self.pit_scale));X.append(self._feature_row(hist,hh,loc,vis,ol,ov,pl,pv));yw.append(int(hs>as_));yr.append(hs+as_);yd.append(hs-as_);append_game(hist,hh,loc,vis,hs,as_)
             if len(X)<1000:return False
-            X=np.asarray(X,float);yw=np.asarray(yw);yr=np.asarray(yr);yd=np.asarray(yd);cut=max(100,int(len(X)*.80));cut=max(100,len(X)-50) if cut>=len(X)-50 else cut;self.modelo_carreras.fit(X[:cut],yr[:cut]);self.modelo_handicap.fit(X[:cut],yd[:cut]);self.sigma_runs=_calibrate_sigma(self.modelo_carreras.predict(X[cut:]),yr[cut:],'total');self.sigma_diff=_calibrate_sigma(self.modelo_handicap.predict(X[cut:]),yd[cut:],'spread');temp=self._new_classifier();temp.fit(X[:cut],yw[:cut]);raw=temp.predict_proba(X[cut:])[:,1];best_alpha,best_brier=1.,float('inf')
-            for alpha in np.linspace(.35,1.,66):
-                score=float(np.mean((.5+alpha*(raw-.5)-yw[cut:])**2))
-                if score<best_brier:best_brier,best_alpha=score,float(alpha)
-            self.prob_shrink=best_alpha;self.modelo_ganador=self._new_classifier();self.modelo_ganador.fit(X,yw);self.modelo_carreras.fit(X,yr);self.modelo_handicap.fit(X,yd);self.current_history,self.current_h2h=hist,hh;self.entrenado=True;self.loaded_from_cache=False;cache={'modelo_ganador':self.modelo_ganador,'modelo_carreras':self.modelo_carreras,'modelo_handicap':self.modelo_handicap,'bat_scale':self.bat_scale,'pit_scale':self.pit_scale,'sigma_runs':self.sigma_runs,'sigma_diff':self.sigma_diff,'prob_shrink':self.prob_shrink,'batting_metric':self.batting_metric,'pitching_metric':self.pitching_metric,'current_history':deepcopy(hist),'current_h2h':deepcopy(hh)}
+            X=np.asarray(X,float);yw=np.asarray(yw);yr=np.asarray(yr);yd=np.asarray(yd);cut=max(100,int(len(X)*.80));cut=max(100,len(X)-50) if cut>=len(X)-50 else cut
+            self.modelo_carreras.fit(X[:cut],yr[:cut]);self.modelo_handicap.fit(X[:cut],yd[:cut]);self.sigma_runs=_calibrate_sigma(self.modelo_carreras.predict(X[cut:]),yr[cut:],'total');self.sigma_diff=_calibrate_sigma(self.modelo_handicap.predict(X[cut:]),yd[cut:],'spread')
+            # Winner ensemble: tune on first half of chronological validation, verify on second.
+            log=self._new_classifier();gb=self._new_nonlinear_classifier();log.fit(X[:cut],yw[:cut]);gb.fit(X[:cut],yw[:cut]);plog=log.predict_proba(X[cut:])[:,1];pgb=gb.predict_proba(X[cut:])[:,1];yv=yw[cut:];mid=max(30,len(yv)//2)
+            tune=slice(0,mid);verify=slice(mid,None)
+            base_alpha,base_tune=_best_alpha(plog[tune],yv[tune]);base_verify=float(np.mean((_shrink(plog[verify],base_alpha)-yv[verify])**2)) if len(yv[mid:]) else base_tune
+            best=(0.,base_alpha,base_tune)
+            for w in np.linspace(.05,.50,10):
+                blend=(1-w)*plog[tune]+w*pgb[tune];alpha,score=_best_alpha(blend,yv[tune])
+                if score<best[2]:best=(float(w),alpha,score)
+            w,alpha,_=best;blend_verify=(1-w)*plog[verify]+w*pgb[verify];ens_verify=float(np.mean((_shrink(blend_verify,alpha)-yv[verify])**2)) if len(yv[mid:]) else base_verify
+            # Require genuine chronological verification gain, not just tuning gain.
+            if w>0 and ens_verify+0.00015<base_verify:self.nonlinear_weight=w;self.prob_shrink=alpha;self.ensemble_validation_gain=base_verify-ens_verify
+            else:self.nonlinear_weight=0.;self.prob_shrink=base_alpha;self.ensemble_validation_gain=0.
+            self.modelo_ganador=self._new_classifier();self.modelo_ganador_nonlinear=self._new_nonlinear_classifier();self.modelo_ganador.fit(X,yw);self.modelo_ganador_nonlinear.fit(X,yw);self.modelo_carreras.fit(X,yr);self.modelo_handicap.fit(X,yd);self.current_history,self.current_h2h=hist,hh;self.entrenado=True;self.loaded_from_cache=False
+            cache={'modelo_ganador':self.modelo_ganador,'modelo_ganador_nonlinear':self.modelo_ganador_nonlinear,'modelo_carreras':self.modelo_carreras,'modelo_handicap':self.modelo_handicap,'bat_scale':self.bat_scale,'pit_scale':self.pit_scale,'sigma_runs':self.sigma_runs,'sigma_diff':self.sigma_diff,'prob_shrink':self.prob_shrink,'nonlinear_weight':self.nonlinear_weight,'batting_metric':self.batting_metric,'pitching_metric':self.pitching_metric,'ensemble_validation_gain':self.ensemble_validation_gain,'current_history':deepcopy(hist),'current_h2h':deepcopy(hh)}
             with _MODEL_CACHE_LOCK:
                 _MODEL_CACHE[key]=cache;_MODEL_CACHE.move_to_end(key)
                 while len(_MODEL_CACHE)>_MODEL_CACHE_MAX:_MODEL_CACHE.popitem(last=False)
@@ -96,5 +115,5 @@ class PredictorMLMLB:
     def predecir_partido(self,loc_abbr,vis_abbr,wrc_loc,wrc_vis,xfip_loc,xfip_vis,pf=None):
         try:
             if not self.entrenado:raise RuntimeError('Modelo no entrenado')
-            loc,vis=normalize_team(loc_abbr),normalize_team(vis_abbr);f=np.asarray([self._feature_row(self.current_history,self.current_h2h,loc,vis,float(wrc_loc),float(wrc_vis),float(xfip_loc),float(xfip_vis))],float);raw=float(self.modelo_ganador.predict_proba(f)[0,1]);pl=self._shrink_probability(raw,self.prob_shrink);runs=float(self.modelo_carreras.predict(f)[0]);diff=float(self.modelo_handicap.predict(f)[0]);return {'Probabilidad_Local':round(pl*100,2),'Probabilidad_Visita':round((1-pl)*100,2),'Probabilidad_Local_Raw':round(raw*100,2),'Prob_Shrink':round(self.prob_shrink,3),'Proyeccion_Carreras':round(runs,2),'Proyeccion_Handicap_Local':round(diff,2),'Sigma_Carreras':round(self.sigma_runs,3),'Sigma_Handicap':round(self.sigma_diff,3),'Modelo_Desde_Cache':bool(self.loaded_from_cache),'Metrica_Bateo':self.batting_metric,'Metrica_Pitcheo':self.pitching_metric}
-        except Exception as e:print(f'Error en predicción ML: {e}');return {'Probabilidad_Local':50.,'Probabilidad_Visita':50.,'Probabilidad_Local_Raw':50.,'Prob_Shrink':1.,'Proyeccion_Carreras':8.5,'Proyeccion_Handicap_Local':0.,'Sigma_Carreras':3.5,'Sigma_Handicap':4.2,'Modelo_Desde_Cache':False,'Metrica_Bateo':None,'Metrica_Pitcheo':None}
+            loc,vis=normalize_team(loc_abbr),normalize_team(vis_abbr);f=np.asarray([self._feature_row(self.current_history,self.current_h2h,loc,vis,float(wrc_loc),float(wrc_vis),float(xfip_loc),float(xfip_vis))],float);p_log=float(self.modelo_ganador.predict_proba(f)[0,1]);p_gb=float(self.modelo_ganador_nonlinear.predict_proba(f)[0,1]);raw=(1-self.nonlinear_weight)*p_log+self.nonlinear_weight*p_gb;pl=float(_shrink([raw],self.prob_shrink)[0]);runs=float(self.modelo_carreras.predict(f)[0]);diff=float(self.modelo_handicap.predict(f)[0]);return {'Probabilidad_Local':round(pl*100,2),'Probabilidad_Visita':round((1-pl)*100,2),'Probabilidad_Local_Raw':round(raw*100,2),'Prob_Shrink':round(self.prob_shrink,3),'Peso_Clasificador_NoLineal':round(self.nonlinear_weight,3),'Ganancia_Brier_Validacion_Ensemble':round(self.ensemble_validation_gain,6),'Proyeccion_Carreras':round(runs,2),'Proyeccion_Handicap_Local':round(diff,2),'Sigma_Carreras':round(self.sigma_runs,3),'Sigma_Handicap':round(self.sigma_diff,3),'Modelo_Desde_Cache':bool(self.loaded_from_cache),'Metrica_Bateo':self.batting_metric,'Metrica_Pitcheo':self.pitching_metric}
+        except Exception as e:print(f'Error en predicción ML: {e}');return {'Probabilidad_Local':50.,'Probabilidad_Visita':50.,'Probabilidad_Local_Raw':50.,'Prob_Shrink':1.,'Peso_Clasificador_NoLineal':0.,'Ganancia_Brier_Validacion_Ensemble':0.,'Proyeccion_Carreras':8.5,'Proyeccion_Handicap_Local':0.,'Sigma_Carreras':3.5,'Sigma_Handicap':4.2,'Modelo_Desde_Cache':False,'Metrica_Bateo':None,'Metrica_Pitcheo':None}
