@@ -8,6 +8,7 @@ import pandas as pd
 from .team_utils import normalize_team
 
 SLATE_TZ = ZoneInfo("America/New_York")
+ROOF_OR_DOME_TEAMS = {"AZ", "HOU", "MIA", "MIL", "SEA", "TB", "TEX", "TOR"}
 
 
 def slate_date(now=None):
@@ -29,6 +30,26 @@ def parse_utc(value):
         return dt.to_pydatetime()
     except Exception:
         return None
+
+
+def conservative_auto_weather(team, start_time_utc, temp_f, wind_mph, wind_dir, now=None):
+    """Use current weather only near first pitch and never assume a retractable roof is open.
+
+    If the roof state is unknown or first pitch is more than two hours away, return
+    neutral inputs rather than injecting current conditions as if they were a forecast.
+    """
+    target = normalize_team(team)
+    if target in ROOF_OR_DOME_TEAMS:
+        return 72, 0, "None", "neutral_roof_unknown"
+    start = parse_utc(start_time_utc)
+    current = now or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+    if start is None or abs((start - current).total_seconds()) > 2 * 3600:
+        return 72, 0, "None", "neutral_not_near_first_pitch"
+    if temp_f is None or wind_mph is None:
+        return 72, 0, "None", "neutral_weather_unavailable"
+    return temp_f, wind_mph, wind_dir or "None", "current_near_first_pitch"
 
 
 def park_for_team(df_parks, team):
