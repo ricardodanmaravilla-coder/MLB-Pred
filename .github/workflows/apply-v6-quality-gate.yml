@@ -1,0 +1,28 @@
+name: Apply V6 starter quality gate
+on:
+  push:
+    branches: [improve/v6-max-predictive]
+    paths:
+      - tools/apply_v6_quality_gate.py
+      - .github/workflows/apply-v6-quality-gate.yml
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: improve/v6-max-predictive
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python tools/apply_v6_quality_gate.py
+      - run: python -m py_compile app_mlb.py
+      - name: Commit V6 quality gate
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app_mlb.py
+          git commit -m 'Apply V6 starter data quality gate'
+          git push origin HEAD:improve/v6-max-predictive
