@@ -67,25 +67,15 @@ def _candidate(market, selection, prob_ml, prob_mc, odds, market_no_vig,
 
     fails = [msg for ok, msg in checks if not ok]
     accepted = not fails
-
-    # Ranking is relative to the market, not raw nominal probability. Natural
-    # high-base-rate sides such as +1.5 therefore do not win automatically.
     edge_component = 0.0 if edge_pp is None else edge_pp
     score = (1.5 * edge_component) + ev_pct - (0.15 * disagreement)
 
     return Candidate(
-        market=market,
-        selection=selection,
-        prob_ml=round(pml, 3),
-        prob_mc=round(pmc, 3),
-        probability=round(combined, 3),
-        odds=round(o, 4),
-        market_no_vig=None if market_no_vig is None else round(float(market_no_vig) * 100.0, 3),
-        edge_pp=None if edge_pp is None else round(edge_pp, 3),
-        ev_pct=round(ev_pct, 3),
-        disagreement_pp=round(disagreement, 3),
-        score=round(score, 4),
-        accepted=accepted,
+        market=market, selection=selection, prob_ml=round(pml,3), prob_mc=round(pmc,3),
+        probability=round(combined,3), odds=round(o,4),
+        market_no_vig=None if market_no_vig is None else round(float(market_no_vig)*100.0,3),
+        edge_pp=None if edge_pp is None else round(edge_pp,3), ev_pct=round(ev_pct,3),
+        disagreement_pp=round(disagreement,3), score=round(score,4), accepted=accepted,
         reason='Cumple filtros' if accepted else '; '.join(fails),
     )
 
@@ -97,8 +87,13 @@ def moneyline_candidate(selection, prob_ml, prob_mc, odds, market_no_vig=None):
 
 
 def total_candidate(selection, prob_ml, prob_mc, odds, market_no_vig=None):
+    # Walk-forward showed the 52-54% ML Over band was not reliable, while Under
+    # >=52% retained useful signal. Use asymmetric evidence-based gates without
+    # changing the shared combined/edge/EV requirements.
+    is_over = str(selection).strip().lower().startswith('over')
+    min_ml = 54.0 if is_over else 52.0
     return _candidate('Totales', selection, prob_ml, prob_mc, odds, market_no_vig,
-                      min_ml=52.0, min_mc=52.0, min_combined=54.0,
+                      min_ml=min_ml, min_mc=52.0, min_combined=54.0,
                       max_disagreement=15.0, min_edge_pp=4.0, min_ev_pct=4.0)
 
 
