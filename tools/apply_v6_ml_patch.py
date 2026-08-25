@@ -17,7 +17,16 @@ rep('from .historical_mlb import prepare_games, team_state, h2h_state, append_ga
     'from .historical_mlb import prepare_games, team_state, h2h_state, append_game\nfrom .metric_quality import batting_metric, pitching_metric\n',
     'metric imports')
 
-rep("        self.modelo_ganador = self._new_classifier()\n", "        self.classifier_family = 'logistic'\n        self.runs_family = 'gbr'\n        self.diff_family = 'gbr'\n        self.modelo_ganador = self._new_classifier(self.classifier_family)\n", 'init classifier')
+rep('''    def __init__(self):
+        self.modelo_ganador = self._new_classifier()
+        self.modelo_carreras = GradientBoostingRegressor(
+''','''    def __init__(self):
+        self.classifier_family = 'logistic'
+        self.runs_family = 'gbr'
+        self.diff_family = 'gbr'
+        self.modelo_ganador = self._new_classifier(self.classifier_family)
+        self.modelo_carreras = GradientBoostingRegressor(
+''','init classifier')
 
 old='''    @staticmethod
     def _new_classifier():
