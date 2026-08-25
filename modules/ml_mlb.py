@@ -30,8 +30,8 @@ def _frame_signature(df, important_columns):
 
 def _cache_key(df_batting, df_pitching, df_games):
     return (
-        _frame_signature(df_batting, ('Team','Season','OPS_Index','wRC+','wOBA','ISO','BB%','K%')),
-        _frame_signature(df_pitching, ('Team','Season','ERA','FIP','xFIP','K-BB%','WHIP','GB%','HR/9')),
+        _frame_signature(df_batting, ('Team','Season','OPS_Index','wRC+','wRC+_Source','wOBA','ISO','BB%','K%')),
+        _frame_signature(df_pitching, ('Team','Season','ERA','FIP','xFIP','xFIP_Source','K-BB%','WHIP','GB%','HR/9')),
         _frame_signature(df_games, ('Date','Season','Home','Away','Home_Score','Away_Score')),
     )
 
@@ -68,7 +68,7 @@ def _calibrate_sigma(pred, actual, market='spread'):
 
 
 class PredictorMLMLB:
-    """Leak-safe pregame model with chronological model-family selection."""
+    """Leak-safe pregame model with conservative chronological family selection."""
 
     def __init__(self):
         self.classifier_family = 'logistic'
@@ -118,33 +118,24 @@ class PredictorMLMLB:
         x[col] = pd.to_numeric(x[col], errors='coerce')
         return x.dropna(subset=['Team','Season',col]).set_index(['Team','Season'])[col].to_dict()
 
-    @staticmethod
-    def _ewma_state(history, team, n=12, alpha=0.28):
-        rows = history.get(team, [])[-int(n):]
-        if not rows:
-            return 0.5, 0.0
-        weights = np.array([(1.0-alpha)**i for i in range(len(rows)-1,-1,-1)], dtype=float)
-        weights /= weights.sum()
-        wins = np.array([r[0] for r in rows], dtype=float)
-        rd = np.array([r[1]-r[2] for r in rows], dtype=float)
-        return float(np.dot(weights,wins)), float(np.dot(weights,rd))
-
     def _feature_row(self, hist, h2h, loc, vis, off_l, off_v, pit_l, pit_v):
+        # V6 ablation result: preserve the V5 5/20-game feature set. 50-game and
+        # EWMA additions reduced outer walk-forward Moneyline/Brier, so they were
+        # removed rather than kept merely for complexity.
         w5l, rf5l, ra5l, rd5l = team_state(hist, loc, 5)
         w5v, rf5v, ra5v, rd5v = team_state(hist, vis, 5)
         w20l, rf20l, ra20l, rd20l = team_state(hist, loc, 20)
         w20v, rf20v, ra20v, rd20v = team_state(hist, vis, 20)
-        w50l, rf50l, ra50l, rd50l = team_state(hist, loc, 50)
-        w50v, rf50v, ra50v, rd50v = team_state(hist, vis, 50)
-        ewl, ewrdl = self._ewma_state(hist, loc)
-        ewv, ewrdv = self._ewma_state(hist, vis)
         hwin, hrd, hn = h2h_state(h2h, loc, vis, 12)
         return [
-            w5l,w5v,w20l,w20v,w50l,w50v,ewl,ewv,
-            rf5l,rf5v,ra5l,ra5v,rd5l,rd5v,rd20l,rd20v,rd50l,rd50v,ewrdl,ewrdv,
-            hwin,hrd,min(hn,12)/12.0,
-            float(off_l)/max(self.bat_scale,1e-6), float(off_v)/max(self.bat_scale,1e-6),
-            float(pit_l)/max(self.pit_scale,1e-6), float(pit_v)/max(self.pit_scale,1e-6),
+            w5l, w5v, w20l, w20v,
+            rf5l, rf5v, ra5l, ra5v,
+            rd5l, rd5v, rd20l, rd20v,
+            hwin, hrd, min(hn, 12) / 12.0,
+            float(off_l) / max(self.bat_scale, 1e-6),
+            float(off_v) / max(self.bat_scale, 1e-6),
+            float(pit_l) / max(self.pit_scale, 1e-6),
+            float(pit_v) / max(self.pit_scale, 1e-6),
             1.0,
         ]
 
