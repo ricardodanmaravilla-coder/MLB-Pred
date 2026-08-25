@@ -1,0 +1,2 @@
+Final verification branch for V6 production commit 925e6c014b757234c13fd688f884d02fda53277b.
+This file exists only to trigger the pull-request CI against the exact production tree.
