@@ -21,8 +21,6 @@ from modules.game_context import (
 # --- CONFIGURACIÓN ---
 st.set_page_config(page_title="MLB Quant Analytics", layout="wide", page_icon="⚾")
 
-# Prefer a private runtime secret. Keep the legacy value only as a temporary
-# compatibility fallback so the stable app does not lose live odds during migration.
 def _get_odds_api_key():
     key = os.getenv("ODDS_API_KEY", "").strip()
     if key:
@@ -43,827 +41,310 @@ EQUIPOS_MAP = {
     "Baltimore Orioles": "BAL", "Tampa Bay Rays": "TB", "Toronto Blue Jays": "TOR",
     "Chicago White Sox": "CWS", "Cleveland Guardians": "CLE", "Detroit Tigers": "DET",
     "Kansas City Royals": "KC", "Minnesota Twins": "MIN", "Los Angeles Angels": "LAA",
-    "Oakland Athletics": "OAK", "Athletics": "OAK", "Sacramento Athletics": "OAK", # Actualizado por reubicación
-    "Seattle Mariners": "SEA", "Texas Rangers": "TEX", "Chicago Cubs": "CHC", 
-    "Cincinnati Reds": "CIN", "Milwaukee Brewers": "MIL", "Pittsburgh Pirates": "PIT", 
-    "St. Louis Cardinals": "STL", "Arizona Diamondbacks": "AZ", "Colorado Rockies": "COL", 
-    "San Francisco Giants": "SF", "San Diego Padres": "SD", "Miami Marlins": "MIA", 
+    "Oakland Athletics": "OAK", "Athletics": "OAK", "Sacramento Athletics": "OAK",
+    "Seattle Mariners": "SEA", "Texas Rangers": "TEX", "Chicago Cubs": "CHC",
+    "Cincinnati Reds": "CIN", "Milwaukee Brewers": "MIL", "Pittsburgh Pirates": "PIT",
+    "St. Louis Cardinals": "STL", "Arizona Diamondbacks": "AZ", "Colorado Rockies": "COL",
+    "San Francisco Giants": "SF", "San Diego Padres": "SD", "Miami Marlins": "MIA",
     "New York Mets": "NYM", "Washington Nationals": "WSH"
 }
 
 def american_to_decimal(am_odds):
-    """Convierte cuotas americanas de Las Vegas a formato decimal europeo automáticamente"""
     try:
         if am_odds is None: return None
         am_odds = float(am_odds)
         if am_odds == 0: return None
-        if am_odds > 0: return round((am_odds / 100.0) + 1, 2)
-        else: return round((100.0 / abs(am_odds)) + 1, 2)
-    except:
+        return round((am_odds / 100.0) + 1, 2) if am_odds > 0 else round((100.0 / abs(am_odds)) + 1, 2)
+    except Exception:
         return None
 
 def _prob_no_vig_dos_vias(cuota_a, cuota_b):
     try:
         a, b = float(cuota_a), float(cuota_b)
-        if a <= 1 or b <= 1:
-            return None, None
-        ia, ib = 1.0 / a, 1.0 / b
-        total = ia + ib
-        return ia / total, ib / total
-    except (TypeError, ValueError, ZeroDivisionError):
-        return None, None
+        if a <= 1 or b <= 1: return None, None
+        ia, ib = 1.0/a, 1.0/b; total = ia+ib
+        return ia/total, ib/total
+    except (TypeError, ValueError, ZeroDivisionError): return None, None
 
 def _pasa_valor(prob_pct, cuota, mercado_no_vig=None, min_ev=0.03, min_edge=0.025):
     try:
-        p = float(prob_pct) / 100.0
-        o = float(cuota)
-        ev = p * o - 1.0
-        if ev < min_ev:
-            return False
-        if mercado_no_vig is not None and (p - float(mercado_no_vig)) < min_edge:
-            return False
+        p=float(prob_pct)/100.; o=float(cuota); ev=p*o-1.
+        if ev<min_ev: return False
+        if mercado_no_vig is not None and (p-float(mercado_no_vig))<min_edge: return False
         return True
-    except (TypeError, ValueError):
-        return False
+    except (TypeError, ValueError): return False
 
 def _score_valor(prob_pct, cuota, mercado_no_vig=None, desacuerdo_pp=0.0):
-    """Rank candidates by market-relative value, not raw probability.
-
-    This prevents naturally high-base-rate markets such as +1.5 from
-    dominating merely because their nominal win probability is larger.
-    """
     try:
-        p = float(prob_pct) / 100.0
-        o = float(cuota)
-        ev_pct = (p * o - 1.0) * 100.0
-        edge_pp = 0.0 if mercado_no_vig is None else (p - float(mercado_no_vig)) * 100.0
-        disagreement_penalty = max(0.0, float(desacuerdo_pp)) * 0.15
-        return round((1.5 * edge_pp) + ev_pct - disagreement_penalty, 4)
-    except (TypeError, ValueError):
-        return -999.0
-
+        p=float(prob_pct)/100.; o=float(cuota); ev_pct=(p*o-1.)*100.; edge_pp=0. if mercado_no_vig is None else (p-float(mercado_no_vig))*100.; return round((1.5*edge_pp)+ev_pct-max(0.,float(desacuerdo_pp))*.15,4)
+    except (TypeError, ValueError): return -999.
 
 def _diagnostico_total(prob_ml, prob_mc, prob_comb, cuota, mercado_no_vig, desacuerdo):
     try:
-        p=float(prob_comb)/100.0
-        ev=(p*float(cuota)-1.0)*100.0 if cuota is not None else None
-        edge=(p-float(mercado_no_vig))*100.0 if mercado_no_vig is not None else None
-        checks=[
-            (float(prob_ml)>=52.0, f"ML {float(prob_ml):.1f}% < 52%"),
-            (float(prob_mc)>=52.0, f"MC {float(prob_mc):.1f}% < 52%"),
-            (float(prob_comb)>=54.0, f"Combinada {float(prob_comb):.1f}% < 54%"),
-            (float(desacuerdo)<=15.0, f"Desacuerdo {float(desacuerdo):.1f} pp > 15"),
-            (edge is not None and edge>=4.0, "Edge < 4 pp"),
-            (ev is not None and ev>=4.0, "EV < 4%"),
-        ]
-        fails=[msg for ok,msg in checks if not ok]
-        return {"EV_pct": None if ev is None else round(ev,2), "Edge_pp": None if edge is None else round(edge,2), "Estado": "CANDIDATO" if not fails else "NO BET", "Motivo": "Cumple filtros O/U" if not fails else "; ".join(fails)}
-    except Exception as e:
-        return {"EV_pct":None,"Edge_pp":None,"Estado":"NO BET","Motivo":f"Error diagnóstico: {e}"}
-
+        p=float(prob_comb)/100.; ev=(p*float(cuota)-1.)*100. if cuota is not None else None; edge=(p-float(mercado_no_vig))*100. if mercado_no_vig is not None else None
+        checks=[(float(prob_ml)>=52.,f"ML {float(prob_ml):.1f}% < 52%"),(float(prob_mc)>=52.,f"MC {float(prob_mc):.1f}% < 52%"),(float(prob_comb)>=54.,f"Combinada {float(prob_comb):.1f}% < 54%"),(float(desacuerdo)<=15.,f"Desacuerdo {float(desacuerdo):.1f} pp > 15"),(edge is not None and edge>=4.,"Edge < 4 pp"),(ev is not None and ev>=4.,"EV < 4%")]
+        fails=[msg for ok,msg in checks if not ok]; return {"EV_pct":None if ev is None else round(ev,2),"Edge_pp":None if edge is None else round(edge,2),"Estado":"CANDIDATO" if not fails else "NO BET","Motivo":"Cumple filtros O/U" if not fails else '; '.join(fails)}
+    except Exception as e: return {"EV_pct":None,"Edge_pp":None,"Estado":"NO BET","Motivo":f"Error diagnóstico: {e}"}
 
 def _team_prior_stat(df, team, column, fallback):
     try:
-        if df is None or df.empty or column not in df.columns or 'Team' not in df.columns:
-            return float(fallback)
-        x = df[df['Team'] == team].copy()
-        if x.empty:
-            return float(fallback)
+        if df is None or df.empty or column not in df.columns or 'Team' not in df.columns: return float(fallback)
+        x=df[df['Team']==team].copy()
+        if x.empty: return float(fallback)
         if 'Season' in x.columns:
-            x['_SeasonNum'] = pd.to_numeric(x['Season'], errors='coerce')
-            target = slate_date().year - 1
-            eligible = x[x['_SeasonNum'] <= target].sort_values('_SeasonNum')
+            x['_SeasonNum']=pd.to_numeric(x['Season'],errors='coerce'); target=slate_date().year-1; eligible=x[x['_SeasonNum']<=target].sort_values('_SeasonNum')
             if not eligible.empty:
-                val = pd.to_numeric(eligible.iloc[-1][column], errors='coerce')
-                if pd.notna(val):
-                    return float(val)
-        val = pd.to_numeric(x.iloc[-1][column], errors='coerce')
-        return float(val) if pd.notna(val) else float(fallback)
-    except Exception:
-        return float(fallback)
-
+                val=pd.to_numeric(eligible.iloc[-1][column],errors='coerce')
+                if pd.notna(val): return float(val)
+        val=pd.to_numeric(x.iloc[-1][column],errors='coerce'); return float(val) if pd.notna(val) else float(fallback)
+    except Exception: return float(fallback)
 
 def _current_offensive_index(df, team, fallback=100.0):
-    """Current offense centered at league average, preferring real FanGraphs wRC+."""
+    """Current offense centered at league average, preferring official/FanGraphs indices."""
     try:
-        if df is None or df.empty or 'Team' not in df.columns:
-            return float(fallback)
-        col = preferred_batting_column(df)
-        if col is None:
-            return float(fallback)
+        if df is None or df.empty or 'Team' not in df.columns: return float(fallback)
+        col=preferred_batting_column(df)
+        if col is None: return float(fallback)
         x=df.copy(); x['_v']=pd.to_numeric(x[col],errors='coerce')
         if 'Season' in x.columns:
             x['_s']=pd.to_numeric(x['Season'],errors='coerce'); latest=x['_s'].dropna().max(); season=x[x['_s']==latest]
-        else:
-            season=x
+        else: season=x
         team_rows=season[season['Team']==team]
         if team_rows.empty: team_rows=x[x['Team']==team]
         vals=team_rows['_v'].dropna()
         if vals.empty: return float(fallback)
         team_val=float(vals.iloc[-1])
-        if col == 'wRC+':
-            return float(np.clip(team_val, 70.0, 130.0))
+        if col in ('wRC+','Offense_Index'):
+            return float(np.clip(team_val,70.,130.))
         league=season['_v'].dropna(); center=float(league.median()) if len(league) else float(x['_v'].dropna().median())
         if not center or pd.isna(center): return float(fallback)
-        return float(np.clip((team_val/center)*100.0,75.0,125.0))
-    except Exception:
-        return float(fallback)
+        return float(np.clip((team_val/center)*100.,75.,125.))
+    except Exception: return float(fallback)
 
 def _starter_run_prevention(df, pitcher_name):
-    """Resolve a starter safely. The legacy xFIP column currently contains ERA.
-
-    Prefer exact full-name matching. A last-name fallback is allowed only when
-    it identifies one unique player, preventing accidental matches for common surnames.
-    """
     try:
-        if not pitcher_name or pitcher_name == 'Por Anunciar' or df is None or df.empty or 'Name' not in df.columns:
-            return None
-        names=df['Name'].astype(str)
-        exact=df[names.str.casefold()==str(pitcher_name).casefold()]
-        match=exact
+        if not pitcher_name or pitcher_name=='Por Anunciar' or df is None or df.empty or 'Name' not in df.columns: return None
+        names=df['Name'].astype(str); exact=df[names.str.casefold()==str(pitcher_name).casefold()]; match=exact
         if match.empty:
-            last=str(pitcher_name).split()[-1].casefold()
-            fallback=df[names.str.split().str[-1].str.casefold()==last]
-            if fallback['Name'].nunique()!=1:
-                return None
+            last=str(pitcher_name).split()[-1].casefold(); fallback=df[names.str.split().str[-1].str.casefold()==last]
+            if fallback['Name'].nunique()!=1: return None
             match=fallback
-        col=next((c for c in ('xFIP','FIP','ERA') if c in match.columns and pd.to_numeric(match[c],errors='coerce').notna().any()), None)
-        if col is None:
-            return None
-        val=pd.to_numeric(match.iloc[-1][col],errors='coerce')
-        return None if pd.isna(val) else float(val)
-    except Exception:
-        return None
-
+        col=next((c for c in ('xFIP','FIP','ERA') if c in match.columns and pd.to_numeric(match[c],errors='coerce').notna().any()),None)
+        if col is None: return None
+        val=pd.to_numeric(match.iloc[-1][col],errors='coerce'); return None if pd.isna(val) else float(val)
+    except Exception: return None
 
 def _starter_expected_innings(df, pitcher_name, default=5.2):
-    """Expected starter workload from season IP/GS, safely bounded."""
     try:
-        if not pitcher_name or pitcher_name == 'Por Anunciar' or df is None or df.empty or 'Name' not in df.columns:
-            return float(default)
+        if not pitcher_name or pitcher_name=='Por Anunciar' or df is None or df.empty or 'Name' not in df.columns: return float(default)
         names=df['Name'].astype(str); match=df[names.str.casefold()==str(pitcher_name).casefold()]
         if match.empty:
             last=str(pitcher_name).split()[-1].casefold(); alt=df[names.str.split().str[-1].str.casefold()==last]
             if alt['Name'].nunique()!=1: return float(default)
             match=alt
-        ip=pd.to_numeric(match.get('IP'),errors='coerce') if 'IP' in match.columns else pd.Series(dtype=float)
-        gs=pd.to_numeric(match.get('GS'),errors='coerce') if 'GS' in match.columns else pd.Series(dtype=float)
-        if len(ip) and len(gs) and pd.notna(ip.iloc[-1]) and pd.notna(gs.iloc[-1]) and float(gs.iloc[-1])>0:
-            return float(np.clip(float(ip.iloc[-1])/float(gs.iloc[-1]),3.5,6.8))
+        ip=pd.to_numeric(match.get('IP'),errors='coerce') if 'IP' in match.columns else pd.Series(dtype=float); gs=pd.to_numeric(match.get('GS'),errors='coerce') if 'GS' in match.columns else pd.Series(dtype=float)
+        if len(ip) and len(gs) and pd.notna(ip.iloc[-1]) and pd.notna(gs.iloc[-1]) and float(gs.iloc[-1])>0: return float(np.clip(float(ip.iloc[-1])/float(gs.iloc[-1]),3.5,6.8))
         return float(default)
-    except Exception:
-        return float(default)
-
+    except Exception: return float(default)
 
 @st.cache_data(ttl=3600)
 def _load_bullpen_proxy():
     try:
         path='data/mlb_bullpen.csv'
-        if not os.path.exists(path):
-            return pd.DataFrame()
+        if not os.path.exists(path): return pd.DataFrame()
         df=pd.read_csv(path)
-        if df.empty or 'Team' not in df.columns or 'ERA' not in df.columns:
-            return pd.DataFrame()
+        if df.empty or 'Team' not in df.columns or 'ERA' not in df.columns: return pd.DataFrame()
         df['ERA']=pd.to_numeric(df['ERA'],errors='coerce')
-        if 'Season' in df.columns:
-            df['Season']=pd.to_numeric(df['Season'],errors='coerce')
+        if 'Season' in df.columns: df['Season']=pd.to_numeric(df['Season'],errors='coerce')
         return df.dropna(subset=['Team','ERA'])
-    except Exception:
-        return pd.DataFrame()
-
+    except Exception: return pd.DataFrame()
 
 def _bullpen_era(team, fallback):
     try:
-        df=_load_bullpen_proxy()
-        rows=df[df['Team'].astype(str).str.upper()==str(team).upper()]
-        if rows.empty:
-            return float(fallback)
-        if 'Season' in rows.columns:
-            rows=rows.sort_values('Season')
+        df=_load_bullpen_proxy(); rows=df[df['Team'].astype(str).str.upper()==str(team).upper()]
+        if rows.empty: return float(fallback)
+        if 'Season' in rows.columns: rows=rows.sort_values('Season')
         return float(rows.iloc[-1]['ERA'])
-    except Exception:
-        return float(fallback)
-
+    except Exception: return float(fallback)
 
 def calcular_criterio_kelly(probabilidad_real, cuota_decimal, fraccion=0.25, prob_push=0.0):
-    """Fractional Kelly with push/refund probability handled explicitly."""
     try:
-        if cuota_decimal is None or probabilidad_real is None:
-            return 0.0
-        p = max(0.0, float(probabilidad_real) / 100.0)
-        push = max(0.0, float(prob_push) / 100.0)
-        q = max(0.0, 1.0 - p - push)
-        b = float(cuota_decimal) - 1.0
-        decisions = p + q
-        if b <= 0 or decisions <= 0:
-            return 0.0
-        kelly = (b * p - q) / (b * decisions)
-        return round(max(0.0, kelly * fraccion) * 100.0, 2)
-    except Exception:
-        return 0.0
+        if cuota_decimal is None or probabilidad_real is None: return 0.0
+        p=max(0.,float(probabilidad_real)/100.); push=max(0.,float(prob_push)/100.); q=max(0.,1.-p-push); b=float(cuota_decimal)-1.; decisions=p+q
+        if b<=0 or decisions<=0:return 0.0
+        return round(max(0.,((b*p-q)/(b*decisions))*fraccion)*100.,2)
+    except Exception:return 0.0
 
 def estimar_prob_ml(proyeccion, linea, tipo="over", sigma=None):
-    """
-    Convierte la proyección del Machine Learning en probabilidad real (%)
-    utilizando la Función de Distribución Acumulada (CDF) Normal.
-    """
-    if proyeccion is None or linea is None:
-        return 50.0
-
-    # Sigma comes from chronological out-of-sample residuals when available.
+    if proyeccion is None or linea is None:return 50.0
     try:
-        sigma = float(sigma) if sigma is not None else (3.5 if tipo in ["over", "under"] else 4.2)
-        sigma = max(1.0, sigma)
-        if tipo == "over":
-            z = (proyeccion - linea) / sigma
-        elif tipo == "under":
-            z = (linea - proyeccion) / sigma
-        elif tipo in ["spread_loc", "spread_vis"]:
-            z = (proyeccion + linea) / sigma
-        else:
-            return 50.0
-
-        prob = 0.5 * (1.0 + math.erf(z / math.sqrt(2.0)))
-        return max(0.0, min(100.0, round(prob * 100.0, 2)))
-        
-    except Exception as e:
-        print(f"Error en CDF: {e}")
-        return 50.0
-
+        sigma=float(sigma) if sigma is not None else (3.5 if tipo in ['over','under'] else 4.2); sigma=max(1.,sigma)
+        if tipo=='over':z=(proyeccion-linea)/sigma
+        elif tipo=='under':z=(linea-proyeccion)/sigma
+        elif tipo in ['spread_loc','spread_vis']:z=(proyeccion+linea)/sigma
+        else:return 50.0
+        prob=.5*(1.+math.erf(z/math.sqrt(2.)));return max(0.,min(100.,round(prob*100.,2)))
+    except Exception:return 50.0
 
 @st.cache_data(ttl=3600)
 def cargar_datos_historicos():
-    bateo = pd.DataFrame()
-    pitcheo = pd.DataFrame()
-    pitcheo_individual = pd.DataFrame()
-    park = pd.DataFrame()
-    games = pd.DataFrame()
-
+    bateo=pd.DataFrame();pitcheo=pd.DataFrame();pitcheo_individual=pd.DataFrame();park=pd.DataFrame();games=pd.DataFrame()
     try:
-        if os.path.exists("data/mlb_batting.csv"):
-            df_temp = pd.read_csv("data/mlb_batting.csv", sep=None, engine='python', on_bad_lines='skip')
-            df_temp.columns = df_temp.columns.str.strip()
-            if not df_temp.empty and 'Team' in df_temp.columns and 'wRC+' in df_temp.columns:
-                df_temp['wRC+'] = pd.to_numeric(df_temp['wRC+'], errors='coerce')
-                bateo = df_temp.dropna(subset=['wRC+'])
-
-        if os.path.exists("data/mlb_pitching.csv"):
-            df_temp = pd.read_csv("data/mlb_pitching.csv", sep=None, engine='python', on_bad_lines='skip')
-            df_temp.columns = df_temp.columns.str.strip()
-            if not df_temp.empty and 'Team' in df_temp.columns and 'xFIP' in df_temp.columns:
-                df_temp['xFIP'] = pd.to_numeric(df_temp['xFIP'], errors='coerce')
-                df_temp['ERA'] = pd.to_numeric(df_temp['ERA'], errors='coerce')
-                pitcheo = df_temp.dropna(subset=['xFIP', 'ERA'])
-
-        if os.path.exists("data/mlb_pitching_individual.csv"):
-            df_temp = pd.read_csv("data/mlb_pitching_individual.csv", sep=None, engine='python', on_bad_lines='skip')
-            df_temp.columns = df_temp.columns.str.strip()
+        if os.path.exists('data/mlb_batting.csv'):
+            df_temp=pd.read_csv('data/mlb_batting.csv',sep=None,engine='python',on_bad_lines='skip');df_temp.columns=df_temp.columns.str.strip()
+            if not df_temp.empty and 'Team' in df_temp.columns:
+                metric=preferred_batting_column(df_temp)
+                if metric: df_temp[metric]=pd.to_numeric(df_temp[metric],errors='coerce');bateo=df_temp.dropna(subset=[metric])
+        if os.path.exists('data/mlb_pitching.csv'):
+            df_temp=pd.read_csv('data/mlb_pitching.csv',sep=None,engine='python',on_bad_lines='skip');df_temp.columns=df_temp.columns.str.strip()
+            if not df_temp.empty and 'Team' in df_temp.columns:
+                for c in ('xFIP','FIP','ERA'):
+                    if c in df_temp.columns:df_temp[c]=pd.to_numeric(df_temp[c],errors='coerce')
+                metric=preferred_pitching_column(df_temp)
+                if metric:pitcheo=df_temp.dropna(subset=[metric])
+        if os.path.exists('data/mlb_pitching_individual.csv'):
+            df_temp=pd.read_csv('data/mlb_pitching_individual.csv',sep=None,engine='python',on_bad_lines='skip');df_temp.columns=df_temp.columns.str.strip()
             if not df_temp.empty and 'Name' in df_temp.columns:
-                df_temp['xFIP'] = pd.to_numeric(df_temp['xFIP'], errors='coerce')
-                df_temp['ERA'] = pd.to_numeric(df_temp['ERA'], errors='coerce')
-                pitcheo_individual = df_temp.dropna(subset=['Name', 'ERA'])
+                for c in ('xFIP','FIP','ERA','IP','GS'):
+                    if c in df_temp.columns:df_temp[c]=pd.to_numeric(df_temp[c],errors='coerce')
+                pitcheo_individual=df_temp
+        if os.path.exists('data/mlb_park_factors.csv'):
+            df_temp=pd.read_csv('data/mlb_park_factors.csv',sep=None,engine='python',on_bad_lines='skip');df_temp.columns=df_temp.columns.str.strip();park=df_temp if not df_temp.empty else park
+        if os.path.exists('data/mlb_games.csv'):
+            df_temp=pd.read_csv('data/mlb_games.csv',sep=None,engine='python',on_bad_lines='skip');df_temp.columns=df_temp.columns.str.strip();games=df_temp if not df_temp.empty else games
+    except Exception as e:st.warning(f'Aviso menor de lectura de archivos: {e}')
+    return bateo,pitcheo,pitcheo_individual,park,games
 
-        if os.path.exists("data/mlb_park_factors.csv"): 
-            df_temp = pd.read_csv("data/mlb_park_factors.csv", sep=None, engine='python', on_bad_lines='skip')
-            df_temp.columns = df_temp.columns.str.strip()
-            if not df_temp.empty:
-                park = df_temp
-                
-        if os.path.exists("data/mlb_games.csv"): 
-            df_temp = pd.read_csv("data/mlb_games.csv", sep=None, engine='python', on_bad_lines='skip')
-            df_temp.columns = df_temp.columns.str.strip()
-            if not df_temp.empty:
-                games = df_temp
+def _make_predictor(bat,pit,games):
+    p=PredictorMLMLB();p.entrenar(bat,pit,games);return p
 
-    except Exception as e:
-        st.warning(f"Aviso menor de lectura de archivos: {e}")
-        
-    return bateo, pitcheo, pitcheo_individual, park, games
+@st.cache_resource(show_spinner=False)
+def _cached_predictor(sig_bat,sig_pit,sig_games,_bat,_pit,_games):return _make_predictor(_bat,_pit,_games)
+def _df_signature(df):
+    if df is None or df.empty:return (0,())
+    try:return (len(df),tuple(df.columns),str(pd.util.hash_pandas_object(df,index=True).sum()))
+    except Exception:return (len(df),tuple(df.columns))
 
-df_bat, df_pit, df_pit_ind, df_parks, df_games = cargar_datos_historicos()
+df_bat,df_pit,df_pit_ind,df_parks,df_games=cargar_datos_historicos()
+predictor_ml=_cached_predictor(_df_signature(df_bat),_df_signature(df_pit),_df_signature(df_games),df_bat,df_pit,df_games)
 
-# Inicializar y entrenar el modelo de Machine Learning de manera transparente
-predictor_ml = PredictorMLMLB()
-if not df_games.empty and not df_bat.empty and not df_pit.empty:
-    predictor_ml.entrenar(df_bat, df_pit, df_games)
-
-@st.cache_data(ttl=600)
 def obtener_clima_estadio(nombre_equipo):
-    ciudades = {
-        "New York Yankees": "New_York", "Boston Red Sox": "Boston", "Los Angeles Dodgers": "Los_Angeles",
-        "Houston Astros": "Houston", "Atlanta Braves": "Atlanta", "Philadelphia Phillies": "Philadelphia",
-        "Baltimore Orioles": "Baltimore", "Tampa Bay Rays": "St_Petersburg", "Toronto Blue Jays": "Toronto",
-        "Chicago White Sox": "Chicago", "Cleveland Guardians": "Cleveland", "Detroit Tigers": "Detroit",
-        "Kansas City Royals": "Kansas_City", "Minnesota Twins": "Minneapolis", "Los Angeles Angels": "Anaheim",
-        "Oakland Athletics": "Oakland", "Seattle Mariners": "Seattle", "Texas Rangers": "Arlington",
-        "Chicago Cubs": "Chicago", "Cincinnati Reds": "Cincinnati", "Milwaukee Brewers": "Milwaukee",
-        "Pittsburgh Pirates": "Pittsburgh", "St. Louis Cardinals": "St_Louis", "Arizona Diamondbacks": "Phoenix",
-        "Colorado Rockies": "Denver", "San Francisco Giants": "San_Francisco", "San Diego Padres": "San_Diego",
-        "Miami Marlins": "Miami", "New York Mets": "New_York", "Washington Nationals": "Washington"
-    }
-    
-    ciudad = ciudades.get(nombre_equipo)
-    if not ciudad:
-        return None, None, "None"
-        
-    url = f"https://wttr.in/{ciudad}?format=j1"
+    ciudades={"New York Yankees":"New_York","Boston Red Sox":"Boston","Los Angeles Dodgers":"Los_Angeles","Houston Astros":"Houston","Atlanta Braves":"Atlanta","Philadelphia Phillies":"Philadelphia","Baltimore Orioles":"Baltimore","Tampa Bay Rays":"St_Petersburg","Toronto Blue Jays":"Toronto","Chicago White Sox":"Chicago","Cleveland Guardians":"Cleveland","Detroit Tigers":"Detroit","Kansas City Royals":"Kansas_City","Minnesota Twins":"Minneapolis","Los Angeles Angels":"Anaheim","Oakland Athletics":"Sacramento","Athletics":"Sacramento","Sacramento Athletics":"Sacramento","Seattle Mariners":"Seattle","Texas Rangers":"Arlington","Chicago Cubs":"Chicago","Cincinnati Reds":"Cincinnati","Milwaukee Brewers":"Milwaukee","Pittsburgh Pirates":"Pittsburgh","St. Louis Cardinals":"St_Louis","Arizona Diamondbacks":"Phoenix","Colorado Rockies":"Denver","San Francisco Giants":"San_Francisco","San Diego Padres":"San_Diego","Miami Marlins":"Miami","New York Mets":"New_York","Washington Nationals":"Washington"}
+    ciudad=ciudades.get(nombre_equipo)
+    if not ciudad:return None,None,'None'
     try:
-        res = requests.get(url, timeout=5)
-        if res.status_code == 200:
-            data = res.json()
-            curr = data.get('current_condition', [{}])[0]
-            temp_f = int(curr.get('temp_F'))
-            wind_mph = int(curr.get('windspeedMiles'))
-            wind_dir = curr.get('winddir16Point', '')
-            
-            # A compass direction cannot be translated to in/outfield without the
-            # physical orientation of this specific ballpark. Preserve the raw
-            # compass reading for diagnostics, but Monte Carlo will not apply a
-            # directional wind multiplier unless the user explicitly supplies
-            # an infield/outfield direction in the individual-game controls.
-            dir_str = f"Compass {wind_dir}" if wind_dir else "None"
-            return temp_f, wind_mph, dir_str
-    except:
-        pass
-    return None, None, "None"
+        res=requests.get(f'https://wttr.in/{ciudad}?format=j1',timeout=5)
+        if res.status_code==200:
+            curr=res.json().get('current_condition',[{}])[0];temp_f=int(curr.get('temp_F'));wind_mph=int(curr.get('windspeedMiles'));wind_dir=curr.get('winddir16Point','');return temp_f,wind_mph,f'Compass {wind_dir}' if wind_dir else 'None'
+    except Exception:pass
+    return None,None,'None'
 
 @st.cache_data(ttl=300)
 def obtener_cartelera_y_cuotas_automaticas():
-    hoy = slate_date().strftime('%Y-%m-%d')
-    url_mlb = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={hoy}&hydrate=probablePitcher,team"
-    
-    partidos = {}
+    hoy=slate_date().strftime('%Y-%m-%d');url_mlb=f'https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={hoy}&hydrate=probablePitcher,team';partidos={}
     try:
-        res_mlb = requests.get(url_mlb, timeout=5)
-        if res_mlb.status_code == 200:
-            data_mlb = res_mlb.json()
-            for date_item in data_mlb.get('dates', []):
-                for game in date_item.get('games', []):
-                    home = game.get('teams', {}).get('home', {}).get('team', {}).get('name', '')
-                    away = game.get('teams', {}).get('away', {}).get('team', {}).get('name', '')
-                    home_pitcher = game.get('teams', {}).get('home', {}).get('probablePitcher', {}).get('fullName', 'Por Anunciar')
-                    away_pitcher = game.get('teams', {}).get('away', {}).get('probablePitcher', {}).get('fullName', 'Por Anunciar')
-                    
+        res_mlb=requests.get(url_mlb,timeout=5)
+        if res_mlb.status_code==200:
+            for date_item in res_mlb.json().get('dates',[]):
+                for game in date_item.get('games',[]):
+                    home=game.get('teams',{}).get('home',{}).get('team',{}).get('name','');away=game.get('teams',{}).get('away',{}).get('team',{}).get('name','');hp=game.get('teams',{}).get('home',{}).get('probablePitcher',{}).get('fullName','Por Anunciar');ap=game.get('teams',{}).get('away',{}).get('probablePitcher',{}).get('fullName','Por Anunciar')
                     if home and away:
-                        game_pk = game.get("gamePk")
-                        llave = f"⚾ {away} ({away_pitcher}) @ {home} ({home_pitcher}) · #{game_pk}"
-                        partidos[llave] = {
-                            "local": home, "visita": away,
-                            "pitcher_local": home_pitcher, "pitcher_visita": away_pitcher,
-                            "game_pk": game.get("gamePk"), "start_time_utc": game.get("gameDate"),
-                            "linea_carreras": None,
-                            "cuota_loc": None, "cuota_vis": None, "cuota_over": None, "cuota_under": None,
-                            "spread_loc": None, "cuota_spread_loc": None, "spread_vis": None, "cuota_spread_vis": None
-                        }
-    except Exception as e:
-        st.error(f"Error en MLB StatsAPI: {e}")
-
-    if ODDS_API_KEY != "":
-        url_odds = f"https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/?apiKey={ODDS_API_KEY}&regions=us&markets=h2h,totals,spreads&oddsFormat=american"
+                        game_pk=game.get('gamePk');key=f'⚾ {away} ({ap}) @ {home} ({hp}) · #{game_pk}';partidos[key]={'local':home,'visita':away,'pitcher_local':hp,'pitcher_visita':ap,'game_pk':game_pk,'start_time_utc':game.get('gameDate'),'linea_carreras':None,'cuota_loc':None,'cuota_vis':None,'cuota_over':None,'cuota_under':None,'spread_loc':None,'cuota_spread_loc':None,'spread_vis':None,'cuota_spread_vis':None}
+    except Exception as e:st.error(f'Error en MLB StatsAPI: {e}')
+    if ODDS_API_KEY:
         try:
-            res_odds = requests.get(url_odds, timeout=5)
-            if res_odds.status_code == 200:
-                data_odds = res_odds.json()
+            res_odds=requests.get(f'https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/?apiKey={ODDS_API_KEY}&regions=us&markets=h2h,totals,spreads&oddsFormat=american',timeout=5)
+            if res_odds.status_code==200:
+                data_odds=res_odds.json()
                 for p_game in partidos.values():
-                    matched_event = match_odds_game(data_odds, p_game)
-                    if matched_event is None:
-                        continue
-                    p_game.update(market_from_event(matched_event, american_to_decimal))
-            elif res_odds.status_code == 429:
-                st.warning("⚠️ Límite de tu API Key de cuotas agotado (The-Odds-API). Pasando a modo matemático sin cuotas reales.")
-            elif res_odds.status_code == 401:
-                st.warning("⚠️ API Key de The-Odds-API rechazada. Revisa que sea correcta.")
-            else:
-                st.warning(f"⚠️ Error de servidor de cuotas: {res_odds.status_code}")
-        except Exception as e:
-            st.warning(f"Aviso de sincronización de cuotas: {e}")
-            
+                    event=match_odds_game(data_odds,p_game)
+                    if event:p_game.update(market_from_event(event,american_to_decimal))
+            elif res_odds.status_code==429:st.warning('⚠️ Límite de tu API Key de cuotas agotado.')
+            elif res_odds.status_code==401:st.warning('⚠️ API Key de The-Odds-API rechazada.')
+            else:st.warning(f'⚠️ Error de servidor de cuotas: {res_odds.status_code}')
+        except Exception as e:st.warning(f'Aviso de sincronización de cuotas: {e}')
     return partidos
 
-# --- INTERFAZ ---
-st.title("⚾ MLB Quant Analytics Pro V6")
-st.markdown("Sistema autónomo de Sabermetría, Clima en Vivo, Simulación Cuántica de Duelos, Escáner Global y Criterio de Kelly.")
+st.title('⚾ MLB Quant Analytics Pro V6')
+st.markdown('Sistema autónomo de Sabermetría, Clima, Simulación Monte Carlo, Escáner Global y Criterio de Kelly.')
 
 if df_bat.empty or df_pit.empty:
-    st.warning("⚠️ Faltan datos históricos. Ejecuta `minero_mlb.py`.")
+    st.warning('⚠️ Faltan datos históricos. Ejecuta `minero_mlb.py`.')
 else:
-    partidos_hoy = obtener_cartelera_y_cuotas_automaticas()
-    if not partidos_hoy:
-        st.info("No hay partidos programados para hoy.")
+    partidos_hoy=obtener_cartelera_y_cuotas_automaticas()
+    if not partidos_hoy:st.info('No hay partidos programados para hoy.')
     else:
-        if not ODDS_API_KEY:
-            st.warning("⚠️ ODDS_API_KEY no configurada en Secrets/entorno. La cartelera se muestra, pero no se emitirán apuestas sin cuotas reales.")
-        if not persistent_backend_available():
-            st.caption("ℹ️ Ledger en modo local: configura GITHUB_TOKEN y LEDGER_GITHUB_REPO para persistencia entre reinicios.")
-        modo_app = st.sidebar.radio("Modo de Operación", ["🎯 Análisis Individual por Partido", "🔍 Escáner Automático de la Jornada (EV+)"])
-        
-        if modo_app == "🔍 Escáner Automático de la Jornada (EV+)":
-            st.subheader("🔍 Escáner Cuántico de Valor para Toda la Jornada")
-            st.markdown("Escanea la cartelera con filtros calibrados por mercado: consenso ML + Monte Carlo, no-vig, edge, EV y desacuerdo máximo.")
-            
-            if st.button("🚀 Ejecutar Escáner Global de la Jornada", type="primary"):
-                with st.spinner("Escaneando duelos y procesando simulaciones avanzadas..."):
-                    recomendaciones = []
-                    diagnostico_totales = []
-                    blend_weights = market_blend_weights()
-                    errores_datos = []
-                    
-                    for llave, datos_partido in partidos_hoy.items():
-                        loc_abbr = EQUIPOS_MAP.get(datos_partido["local"], "")
-                        vis_abbr = EQUIPOS_MAP.get(datos_partido["visita"], "")
-                        if not loc_abbr or not vis_abbr:
-                            errores_datos.append({"Partido": f"{datos_partido.get('visita','?')} @ {datos_partido.get('local','?')}", "Error": "Equipo no normalizable"})
-                            continue
-                        
-                        cuota_loc = datos_partido.get("cuota_loc")
-                        cuota_vis = datos_partido.get("cuota_vis")
-                        linea_casino = datos_partido.get("linea_carreras")
-                        
-                        if cuota_loc is None or cuota_vis is None or linea_casino is None:
-                            errores_datos.append({"Partido": f"{datos_partido['visita']} @ {datos_partido['local']}", "Error": "Cuotas/total no disponibles o no emparejados de forma segura"})
-                            continue
-                        
+        if not ODDS_API_KEY:st.warning('⚠️ ODDS_API_KEY no configurada en Secrets/entorno. La cartelera se muestra, pero no se emitirán apuestas sin cuotas reales.')
+        if not persistent_backend_available():st.caption('ℹ️ Ledger en modo local: configura GITHUB_TOKEN y LEDGER_GITHUB_REPO para persistencia entre reinicios.')
+        modo_app=st.sidebar.radio('Modo de Operación',['🎯 Análisis Individual por Partido','🔍 Escáner Automático de la Jornada (EV+)'])
+        if modo_app=='🔍 Escáner Automático de la Jornada (EV+)':
+            st.subheader('🔍 Escáner Cuántico de Valor para Toda la Jornada');st.markdown('Escanea la cartelera con filtros calibrados por mercado: consenso ML + Monte Carlo, no-vig, edge, EV y desacuerdo máximo.')
+            if st.button('🚀 Ejecutar Escáner Global de la Jornada',type='primary'):
+                with st.spinner('Escaneando duelos y procesando simulaciones avanzadas...'):
+                    recomendaciones=[];diagnostico_totales=[];blend_weights=market_blend_weights();errores_datos=[]
+                    for llave,datos_partido in partidos_hoy.items():
+                        loc_abbr=EQUIPOS_MAP.get(datos_partido['local'],'');vis_abbr=EQUIPOS_MAP.get(datos_partido['visita'],'')
+                        if not loc_abbr or not vis_abbr:errores_datos.append({'Partido':f"{datos_partido.get('visita','?')} @ {datos_partido.get('local','?')}",'Error':'Equipo no normalizable'});continue
+                        cuota_loc=datos_partido.get('cuota_loc');cuota_vis=datos_partido.get('cuota_vis');linea_casino=datos_partido.get('linea_carreras')
+                        if cuota_loc is None or cuota_vis is None or linea_casino is None:errores_datos.append({'Partido':f"{datos_partido['visita']} @ {datos_partido['local']}",'Error':'Cuotas/total no disponibles o no emparejados de forma segura'});continue
                         try:
-                            wrc_loc = _current_offensive_index(df_bat, loc_abbr)
-                            wrc_vis = _current_offensive_index(df_bat, vis_abbr)
-                            
-                            pitcher_loc_nombre = datos_partido["pitcher_local"]
-                            xfip_loc = _starter_run_prevention(df_pit_ind, pitcher_loc_nombre)
-                            starter_ip_loc = _starter_expected_innings(df_pit_ind, pitcher_loc_nombre)
-                            
-                            if xfip_loc is None:
-                                errores_datos.append({"Partido": f"{datos_partido['visita']} @ {datos_partido['local']}", "Error": f"Abridor local sin métrica individual fiable: {pitcher_loc_nombre}"})
-                                continue
-
-                            pitcher_vis_nombre = datos_partido["pitcher_visita"]
-                            xfip_vis = _starter_run_prevention(df_pit_ind, pitcher_vis_nombre)
-                            starter_ip_vis = _starter_expected_innings(df_pit_ind, pitcher_vis_nombre)
-                            
-                            if xfip_vis is None:
-                                errores_datos.append({"Partido": f"{datos_partido['visita']} @ {datos_partido['local']}", "Error": f"Abridor visitante sin métrica individual fiable: {pitcher_vis_nombre}"})
-                                continue
-
-                            team_bullpen_loc = df_pit[df_pit['Team'] == loc_abbr]
-                            team_era_loc = float(team_bullpen_loc.iloc[-1]['ERA']) if not team_bullpen_loc.empty else 4.0
-                            bullpen_loc_era = _bullpen_era(loc_abbr, team_era_loc)
-                            
-                            team_bullpen_vis = df_pit[df_pit['Team'] == vis_abbr]
-                            team_era_vis = float(team_bullpen_vis.iloc[-1]['ERA']) if not team_bullpen_vis.empty else 4.0
-                            bullpen_vis_era = _bullpen_era(vis_abbr, team_era_vis)
-                            
-                            park_info = park_for_team(df_parks, loc_abbr)
-                            if not park_info:
-                                errores_datos.append({"Partido": f"{datos_partido['visita']} @ {datos_partido['local']}", "Error": "Parque no resoluble"})
-                                continue
-                            park_factor = park_info['park_factor']
-                            altitud = park_info['altitude_ft']
-                            
-                            # Clima real del estadio para el scanner; fallback solo si la consulta no responde.
-                            temp_raw, viento_raw, dir_raw = obtener_clima_estadio(datos_partido["local"])
-                            temp_scan, viento_scan, dir_scan, weather_source = best_auto_weather(
-                                datos_partido["local"], datos_partido.get("start_time_utc"), temp_raw, viento_raw, dir_raw
-                            )
-
-                            # Ejecutar Simulación de Montecarlo
-                            res_mc = simular_partido_mlb(
-                                local=datos_partido['local'], visita=datos_partido['visita'],
-                                pitcher_loc_xfip=xfip_loc, pitcher_vis_xfip=xfip_vis,
-                                wrc_loc=wrc_loc, wrc_vis=wrc_vis,
-                                bullpen_loc_era=bullpen_loc_era, bullpen_vis_era=bullpen_vis_era,
-                                park_factor=park_factor, altitud_ft=altitud,
-                                viento_mph=viento_scan, direccion_viento=dir_scan, temp_f=temp_scan,
-                                linea_carreras_casino=linea_casino,
-                                df_games=df_games,
-                                num_simulaciones=50000,
-                                starter_ip_loc=starter_ip_loc, starter_ip_vis=starter_ip_vis
-                            )
-
-                            # ML histórico: misma definición de features que en entrenamiento
-                            # (fortaleza agregada de temporada anterior + resultados rolling).
-                            bat_col_ml = preferred_batting_column(df_bat) or 'OPS_Index'
-                            pit_col_ml = preferred_pitching_column(df_pit) or 'ERA'
-                            ml_off_loc = _team_prior_stat(df_bat, loc_abbr, bat_col_ml, wrc_loc)
-                            ml_off_vis = _team_prior_stat(df_bat, vis_abbr, bat_col_ml, wrc_vis)
-                            ml_pit_loc = _team_prior_stat(df_pit, loc_abbr, pit_col_ml, bullpen_loc_era)
-                            ml_pit_vis = _team_prior_stat(df_pit, vis_abbr, pit_col_ml, bullpen_vis_era)
-                            res_ml = predictor_ml.predecir_partido(
-                                loc_abbr, vis_abbr, ml_off_loc, ml_off_vis, ml_pit_loc, ml_pit_vis, park_factor
-                            )
-
-                            # --- PROBABILIDADES MONTECARLO ---
-                            prob_mc_loc = res_mc['Moneyline']['Gana Local']
-                            prob_mc_vis = res_mc['Moneyline']['Gana Visita']
-                            carreras_dict = res_mc.get('Carreras', {})
-                            prob_mc_over = carreras_dict.get(f"Over {linea_casino}", 50.0)
-                            prob_mc_under = carreras_dict.get(f"Under {linea_casino}", 50.0)
-
-                            spread_loc = datos_partido.get("spread_loc")
-                            spread_vis = datos_partido.get("spread_vis")
-                            
-                            # Lectura dinámica de Montecarlo para el hándicap local y visitante
-                            prob_mc_spread_loc = carreras_dict.get(f"Spread Local {spread_loc:+.1f}", 50.0) if spread_loc is not None else 50.0
-                            prob_mc_spread_vis = carreras_dict.get(f"Spread Visita {spread_vis:+.1f}", 50.0) if spread_vis is not None else 50.0
-
-                            # --- PROBABILIDADES MACHINE LEARNING ---
-                            prob_ml_loc = res_ml['Probabilidad_Local']
-                            prob_ml_vis = res_ml['Probabilidad_Visita']
-
-                            proy_carreras = res_ml.get('Proyeccion_Carreras', linea_casino)
-                            prob_ml_over = estimar_prob_ml(proy_carreras, linea_casino, "over", res_ml.get("Sigma_Carreras"))
-                            prob_ml_under = estimar_prob_ml(proy_carreras, linea_casino, "under", res_ml.get("Sigma_Carreras"))
-
-                            proy_hc_loc = res_ml.get('Proyeccion_Handicap_Local', 0)
-                            prob_ml_spread_loc = estimar_prob_ml(proy_hc_loc, spread_loc, "spread_loc", res_ml.get("Sigma_Handicap")) if spread_loc is not None else 50.0
-                            prob_ml_spread_vis = estimar_prob_ml(-proy_hc_loc, spread_vis, "spread_vis", res_ml.get("Sigma_Handicap")) if spread_vis is not None else 50.0
-
-                            # --- MOTOR ÚNICO DE SELECCIÓN (producción = backtest) ---
-                            mkt_loc_scanner, mkt_vis_scanner = no_vig_two_way(cuota_loc, cuota_vis)
-                            mkt_over_scanner, mkt_under_scanner = no_vig_two_way(
-                                datos_partido.get("cuota_over"), datos_partido.get("cuota_under")
-                            )
-                            mkt_sp_loc_scanner, mkt_sp_vis_scanner = no_vig_two_way(
-                                datos_partido.get("cuota_spread_loc"), datos_partido.get("cuota_spread_vis")
-                            )
-
-                            candidatos = [
-                                (moneyline_candidate(f"Gana Local ({datos_partido['local']})", prob_ml_loc, prob_mc_loc, cuota_loc, mkt_loc_scanner, blend_weight_ml=blend_weights['Moneyline']['ml_weight']), None),
-                                (moneyline_candidate(f"Gana Visita ({datos_partido['visita']})", prob_ml_vis, prob_mc_vis, cuota_vis, mkt_vis_scanner, blend_weight_ml=blend_weights['Moneyline']['ml_weight']), None),
-                            ]
-                            if datos_partido.get("cuota_over") is not None:
-                                candidatos.append((total_candidate(f"Over {linea_casino}", prob_ml_over, prob_mc_over, datos_partido.get("cuota_over"), mkt_over_scanner, carreras_dict.get(f"Push {linea_casino}", 0.0), blend_weight_ml=blend_weights['Totales']['ml_weight']), linea_casino))
-                            if datos_partido.get("cuota_under") is not None:
-                                candidatos.append((total_candidate(f"Under {linea_casino}", prob_ml_under, prob_mc_under, datos_partido.get("cuota_under"), mkt_under_scanner, carreras_dict.get(f"Push {linea_casino}", 0.0), blend_weight_ml=blend_weights['Totales']['ml_weight']), linea_casino))
-                            if spread_loc is not None and datos_partido.get("cuota_spread_loc") is not None:
-                                candidatos.append((runline_candidate(f"Hándicap {spread_loc:+.1f} ({datos_partido['local']})", prob_ml_spread_loc, prob_mc_spread_loc, datos_partido.get("cuota_spread_loc"), mkt_sp_loc_scanner, carreras_dict.get(f"Push Spread Local {spread_loc:+.1f}", 0.0), blend_weight_ml=blend_weights['Hándicap']['ml_weight']), spread_loc))
-                            if spread_vis is not None and datos_partido.get("cuota_spread_vis") is not None:
-                                candidatos.append((runline_candidate(f"Hándicap {spread_vis:+.1f} ({datos_partido['visita']})", prob_ml_spread_vis, prob_mc_spread_vis, datos_partido.get("cuota_spread_vis"), mkt_sp_vis_scanner, carreras_dict.get(f"Push Spread Visita {spread_vis:+.1f}", 0.0), blend_weight_ml=blend_weights['Hándicap']['ml_weight']), spread_vis))
-
-                            for cand, market_line in candidatos:
-                                if cand is None:
-                                    continue
-                                if cand.market == 'Totales':
-                                    diagnostico_totales.append({
-                                        "Partido": f"{datos_partido['visita']} @ {datos_partido['local']}",
-                                        "O/U": cand.selection, "ML": round(cand.prob_ml,1), "MC": round(cand.prob_mc,1),
-                                        "Combinada": round(cand.probability,1), "Cuota": cand.odds,
-                                        "Edge_pp": cand.edge_pp, "EV_pct": cand.ev_pct,
-                                        "Estado": "CANDIDATO" if cand.accepted else "NO BET", "Motivo": cand.reason,
-                                    })
-                                if not cand.accepted:
-                                    continue
-                                recomendaciones.append({
-                                    "Partido": f"{datos_partido['visita']} @ {datos_partido['local']}",
-                                    "Mercado": cand.market,
-                                    "Apuesta": cand.selection,
-                                    "Prob. ML": f"{round(cand.prob_ml,1)}%",
-                                    "Prob. MC": f"{round(cand.prob_mc,1)}%",
-                                    "Cuota": cand.odds,
-                                    "EV+": f"{round(cand.ev_pct,2)}%",
-                                    "Stake Kelly": f"{calcular_criterio_kelly(cand.probability, cand.odds, prob_push=cand.push_probability)}%",
-                                    "_Score": cand.score,
-                                    "_Home": datos_partido['local'], "_Away": datos_partido['visita'],
-                                    "_GamePk": datos_partido.get('game_pk'),
-                                    "_Line": market_line, "_ProbCombined": cand.probability,
-                                    "_MarketNoVig": cand.market_no_vig, "_Edge": cand.edge_pp,
-                                    "_Disagreement": cand.disagreement_pp, "_BlendWeightML": cand.blend_weight_ml,
-                                    "_BatMetric": res_ml.get('Metrica_Bateo'), "_PitMetric": res_ml.get('Metrica_Pitcheo'),
-                                    "_StarterHome": datos_partido.get('pitcher_local'), "_StarterAway": datos_partido.get('pitcher_visita'),
-                                    "_StarterIPHome": starter_ip_loc, "_StarterIPAway": starter_ip_vis,
-                                    "_Park": park_factor, "_Temp": temp_scan, "_Wind": viento_scan, "_WindDir": dir_scan,
-                                    "_WeatherSource": weather_source,
-                                })
-
-                        except Exception as e:
-                            errores_datos.append({"Partido": f"{datos_partido.get('visita','?')} @ {datos_partido.get('local','?')}", "Error": str(e)[:180]})
-                            continue
-                    
+                            wrc_loc=_current_offensive_index(df_bat,loc_abbr);wrc_vis=_current_offensive_index(df_bat,vis_abbr);pln=datos_partido['pitcher_local'];xfip_loc=_starter_run_prevention(df_pit_ind,pln);starter_ip_loc=_starter_expected_innings(df_pit_ind,pln)
+                            if xfip_loc is None:errores_datos.append({'Partido':f"{datos_partido['visita']} @ {datos_partido['local']}",'Error':f'Abridor local sin métrica individual fiable: {pln}'});continue
+                            pvn=datos_partido['pitcher_visita'];xfip_vis=_starter_run_prevention(df_pit_ind,pvn);starter_ip_vis=_starter_expected_innings(df_pit_ind,pvn)
+                            if xfip_vis is None:errores_datos.append({'Partido':f"{datos_partido['visita']} @ {datos_partido['local']}",'Error':f'Abridor visitante sin métrica individual fiable: {pvn}'});continue
+                            th=df_pit[df_pit['Team']==loc_abbr];tv=df_pit[df_pit['Team']==vis_abbr];bp_h=_bullpen_era(loc_abbr,float(th.iloc[-1]['ERA']) if not th.empty else 4.0);bp_v=_bullpen_era(vis_abbr,float(tv.iloc[-1]['ERA']) if not tv.empty else 4.0);park_info=park_for_team(df_parks,loc_abbr)
+                            if not park_info:errores_datos.append({'Partido':f"{datos_partido['visita']} @ {datos_partido['local']}",'Error':'Parque no resoluble'});continue
+                            park_factor=park_info['park_factor'];altitud=park_info['altitude_ft'];tr,wr,dr=obtener_clima_estadio(datos_partido['local']);temp_scan,viento_scan,dir_scan,weather_source=best_auto_weather(datos_partido['local'],datos_partido.get('start_time_utc'),tr,wr,dr)
+                            res_mc=simular_partido_mlb(local=datos_partido['local'],visita=datos_partido['visita'],pitcher_loc_xfip=xfip_loc,pitcher_vis_xfip=xfip_vis,wrc_loc=wrc_loc,wrc_vis=wrc_vis,bullpen_loc_era=bp_h,bullpen_vis_era=bp_v,park_factor=park_factor,altitud_ft=altitud,viento_mph=viento_scan,direccion_viento=dir_scan,temp_f=temp_scan,linea_carreras_casino=linea_casino,df_games=df_games,num_simulaciones=50000,starter_ip_loc=starter_ip_loc,starter_ip_vis=starter_ip_vis)
+                            bat_col_ml=preferred_batting_column(df_bat) or 'OPS_Index';pit_col_ml=preferred_pitching_column(df_pit) or 'ERA';ml_off_loc=_team_prior_stat(df_bat,loc_abbr,bat_col_ml,wrc_loc);ml_off_vis=_team_prior_stat(df_bat,vis_abbr,bat_col_ml,wrc_vis);ml_pit_loc=_team_prior_stat(df_pit,loc_abbr,pit_col_ml,bp_h);ml_pit_vis=_team_prior_stat(df_pit,vis_abbr,pit_col_ml,bp_v);res_ml=predictor_ml.predecir_partido(loc_abbr,vis_abbr,ml_off_loc,ml_off_vis,ml_pit_loc,ml_pit_vis,park_factor)
+                            prob_mc_loc=res_mc['Moneyline']['Gana Local'];prob_mc_vis=res_mc['Moneyline']['Gana Visita'];carreras_dict=res_mc.get('Carreras',{});prob_mc_over=carreras_dict.get(f'Over {linea_casino}',50.);prob_mc_under=carreras_dict.get(f'Under {linea_casino}',50.);spread_loc=datos_partido.get('spread_loc');spread_vis=datos_partido.get('spread_vis');prob_mc_spread_loc=carreras_dict.get(f'Spread Local {spread_loc:+.1f}',50.) if spread_loc is not None else 50.;prob_mc_spread_vis=carreras_dict.get(f'Spread Visita {spread_vis:+.1f}',50.) if spread_vis is not None else 50.;prob_ml_loc=res_ml['Probabilidad_Local'];prob_ml_vis=res_ml['Probabilidad_Visita'];proy=res_ml.get('Proyeccion_Carreras',linea_casino);prob_ml_over=estimar_prob_ml(proy,linea_casino,'over',res_ml.get('Sigma_Carreras'));prob_ml_under=estimar_prob_ml(proy,linea_casino,'under',res_ml.get('Sigma_Carreras'));ph=res_ml.get('Proyeccion_Handicap_Local',0);prob_ml_spread_loc=estimar_prob_ml(ph,spread_loc,'spread_loc',res_ml.get('Sigma_Handicap')) if spread_loc is not None else 50.;prob_ml_spread_vis=estimar_prob_ml(-ph,spread_vis,'spread_vis',res_ml.get('Sigma_Handicap')) if spread_vis is not None else 50.;mhl,mhv=no_vig_two_way(cuota_loc,cuota_vis);mo,mu=no_vig_two_way(datos_partido.get('cuota_over'),datos_partido.get('cuota_under'));msl,msv=no_vig_two_way(datos_partido.get('cuota_spread_loc'),datos_partido.get('cuota_spread_vis'))
+                            candidatos=[(moneyline_candidate(f"Gana Local ({datos_partido['local']})",prob_ml_loc,prob_mc_loc,cuota_loc,mhl,blend_weight_ml=blend_weights['Moneyline']['ml_weight']),None),(moneyline_candidate(f"Gana Visita ({datos_partido['visita']})",prob_ml_vis,prob_mc_vis,cuota_vis,mhv,blend_weight_ml=blend_weights['Moneyline']['ml_weight']),None)]
+                            if datos_partido.get('cuota_over') is not None:candidatos.append((total_candidate(f'Over {linea_casino}',prob_ml_over,prob_mc_over,datos_partido.get('cuota_over'),mo,carreras_dict.get(f'Push {linea_casino}',0.),blend_weight_ml=blend_weights['Totales']['ml_weight']),linea_casino))
+                            if datos_partido.get('cuota_under') is not None:candidatos.append((total_candidate(f'Under {linea_casino}',prob_ml_under,prob_mc_under,datos_partido.get('cuota_under'),mu,carreras_dict.get(f'Push {linea_casino}',0.),blend_weight_ml=blend_weights['Totales']['ml_weight']),linea_casino))
+                            if spread_loc is not None and datos_partido.get('cuota_spread_loc') is not None:candidatos.append((runline_candidate(f"Hándicap {spread_loc:+.1f} ({datos_partido['local']})",prob_ml_spread_loc,prob_mc_spread_loc,datos_partido.get('cuota_spread_loc'),msl,carreras_dict.get(f'Push Spread Local {spread_loc:+.1f}',0.),blend_weight_ml=blend_weights['Hándicap']['ml_weight']),spread_loc))
+                            if spread_vis is not None and datos_partido.get('cuota_spread_vis') is not None:candidatos.append((runline_candidate(f"Hándicap {spread_vis:+.1f} ({datos_partido['visita']})",prob_ml_spread_vis,prob_mc_spread_vis,datos_partido.get('cuota_spread_vis'),msv,carreras_dict.get(f'Push Spread Visita {spread_vis:+.1f}',0.),blend_weight_ml=blend_weights['Hándicap']['ml_weight']),spread_vis))
+                            for cand,market_line in candidatos:
+                                if cand is None:continue
+                                if cand.market=='Totales':diagnostico_totales.append({'Partido':f"{datos_partido['visita']} @ {datos_partido['local']}",'O/U':cand.selection,'ML':round(cand.prob_ml,1),'MC':round(cand.prob_mc,1),'Combinada':round(cand.probability,1),'Cuota':cand.odds,'Edge_pp':cand.edge_pp,'EV_pct':cand.ev_pct,'Estado':'CANDIDATO' if cand.accepted else 'NO BET','Motivo':cand.reason})
+                                if not cand.accepted:continue
+                                recomendaciones.append({'Partido':f"{datos_partido['visita']} @ {datos_partido['local']}",'Mercado':cand.market,'Apuesta':cand.selection,'Prob. ML':f'{round(cand.prob_ml,1)}%','Prob. MC':f'{round(cand.prob_mc,1)}%','Cuota':cand.odds,'EV+':f'{round(cand.ev_pct,2)}%','Stake Kelly':f'{calcular_criterio_kelly(cand.probability,cand.odds,prob_push=cand.push_probability)}%','_Score':cand.score,'_Home':datos_partido['local'],'_Away':datos_partido['visita'],'_GamePk':datos_partido.get('game_pk'),'_Line':market_line,'_ProbCombined':cand.probability,'_MarketNoVig':cand.market_no_vig,'_Edge':cand.edge_pp,'_Disagreement':cand.disagreement_pp,'_BlendWeightML':cand.blend_weight_ml,'_BatMetric':res_ml.get('Metrica_Bateo'),'_PitMetric':res_ml.get('Metrica_Pitcheo'),'_StarterHome':datos_partido.get('pitcher_local'),'_StarterAway':datos_partido.get('pitcher_visita'),'_StarterIPHome':starter_ip_loc,'_StarterIPAway':starter_ip_vis,'_Park':park_factor,'_Temp':temp_scan,'_Wind':viento_scan,'_WindDir':dir_scan,'_WeatherSource':weather_source})
+                        except Exception as e:errores_datos.append({'Partido':f"{datos_partido.get('visita','?')} @ {datos_partido.get('local','?')}",'Error':str(e)[:180]});continue
                     if recomendaciones:
-                        df_all = pd.DataFrame(recomendaciones).sort_values("_Score", ascending=False).head(3)
-                        ledger_rows = []
-                        for _, rr in df_all.iterrows():
-                            ledger_rows.append({
-                                'game_date': slate_date().isoformat(), 'game_pk': rr['_GamePk'], 'away': rr['_Away'], 'home': rr['_Home'],
-                                'market': rr['Mercado'], 'selection': rr['Apuesta'], 'line': rr['_Line'], 'odds': rr['Cuota'],
-                                'prob_ml': rr['Prob. ML'], 'prob_mc': rr['Prob. MC'], 'prob_combined': rr['_ProbCombined'],
-                                'blend_weight_ml': rr['_BlendWeightML'], 'market_no_vig': rr['_MarketNoVig'], 'edge_pp': rr['_Edge'], 'ev_pct': str(rr['EV+']).replace('%',''),
-                                'disagreement_pp': rr['_Disagreement'], 'score': rr['_Score'],
-                                'batting_metric': rr['_BatMetric'], 'pitching_metric': rr['_PitMetric'],
-                                'starter_away': rr['_StarterAway'], 'starter_home': rr['_StarterHome'],
-                                'starter_ip_away': rr['_StarterIPAway'], 'starter_ip_home': rr['_StarterIPHome'],
-                                'park_factor': rr['_Park'], 'temperature_f': rr['_Temp'], 'wind_mph': rr['_Wind'], 'wind_direction': rr['_WindDir'],
-                                'weather_source': rr['_WeatherSource'], 'model_version': 'v6', 'result_status': 'pending'
-                            })
-                        try:
-                            append_snapshot(ledger_rows)
-                        except Exception as ledger_error:
-                            st.caption(f"Ledger local no persistió este snapshot: {ledger_error}")
-                        visible = [c for c in df_all.columns if not c.startswith('_')]
-                        st.dataframe(df_all[visible], use_container_width=True, hide_index=True)
-                    else:
-                        st.info("No se encontraron apuestas que superen los filtros de valor del scanner hoy.")
-
+                        df_all=pd.DataFrame(recomendaciones).sort_values('_Score',ascending=False).head(3);ledger_rows=[]
+                        for _,rr in df_all.iterrows():ledger_rows.append({'game_date':slate_date().isoformat(),'game_pk':rr['_GamePk'],'away':rr['_Away'],'home':rr['_Home'],'market':rr['Mercado'],'selection':rr['Apuesta'],'line':rr['_Line'],'odds':rr['Cuota'],'prob_ml':rr['Prob. ML'],'prob_mc':rr['Prob. MC'],'prob_combined':rr['_ProbCombined'],'blend_weight_ml':rr['_BlendWeightML'],'market_no_vig':rr['_MarketNoVig'],'edge_pp':rr['_Edge'],'ev_pct':str(rr['EV+']).replace('%',''),'disagreement_pp':rr['_Disagreement'],'score':rr['_Score'],'batting_metric':rr['_BatMetric'],'pitching_metric':rr['_PitMetric'],'starter_away':rr['_StarterAway'],'starter_home':rr['_StarterHome'],'starter_ip_away':rr['_StarterIPAway'],'starter_ip_home':rr['_StarterIPHome'],'park_factor':rr['_Park'],'temperature_f':rr['_Temp'],'wind_mph':rr['_Wind'],'wind_direction':rr['_WindDir'],'weather_source':rr['_WeatherSource'],'model_version':'v6','result_status':'pending'})
+                        try:append_snapshot(ledger_rows)
+                        except Exception as le:st.caption(f'Ledger local no persistió este snapshot: {le}')
+                        st.dataframe(df_all[[c for c in df_all.columns if not c.startswith('_')]],use_container_width=True,hide_index=True)
+                    else:st.info('No se encontraron apuestas que superen los filtros de valor del scanner hoy.')
                     if diagnostico_totales:
-                        st.markdown("### 🧪 Mejor oportunidad O/U analizada")
-                        df_tot_diag=pd.DataFrame(diagnostico_totales)
-                        df_tot_diag["_rank"]=df_tot_diag["Edge_pp"].fillna(-999)+df_tot_diag["EV_pct"].fillna(-999)
-                        st.dataframe(df_tot_diag.sort_values("_rank",ascending=False).head(3).drop(columns=["_rank"]), use_container_width=True, hide_index=True)
-
+                        st.markdown('### 🧪 Mejor oportunidad O/U analizada');d=pd.DataFrame(diagnostico_totales);d['_rank']=d['Edge_pp'].fillna(-999)+d['EV_pct'].fillna(-999);st.dataframe(d.sort_values('_rank',ascending=False).head(3).drop(columns=['_rank']),use_container_width=True,hide_index=True)
                     if errores_datos:
-                        with st.expander(f"⚠️ Partidos no evaluados por datos incompletos ({len(errores_datos)})"):
-                            st.dataframe(pd.DataFrame(errores_datos), use_container_width=True, hide_index=True)
+                        with st.expander(f'⚠️ Partidos no evaluados por datos incompletos ({len(errores_datos)})'):st.dataframe(pd.DataFrame(errores_datos),use_container_width=True,hide_index=True)
         else:
-            st.subheader("1. Cartelera Oficial Sincronizada")
-            seleccion = st.selectbox("Selecciona un duelo:", list(partidos_hoy.keys()))
-            datos_partido = partidos_hoy[seleccion]
-            
-            current_temp, current_wind, current_dir = obtener_clima_estadio(datos_partido["local"])
-            temp_auto, viento_auto, dir_auto, weather_auto_source = best_auto_weather(
-                datos_partido["local"], datos_partido.get("start_time_utc"), current_temp, current_wind, current_dir
-            )
-            
-            st.subheader("2. Datos del Mercado y Clima (En Vivo)")
-            c1, c2, c3, c4 = st.columns(4)
-            
-            opciones_viento = ["None", "Outfield (Hacia Afuera)", "Infield (Hacia Adentro)", "Lateral (Derecha a Izquierda)", "Lateral (Izquierda a Derecha)"]
-            indice_dir = opciones_viento.index(dir_auto) if dir_auto in opciones_viento else 0
-            st.caption(f"Fuente clima automática: {weather_auto_source}")
-            
-            with c1:
-                st.metric("Línea O/U Casino", datos_partido["linea_carreras"] if datos_partido["linea_carreras"] is not None else "No disponible")
-                st.metric("Cuota Over", datos_partido["cuota_over"] if datos_partido["cuota_over"] is not None else "No disponible")
-            with c2:
-                st.metric(f"Cuota ML ({datos_partido['local']})", datos_partido["cuota_loc"] if datos_partido["cuota_loc"] is not None else "No disponible")
-                st.metric(f"Cuota ML ({datos_partido['visita']})", datos_partido["cuota_vis"] if datos_partido["cuota_vis"] is not None else "No disponible")
-            with c3:
-                viento = st.number_input("Viento (mph)", value=int(viento_auto) if viento_auto is not None else 8, step=1)
-                dir_viento = st.selectbox("Dirección del Viento", opciones_viento, index=indice_dir)
-            with c4:
-                temp = st.slider("Temperatura (°F)", 30, 110, int(temp_auto) if temp_auto is not None else 72)
-                
-            if st.button("🚀 Ejecutar Simulación Cuántica", type="primary"):
-                with st.spinner("Procesando datos en vivo y ejecutando simulaciones..."):
-                    loc_abbr = EQUIPOS_MAP.get(datos_partido["local"], "")
-                    vis_abbr = EQUIPOS_MAP.get(datos_partido["visita"], "")
-                    
-                    if df_bat.empty or df_pit.empty or df_parks.empty:
-                        st.error("❌ Error crítico: Las bases de datos históricas están vacías.")
-                        st.stop()
-
-                    try:
-                        wrc_loc = _current_offensive_index(df_bat, loc_abbr)
-                        wrc_vis = _current_offensive_index(df_bat, vis_abbr)
-                    except Exception as e:
-                        st.error(f"Error procesando índice ofensivo: {e}")
-                        st.stop()
-                    
-                    pitcher_loc_nombre = datos_partido["pitcher_local"]
-                    xfip_loc = _starter_run_prevention(df_pit_ind, pitcher_loc_nombre)
-                    starter_ip_loc = _starter_expected_innings(df_pit_ind, pitcher_loc_nombre)
-                    
-                    if xfip_loc is None:
-                        st.error(f"❌ Abridor local sin métrica individual fiable: {pitcher_loc_nombre}. No se emite apuesta con un proxy de equipo.")
-                        st.stop()
-
-                    pitcher_vis_nombre = datos_partido["pitcher_visita"]
-                    xfip_vis = _starter_run_prevention(df_pit_ind, pitcher_vis_nombre)
-                    starter_ip_vis = _starter_expected_innings(df_pit_ind, pitcher_vis_nombre)
-                    
-                    if xfip_vis is None:
-                        st.error(f"❌ Abridor visitante sin métrica individual fiable: {pitcher_vis_nombre}. No se emite apuesta con un proxy de equipo.")
-                        st.stop()
-
-                    team_bullpen_loc = df_pit[df_pit['Team'] == loc_abbr]
-                    team_era_loc = float(team_bullpen_loc.iloc[-1]['ERA']) if not team_bullpen_loc.empty else 4.0
-                    bullpen_loc_era = _bullpen_era(loc_abbr, team_era_loc)
-                    
-                    team_bullpen_vis = df_pit[df_pit['Team'] == vis_abbr]
-                    team_era_vis = float(team_bullpen_vis.iloc[-1]['ERA']) if not team_bullpen_vis.empty else 4.0
-                    bullpen_vis_era = _bullpen_era(vis_abbr, team_era_vis)
-                    
-                    park_info = park_for_team(df_parks, loc_abbr)
-                    if not park_info:
-                        st.error(f"❌ Error de integridad: no se pudo resolver el parque de {datos_partido['local']} ({loc_abbr}).")
-                        st.stop()
-                    park_factor = park_info['park_factor']
-                    altitud = park_info['altitude_ft']
-                    
-                    linea_casino = datos_partido["linea_carreras"]
-                    
-                    if linea_casino is None or datos_partido["cuota_loc"] is None or datos_partido["cuota_vis"] is None:
-                         st.error("❌ Faltan cuotas reales del casino. Simulación cancelada para no inyectar datos falsos.")
-                         st.stop()
-
-                    res_mc = simular_partido_mlb(
-                        local=datos_partido['local'], visita=datos_partido['visita'],
-                        pitcher_loc_xfip=xfip_loc, pitcher_vis_xfip=xfip_vis,
-                        wrc_loc=wrc_loc, wrc_vis=wrc_vis,
-                        bullpen_loc_era=bullpen_loc_era, bullpen_vis_era=bullpen_vis_era,
-                        park_factor=park_factor, altitud_ft=altitud,
-                        viento_mph=viento, direccion_viento=dir_viento, temp_f=temp,
-                        linea_carreras_casino=linea_casino,
-                        df_games=df_games,
-                        num_simulaciones=50000,
-                        starter_ip_loc=starter_ip_loc, starter_ip_vis=starter_ip_vis
-                    )
-                    
-                    cuotas_reales = {
-                        "Moneyline_Local": datos_partido["cuota_loc"],
-                        "Moneyline_Visita": datos_partido["cuota_vis"],
-                        "Cuota_Over": datos_partido["cuota_over"],
-                        "Cuota_Under": datos_partido["cuota_under"],
-                        "Spread_Local": datos_partido.get("spread_loc"),
-                        "Cuota_Spread_Local": datos_partido.get("cuota_spread_loc"),
-                        "Spread_Visita": datos_partido.get("spread_vis"),
-                        "Cuota_Spread_Visita": datos_partido.get("cuota_spread_vis")
-                    }
-                    
-                    # V4.2: el modo individual usa exactamente el mismo motor de selección
-                    # que el scanner global: ML + Monte Carlo + mercado no-vig + edge + EV.
-                    bat_col_ml = preferred_batting_column(df_bat) or 'OPS_Index'
-                    pit_col_ml = preferred_pitching_column(df_pit) or 'ERA'
-                    ml_off_loc = _team_prior_stat(df_bat, loc_abbr, bat_col_ml, wrc_loc)
-                    ml_off_vis = _team_prior_stat(df_bat, vis_abbr, bat_col_ml, wrc_vis)
-                    ml_pit_loc = _team_prior_stat(df_pit, loc_abbr, pit_col_ml, bullpen_loc_era)
-                    ml_pit_vis = _team_prior_stat(df_pit, vis_abbr, pit_col_ml, bullpen_vis_era)
-                    res_ml = predictor_ml.predecir_partido(
-                        loc_abbr, vis_abbr, ml_off_loc, ml_off_vis, ml_pit_loc, ml_pit_vis, park_factor
-                    )
-
-                    carreras_dict = res_mc.get('Carreras', {})
-                    prob_mc_loc = res_mc['Moneyline']['Gana Local']
-                    prob_mc_vis = res_mc['Moneyline']['Gana Visita']
-                    prob_ml_loc = res_ml['Probabilidad_Local']
-                    prob_ml_vis = res_ml['Probabilidad_Visita']
-
-                    prob_mc_over = carreras_dict.get(f"Over {linea_casino}", 50.0)
-                    prob_mc_under = carreras_dict.get(f"Under {linea_casino}", 50.0)
-                    proy_carreras = res_ml.get('Proyeccion_Carreras', linea_casino)
-                    prob_ml_over = estimar_prob_ml(proy_carreras, linea_casino, 'over', res_ml.get('Sigma_Carreras'))
-                    prob_ml_under = estimar_prob_ml(proy_carreras, linea_casino, 'under', res_ml.get('Sigma_Carreras'))
-
-                    spread_loc = cuotas_reales.get('Spread_Local')
-                    spread_vis = cuotas_reales.get('Spread_Visita')
-                    prob_mc_spread_loc = carreras_dict.get(f"Spread Local {spread_loc:+.1f}", 50.0) if spread_loc is not None else 50.0
-                    prob_mc_spread_vis = carreras_dict.get(f"Spread Visita {spread_vis:+.1f}", 50.0) if spread_vis is not None else 50.0
-                    proy_hc_loc = res_ml.get('Proyeccion_Handicap_Local', 0.0)
-                    prob_ml_spread_loc = estimar_prob_ml(proy_hc_loc, spread_loc, 'spread_loc', res_ml.get('Sigma_Handicap')) if spread_loc is not None else 50.0
-                    prob_ml_spread_vis = estimar_prob_ml(-proy_hc_loc, spread_vis, 'spread_vis', res_ml.get('Sigma_Handicap')) if spread_vis is not None else 50.0
-
-                    mkt_loc, mkt_vis = no_vig_two_way(cuotas_reales['Moneyline_Local'], cuotas_reales['Moneyline_Visita'])
-                    mkt_over, mkt_under = no_vig_two_way(cuotas_reales.get('Cuota_Over'), cuotas_reales.get('Cuota_Under'))
-                    mkt_sp_loc, mkt_sp_vis = no_vig_two_way(cuotas_reales.get('Cuota_Spread_Local'), cuotas_reales.get('Cuota_Spread_Visita'))
-
-                    blend_weights = market_blend_weights()
-                    candidatos_ind = [
-                        moneyline_candidate(f"Gana Local ({datos_partido['local']})", prob_ml_loc, prob_mc_loc, cuotas_reales['Moneyline_Local'], mkt_loc, blend_weight_ml=blend_weights['Moneyline']['ml_weight']),
-                        moneyline_candidate(f"Gana Visita ({datos_partido['visita']})", prob_ml_vis, prob_mc_vis, cuotas_reales['Moneyline_Visita'], mkt_vis, blend_weight_ml=blend_weights['Moneyline']['ml_weight']),
-                    ]
-                    if cuotas_reales.get('Cuota_Over') is not None:
-                        candidatos_ind.append(total_candidate(f"Over {linea_casino}", prob_ml_over, prob_mc_over, cuotas_reales['Cuota_Over'], mkt_over, carreras_dict.get(f"Push {linea_casino}", 0.0), blend_weight_ml=blend_weights['Totales']['ml_weight']))
-                    if cuotas_reales.get('Cuota_Under') is not None:
-                        candidatos_ind.append(total_candidate(f"Under {linea_casino}", prob_ml_under, prob_mc_under, cuotas_reales['Cuota_Under'], mkt_under, carreras_dict.get(f"Push {linea_casino}", 0.0), blend_weight_ml=blend_weights['Totales']['ml_weight']))
-                    if spread_loc is not None and cuotas_reales.get('Cuota_Spread_Local') is not None:
-                        candidatos_ind.append(runline_candidate(f"Hándicap {spread_loc:+.1f} ({datos_partido['local']})", prob_ml_spread_loc, prob_mc_spread_loc, cuotas_reales['Cuota_Spread_Local'], mkt_sp_loc, carreras_dict.get(f"Push Spread Local {spread_loc:+.1f}", 0.0), blend_weight_ml=blend_weights['Hándicap']['ml_weight']))
-                    if spread_vis is not None and cuotas_reales.get('Cuota_Spread_Visita') is not None:
-                        candidatos_ind.append(runline_candidate(f"Hándicap {spread_vis:+.1f} ({datos_partido['visita']})", prob_ml_spread_vis, prob_mc_spread_vis, cuotas_reales['Cuota_Spread_Visita'], mkt_sp_vis, carreras_dict.get(f"Push Spread Visita {spread_vis:+.1f}", 0.0), blend_weight_ml=blend_weights['Hándicap']['ml_weight']))
-
-                    veredicto_apuestas = []
+            st.subheader('1. Cartelera Oficial Sincronizada');seleccion=st.selectbox('Selecciona un duelo:',list(partidos_hoy.keys()));datos_partido=partidos_hoy[seleccion];ct,cw,cd=obtener_clima_estadio(datos_partido['local']);temp_auto,viento_auto,dir_auto,weather_auto_source=best_auto_weather(datos_partido['local'],datos_partido.get('start_time_utc'),ct,cw,cd);st.subheader('2. Datos del Mercado y Clima (En Vivo)');c1,c2,c3,c4=st.columns(4);opciones_viento=['None','Outfield (Hacia Afuera)','Infield (Hacia Adentro)','Lateral (Derecha a Izquierda)','Lateral (Izquierda a Derecha)'];indice_dir=opciones_viento.index(dir_auto) if dir_auto in opciones_viento else 0;st.caption(f'Fuente clima automática: {weather_auto_source}')
+            with c1:st.metric('Línea O/U Casino',datos_partido['linea_carreras'] if datos_partido['linea_carreras'] is not None else 'No disponible');st.metric('Cuota Over',datos_partido['cuota_over'] if datos_partido['cuota_over'] is not None else 'No disponible')
+            with c2:st.metric(f"Cuota ML ({datos_partido['local']})",datos_partido['cuota_loc'] if datos_partido['cuota_loc'] is not None else 'No disponible');st.metric(f"Cuota ML ({datos_partido['visita']})",datos_partido['cuota_vis'] if datos_partido['cuota_vis'] is not None else 'No disponible')
+            with c3:viento=st.number_input('Viento (mph)',value=int(viento_auto) if viento_auto is not None else 8,step=1);dir_viento=st.selectbox('Dirección del Viento',opciones_viento,index=indice_dir)
+            with c4:temp=st.slider('Temperatura (°F)',30,110,int(temp_auto) if temp_auto is not None else 72)
+            if st.button('🚀 Ejecutar Simulación Cuántica',type='primary'):
+                with st.spinner('Procesando datos en vivo y ejecutando simulaciones...'):
+                    loc_abbr=EQUIPOS_MAP.get(datos_partido['local'],'');vis_abbr=EQUIPOS_MAP.get(datos_partido['visita'],'')
+                    if df_bat.empty or df_pit.empty or df_parks.empty:st.error('❌ Error crítico: Las bases de datos históricas están vacías.');st.stop()
+                    wrc_loc=_current_offensive_index(df_bat,loc_abbr);wrc_vis=_current_offensive_index(df_bat,vis_abbr);pln=datos_partido['pitcher_local'];xfip_loc=_starter_run_prevention(df_pit_ind,pln);starter_ip_loc=_starter_expected_innings(df_pit_ind,pln)
+                    if xfip_loc is None:st.error(f'❌ Abridor local sin métrica individual fiable: {pln}. No se emite apuesta con un proxy de equipo.');st.stop()
+                    pvn=datos_partido['pitcher_visita'];xfip_vis=_starter_run_prevention(df_pit_ind,pvn);starter_ip_vis=_starter_expected_innings(df_pit_ind,pvn)
+                    if xfip_vis is None:st.error(f'❌ Abridor visitante sin métrica individual fiable: {pvn}. No se emite apuesta con un proxy de equipo.');st.stop()
+                    th=df_pit[df_pit['Team']==loc_abbr];tv=df_pit[df_pit['Team']==vis_abbr];bp_h=_bullpen_era(loc_abbr,float(th.iloc[-1]['ERA']) if not th.empty else 4.0);bp_v=_bullpen_era(vis_abbr,float(tv.iloc[-1]['ERA']) if not tv.empty else 4.0);park_info=park_for_team(df_parks,loc_abbr)
+                    if not park_info:st.error(f"❌ Error de integridad: no se pudo resolver el parque de {datos_partido['local']} ({loc_abbr}).");st.stop()
+                    park_factor=park_info['park_factor'];altitud=park_info['altitude_ft'];linea_casino=datos_partido.get('linea_carreras')
+                    if linea_casino is None:st.error('❌ No hay línea O/U real disponible para este juego.');st.stop()
+                    res_mc=simular_partido_mlb(local=datos_partido['local'],visita=datos_partido['visita'],pitcher_loc_xfip=xfip_loc,pitcher_vis_xfip=xfip_vis,wrc_loc=wrc_loc,wrc_vis=wrc_vis,bullpen_loc_era=bp_h,bullpen_vis_era=bp_v,park_factor=park_factor,altitud_ft=altitud,viento_mph=viento,direccion_viento=dir_viento,temp_f=temp,linea_carreras_casino=linea_casino,df_games=df_games,num_simulaciones=50000,starter_ip_loc=starter_ip_loc,starter_ip_vis=starter_ip_vis);bat_col_ml=preferred_batting_column(df_bat) or 'OPS_Index';pit_col_ml=preferred_pitching_column(df_pit) or 'ERA';res_ml=predictor_ml.predecir_partido(loc_abbr,vis_abbr,_team_prior_stat(df_bat,loc_abbr,bat_col_ml,wrc_loc),_team_prior_stat(df_bat,vis_abbr,bat_col_ml,wrc_vis),_team_prior_stat(df_pit,loc_abbr,pit_col_ml,bp_h),_team_prior_stat(df_pit,vis_abbr,pit_col_ml,bp_v),park_factor);carreras_dict=res_mc.get('Carreras',{});prob_mc_loc=res_mc['Moneyline']['Gana Local'];prob_mc_vis=res_mc['Moneyline']['Gana Visita'];prob_ml_loc=res_ml['Probabilidad_Local'];prob_ml_vis=res_ml['Probabilidad_Visita'];prob_mc_over=carreras_dict.get(f'Over {linea_casino}',50.);prob_mc_under=carreras_dict.get(f'Under {linea_casino}',50.);proy=res_ml.get('Proyeccion_Carreras',linea_casino);prob_ml_over=estimar_prob_ml(proy,linea_casino,'over',res_ml.get('Sigma_Carreras'));prob_ml_under=estimar_prob_ml(proy,linea_casino,'under',res_ml.get('Sigma_Carreras'));spread_loc=datos_partido.get('spread_loc');spread_vis=datos_partido.get('spread_vis');prob_mc_spread_loc=carreras_dict.get(f'Spread Local {spread_loc:+.1f}',50.) if spread_loc is not None else 50.;prob_mc_spread_vis=carreras_dict.get(f'Spread Visita {spread_vis:+.1f}',50.) if spread_vis is not None else 50.;ph=res_ml.get('Proyeccion_Handicap_Local',0);prob_ml_spread_loc=estimar_prob_ml(ph,spread_loc,'spread_loc',res_ml.get('Sigma_Handicap')) if spread_loc is not None else 50.;prob_ml_spread_vis=estimar_prob_ml(-ph,spread_vis,'spread_vis',res_ml.get('Sigma_Handicap')) if spread_vis is not None else 50.;cl=datos_partido.get('cuota_loc');cv=datos_partido.get('cuota_vis');co=datos_partido.get('cuota_over');cu=datos_partido.get('cuota_under')
+                    if None in (cl,cv,co,cu):st.error('❌ Faltan cuotas reales de ambos lados.');st.stop()
+                    mhl,mhv=no_vig_two_way(cl,cv);mo,mu=no_vig_two_way(co,cu);msl,msv=no_vig_two_way(datos_partido.get('cuota_spread_loc'),datos_partido.get('cuota_spread_vis'));blend_weights=market_blend_weights();candidatos_ind=[moneyline_candidate(f"Gana Local ({datos_partido['local']})",prob_ml_loc,prob_mc_loc,cl,mhl,blend_weight_ml=blend_weights['Moneyline']['ml_weight']),moneyline_candidate(f"Gana Visita ({datos_partido['visita']})",prob_ml_vis,prob_mc_vis,cv,mhv,blend_weight_ml=blend_weights['Moneyline']['ml_weight']),total_candidate(f'Over {linea_casino}',prob_ml_over,prob_mc_over,co,mo,carreras_dict.get(f'Push {linea_casino}',0.),blend_weight_ml=blend_weights['Totales']['ml_weight']),total_candidate(f'Under {linea_casino}',prob_ml_under,prob_mc_under,cu,mu,carreras_dict.get(f'Push {linea_casino}',0.),blend_weight_ml=blend_weights['Totales']['ml_weight'])]
+                    if spread_loc is not None and datos_partido.get('cuota_spread_loc') is not None:candidatos_ind.append(runline_candidate(f"Hándicap {spread_loc:+.1f} ({datos_partido['local']})",prob_ml_spread_loc,prob_mc_spread_loc,datos_partido['cuota_spread_loc'],msl,carreras_dict.get(f'Push Spread Local {spread_loc:+.1f}',0.),blend_weight_ml=blend_weights['Hándicap']['ml_weight']))
+                    if spread_vis is not None and datos_partido.get('cuota_spread_vis') is not None:candidatos_ind.append(runline_candidate(f"Hándicap {spread_vis:+.1f} ({datos_partido['visita']})",prob_ml_spread_vis,prob_mc_spread_vis,datos_partido['cuota_spread_vis'],msv,carreras_dict.get(f'Push Spread Visita {spread_vis:+.1f}',0.),blend_weight_ml=blend_weights['Hándicap']['ml_weight']))
+                    filas=[]
                     for cand in candidatos_ind:
-                        if cand is None:
-                            continue
-                        veredicto_apuestas.append({
-                            'Mercado': cand.market,
-                            'Apuesta': cand.selection,
-                            'Prob. ML': f"{round(cand.prob_ml, 1)}%",
-                            'Prob. MC': f"{round(cand.prob_mc, 1)}%",
-                            'Prob. Combinada': f"{round(cand.probability, 1)}%",
-                            'Peso ML': f"{round(cand.blend_weight_ml*100, 0)}%",
-                            'Push': f"{round(cand.push_probability, 1)}%" if cand.push_probability else "0.0%",
-                            'Cuota': cand.odds,
-                            'Edge': 'N/D' if cand.edge_pp is None else f"{round(cand.edge_pp, 2)} pp",
-                            'EV+': f"{round(cand.ev_pct, 2)}%",
-                            'Kelly Stake': f"{calcular_criterio_kelly(cand.probability, cand.odds, prob_push=cand.push_probability)}%" if cand.accepted else '0.0%',
-                            'Estado': 'APUESTA' if cand.accepted else 'NO BET',
-                            'Motivo': cand.reason,
-                        })
-
-                    df_apuestas = pd.DataFrame(veredicto_apuestas)
-                    
-                    st.markdown("---")
-                    st.subheader(f"🏟️ Factores Ambientales en {datos_partido['local']}")
-                    m1, m2, m3 = st.columns(3)
-                    m1.metric("Altitud del Parque", f"{altitud} ft")
-                    m2.metric("Park Factor General", park_factor)
-                    m3.metric("Clima in Vivo", f"{temp}°F | Viento: {viento}mph")
-                    
-                    st.markdown("### 🎲 Probabilidades Reales del Duelo")
-                    c1, c2, c3, c4 = st.columns(4)
-                    c1.metric(f"Gana {datos_partido['local']}", f"{res_mc['Moneyline']['Gana Local']}%")
-                    c2.metric(f"Gana {datos_partido['visita']}", f"{res_mc['Moneyline']['Gana Visita']}%")
-                    
-                    prob_over = res_mc.get('Carreras', {}).get(f"Over {linea_casino}", 50.0)
-                    c3.metric(f"Over {linea_casino} Carreras", f"{prob_over}%")
-                    c4.metric("Promedio Carreras Total", f"{res_mc['Carreras']['Promedio_Total']}")
-                    
-                    st.markdown("### 🎯 Veredicto Financiero y Valor Esperado (EV+)")
-                    st.dataframe(df_apuestas, use_container_width=True, hide_index=True)
+                        if cand is None:continue
+                        filas.append({'Selección':cand.selection,'Mercado':cand.market,'Prob. ML':f'{cand.prob_ml:.1f}%','Prob. MC':f'{cand.prob_mc:.1f}%','Prob. Combinada':f'{cand.probability:.1f}%','Peso ML':f'{cand.blend_weight_ml*100:.0f}%','Push':f'{cand.push_probability:.1f}%','Cuota':cand.odds,'Edge':None if cand.edge_pp is None else f'{cand.edge_pp:.2f} pp','EV':f'{cand.ev_pct:.2f}%','Kelly':f'{calcular_criterio_kelly(cand.probability,cand.odds,prob_push=cand.push_probability)}%' if cand.accepted else '0.0%','Estado':'✅ CANDIDATO' if cand.accepted else 'NO BET','Motivo':cand.reason})
+                    st.subheader('3. Veredicto Financiero Unificado');st.dataframe(pd.DataFrame(filas),use_container_width=True,hide_index=True)
