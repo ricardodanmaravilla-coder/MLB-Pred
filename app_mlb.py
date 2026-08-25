@@ -803,91 +803,73 @@ else:
                         "Cuota_Spread_Visita": datos_partido.get("cuota_spread_vis")
                     }
                     
-                    veredicto_apuestas = []
-                    prob_loc = res_mc['Moneyline']['Gana Local']
-                    prob_vis = res_mc['Moneyline']['Gana Visita']
-                    cuota_loc = cuotas_reales['Moneyline_Local']
-                    cuota_vis = cuotas_reales['Moneyline_Visita']
-                    
-                    # Moneyline Local
-                    kelly_loc = calcular_criterio_kelly(prob_loc, cuota_loc)
-                    ev_loc = (prob_loc / 100.0) * cuota_loc - 1.0
-                    veredicto_apuestas.append({
-                        "Apuesta": f"Gana Local ({datos_partido['local']})",
-                        "Prob. Real": f"{prob_loc}%",
-                        "Cuota": cuota_loc,
-                        "EV+": f"{round(ev_loc*100, 2)}%",
-                        "Kelly Stake": f"{kelly_loc}%"
-                    })
-                    
-                    # Moneyline Visita
-                    kelly_vis = calcular_criterio_kelly(prob_vis, cuota_vis)
-                    ev_vis = (prob_vis / 100.0) * cuota_vis - 1.0
-                    veredicto_apuestas.append({
-                        "Apuesta": f"Gana Visita ({datos_partido['visita']})",
-                        "Prob. Real": f"{prob_vis}%",
-                        "Cuota": cuota_vis,
-                        "EV+": f"{round(ev_vis*100, 2)}%",
-                        "Kelly Stake": f"{kelly_vis}%"
-                    })
+                    # V4.2: el modo individual usa exactamente el mismo motor de selección
+                    # que el scanner global: ML + Monte Carlo + mercado no-vig + edge + EV.
+                    bat_col_ml = 'OPS_Index' if 'OPS_Index' in df_bat.columns else 'wRC+'
+                    pit_col_ml = 'ERA' if 'ERA' in df_pit.columns else 'xFIP'
+                    ml_off_loc = _team_prior_stat(df_bat, loc_abbr, bat_col_ml, wrc_loc)
+                    ml_off_vis = _team_prior_stat(df_bat, vis_abbr, bat_col_ml, wrc_vis)
+                    ml_pit_loc = _team_prior_stat(df_pit, loc_abbr, pit_col_ml, bullpen_loc_era)
+                    ml_pit_vis = _team_prior_stat(df_pit, vis_abbr, pit_col_ml, bullpen_vis_era)
+                    res_ml = predictor_ml.predecir_partido(
+                        loc_abbr, vis_abbr, ml_off_loc, ml_off_vis, ml_pit_loc, ml_pit_vis, park_factor
+                    )
 
-                    # Over / Under (Totales)
                     carreras_dict = res_mc.get('Carreras', {})
-                    prob_over = carreras_dict.get(f"Over {linea_casino}", 50.0)
-                    cuota_ov = cuotas_reales.get("Cuota_Over")
-                    if cuota_ov is not None:
-                        kelly_ov = calcular_criterio_kelly(prob_over, cuota_ov)
-                        ev_ov = (prob_over / 100.0) * cuota_ov - 1.0
+                    prob_mc_loc = res_mc['Moneyline']['Gana Local']
+                    prob_mc_vis = res_mc['Moneyline']['Gana Visita']
+                    prob_ml_loc = res_ml['Probabilidad_Local']
+                    prob_ml_vis = res_ml['Probabilidad_Visita']
+
+                    prob_mc_over = carreras_dict.get(f"Over {linea_casino}", 50.0)
+                    prob_mc_under = carreras_dict.get(f"Under {linea_casino}", 50.0)
+                    proy_carreras = res_ml.get('Proyeccion_Carreras', linea_casino)
+                    prob_ml_over = estimar_prob_ml(proy_carreras, linea_casino, 'over', res_ml.get('Sigma_Carreras'))
+                    prob_ml_under = estimar_prob_ml(proy_carreras, linea_casino, 'under', res_ml.get('Sigma_Carreras'))
+
+                    spread_loc = cuotas_reales.get('Spread_Local')
+                    spread_vis = cuotas_reales.get('Spread_Visita')
+                    prob_mc_spread_loc = carreras_dict.get(f"Spread Local {spread_loc:+.1f}", 50.0) if spread_loc is not None else 50.0
+                    prob_mc_spread_vis = carreras_dict.get(f"Spread Visita {spread_vis:+.1f}", 50.0) if spread_vis is not None else 50.0
+                    proy_hc_loc = res_ml.get('Proyeccion_Handicap_Local', 0.0)
+                    prob_ml_spread_loc = estimar_prob_ml(proy_hc_loc, spread_loc, 'spread_loc', res_ml.get('Sigma_Handicap')) if spread_loc is not None else 50.0
+                    prob_ml_spread_vis = estimar_prob_ml(-proy_hc_loc, spread_vis, 'spread_vis', res_ml.get('Sigma_Handicap')) if spread_vis is not None else 50.0
+
+                    mkt_loc, mkt_vis = no_vig_two_way(cuotas_reales['Moneyline_Local'], cuotas_reales['Moneyline_Visita'])
+                    mkt_over, mkt_under = no_vig_two_way(cuotas_reales.get('Cuota_Over'), cuotas_reales.get('Cuota_Under'))
+                    mkt_sp_loc, mkt_sp_vis = no_vig_two_way(cuotas_reales.get('Cuota_Spread_Local'), cuotas_reales.get('Cuota_Spread_Visita'))
+
+                    candidatos_ind = [
+                        moneyline_candidate(f"Gana Local ({datos_partido['local']})", prob_ml_loc, prob_mc_loc, cuotas_reales['Moneyline_Local'], mkt_loc),
+                        moneyline_candidate(f"Gana Visita ({datos_partido['visita']})", prob_ml_vis, prob_mc_vis, cuotas_reales['Moneyline_Visita'], mkt_vis),
+                    ]
+                    if cuotas_reales.get('Cuota_Over') is not None:
+                        candidatos_ind.append(total_candidate(f"Over {linea_casino}", prob_ml_over, prob_mc_over, cuotas_reales['Cuota_Over'], mkt_over))
+                    if cuotas_reales.get('Cuota_Under') is not None:
+                        candidatos_ind.append(total_candidate(f"Under {linea_casino}", prob_ml_under, prob_mc_under, cuotas_reales['Cuota_Under'], mkt_under))
+                    if spread_loc is not None and cuotas_reales.get('Cuota_Spread_Local') is not None:
+                        candidatos_ind.append(runline_candidate(f"Hándicap {spread_loc:+.1f} ({datos_partido['local']})", prob_ml_spread_loc, prob_mc_spread_loc, cuotas_reales['Cuota_Spread_Local'], mkt_sp_loc))
+                    if spread_vis is not None and cuotas_reales.get('Cuota_Spread_Visita') is not None:
+                        candidatos_ind.append(runline_candidate(f"Hándicap {spread_vis:+.1f} ({datos_partido['visita']})", prob_ml_spread_vis, prob_mc_spread_vis, cuotas_reales['Cuota_Spread_Visita'], mkt_sp_vis))
+
+                    veredicto_apuestas = []
+                    for cand in candidatos_ind:
+                        if cand is None:
+                            continue
                         veredicto_apuestas.append({
-                            "Apuesta": f"Over {linea_casino}",
-                            "Prob. Real": f"{prob_over}%",
-                            "Cuota": cuota_ov,
-                            "EV+": f"{round(ev_ov*100, 2)}%",
-                            "Kelly Stake": f"{kelly_ov}%"
+                            'Mercado': cand.market,
+                            'Apuesta': cand.selection,
+                            'Prob. ML': f"{round(cand.prob_ml, 1)}%",
+                            'Prob. MC': f"{round(cand.prob_mc, 1)}%",
+                            'Prob. Combinada': f"{round(cand.probability, 1)}%",
+                            'Cuota': cand.odds,
+                            'Edge': 'N/D' if cand.edge_pp is None else f"{round(cand.edge_pp, 2)} pp",
+                            'EV+': f"{round(cand.ev_pct, 2)}%",
+                            'Kelly Stake': f"{calcular_criterio_kelly(cand.probability, cand.odds)}%" if cand.accepted else '0.0%',
+                            'Estado': 'APUESTA' if cand.accepted else 'NO BET',
+                            'Motivo': cand.reason,
                         })
 
-                    prob_under = carreras_dict.get(f"Under {linea_casino}", 50.0)
-                    cuota_un = cuotas_reales.get("Cuota_Under")
-                    if cuota_un is not None:
-                        kelly_un = calcular_criterio_kelly(prob_under, cuota_un)
-                        ev_un = (prob_under / 100.0) * cuota_un - 1.0
-                        veredicto_apuestas.append({
-                            "Apuesta": f"Under {linea_casino}",
-                            "Prob. Real": f"{prob_under}%",
-                            "Cuota": cuota_un,
-                            "EV+": f"{round(ev_un*100, 2)}%",
-                            "Kelly Stake": f"{kelly_un}%"
-                        })
-
-                    # Hándicap (Spreads reales desde Montecarlo con lectura dinámica)
-                    spread_loc = cuotas_reales.get("Spread_Local")
-                    cuota_sp_loc = cuotas_reales.get("Cuota_Spread_Local")
-                    if spread_loc is not None and cuota_sp_loc is not None:
-                        prob_spread_loc = carreras_dict.get(f"Spread Local {spread_loc:+.1f}", 50.0)
-                        kelly_sp_loc = calcular_criterio_kelly(prob_spread_loc, cuota_sp_loc)
-                        ev_sp_loc = (prob_spread_loc / 100.0) * cuota_sp_loc - 1.0
-                        veredicto_apuestas.append({
-                            "Apuesta": f"Hándicap {spread_loc:+.1f} ({datos_partido['local']})",
-                            "Prob. Real": f"{round(prob_spread_loc, 2)}%",
-                            "Cuota": cuota_sp_loc,
-                            "EV+": f"{round(ev_sp_loc*100, 2)}%",
-                            "Kelly Stake": f"{kelly_sp_loc}%"
-                        })
-
-                    spread_vis = cuotas_reales.get("Spread_Visita")
-                    cuota_sp_vis = cuotas_reales.get("Cuota_Spread_Visita")
-                    if spread_vis is not None and cuota_sp_vis is not None:
-                        prob_spread_vis = carreras_dict.get(f"Spread Visita {spread_vis:+.1f}", 50.0)
-                        kelly_sp_vis = calcular_criterio_kelly(prob_spread_vis, cuota_sp_vis)
-                        ev_sp_vis = (prob_spread_vis / 100.0) * cuota_sp_vis - 1.0
-                        veredicto_apuestas.append({
-                            "Apuesta": f"Hándicap {spread_vis:+.1f} ({datos_partido['visita']})",
-                            "Prob. Real": f"{round(prob_spread_vis, 2)}%",
-                            "Cuota": cuota_sp_vis,
-                            "EV+": f"{round(ev_sp_vis*100, 2)}%",
-                            "Kelly Stake": f"{kelly_sp_vis}%"
-                        })
-                    
                     df_apuestas = pd.DataFrame(veredicto_apuestas)
                     
                     st.markdown("---")
