@@ -1,7 +1,7 @@
 import math
 import pandas as pd
 
-from modules.advanced_stats import enrich_team_frames
+from modules.advanced_stats import enrich_team_frames, enrich_pitcher_frame
 from modules.metric_quality import batting_metric, pitching_metric, row_pitching_value
 from modules.ml_mlb import PredictorMLMLB
 from modules.scanner_engine import moneyline_candidate, total_candidate, runline_candidate
@@ -23,6 +23,32 @@ def test_metric_quality_prefers_real_sources_only_with_coverage():
     assert pitching_metric(real_pit) == 'xFIP'
     value, used = row_pitching_value(pd.Series({'ERA':4.2,'FIP':3.9,'xFIP':3.7,'xFIP_Source':'FANGRAPHS_REAL_XFIP'}))
     assert abs(value-3.7) < 1e-9 and used == 'xFIP'
+
+
+def test_individual_pitcher_real_source_requires_actual_fg_match():
+    import pybaseball
+    original = pybaseball.pitching_stats
+    fake_fg = pd.DataFrame({
+        'Name':['Matched Pitcher'], 'Team':['NYY'], 'ERA':[3.60], 'FIP':[3.50],
+        'xFIP':[3.45], 'WHIP':[1.12], 'K-BB%':[18.0], 'GB%':[44.0],
+        'HR/9':[0.95], 'IP':[120.0], 'GS':[20], 'G':[20],
+    })
+    base = pd.DataFrame({
+        'Name':['Matched Pitcher','Legacy Pitcher'], 'Team':['NYY','BOS'],
+        'ERA':[4.20,4.40], 'xFIP':[4.20,4.40],
+        'xFIP_Source':['LEGACY_ERA_PROXY_NOT_REAL_XFIP']*2,
+    })
+    try:
+        pybaseball.pitching_stats = lambda *args, **kwargs: fake_fg.copy()
+        out = enrich_pitcher_frame(base, 2026)
+    finally:
+        pybaseball.pitching_stats = original
+    matched = out[out['Name']=='Matched Pitcher'].iloc[0]
+    legacy = out[out['Name']=='Legacy Pitcher'].iloc[0]
+    assert abs(float(matched['xFIP'])-3.45) < 1e-9
+    assert matched['xFIP_Source'] == 'FANGRAPHS_REAL_XFIP'
+    assert abs(float(legacy['xFIP'])-4.40) < 1e-9
+    assert legacy['xFIP_Source'] == 'LEGACY_ERA_PROXY_NOT_REAL_XFIP'
 
 
 def test_current_historical_metric_source_is_consistent():
@@ -60,13 +86,11 @@ def test_feature_vector_and_model_selection():
 
 
 def test_precision_first_market_abstention():
-    # Moneyline: old 55/55 zone must abstain; strong 60/61 consensus can pass.
     weak_ml=moneyline_candidate('Home',57,60,1.95,.50)
     assert weak_ml is not None and not weak_ml.accepted
     strong_ml=moneyline_candidate('Home',60,61,1.95,.50)
     assert strong_ml is not None and strong_ml.accepted
 
-    # Totals: weak Over and marginal Under are deliberately rejected.
     weak_over=total_candidate('Over 8.5',55,58,1.95,.50)
     assert weak_over is not None and not weak_over.accepted
     strong_over=total_candidate('Over 8.5',58,60,1.95,.50)
@@ -74,7 +98,6 @@ def test_precision_first_market_abstention():
     weak_under=total_candidate('Under 8.5',53,60,1.95,.50)
     assert weak_under is not None and not weak_under.accepted
 
-    # Run line now requires exceptional agreement/edge rather than base-rate comfort.
     old_style_rl=runline_candidate('Away +1.5',60,60,1.90,.55)
     assert old_style_rl is not None and not old_style_rl.accepted
     strong_rl=runline_candidate('Away +1.5',63,64,1.90,.55)
