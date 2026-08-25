@@ -33,11 +33,7 @@ def parse_utc(value):
 
 
 def conservative_auto_weather(team, start_time_utc, temp_f, wind_mph, wind_dir, now=None):
-    """Use current weather only near first pitch and never assume a retractable roof is open.
-
-    If the roof state is unknown or first pitch is more than two hours away, return
-    neutral inputs rather than injecting current conditions as if they were a forecast.
-    """
+    """Use current weather only near first pitch and never assume a retractable roof is open."""
     target = normalize_team(team)
     if target in ROOF_OR_DOME_TEAMS:
         return 72, 0, "None", "neutral_roof_unknown"
@@ -86,22 +82,18 @@ def _same_matchup(odds_game, mlb_game):
     )
 
 
-def match_odds_game(odds_games, mlb_game, max_hours=6.0):
-    """Match odds to an MLB game by both teams and start time.
+def match_odds_game(odds_games, mlb_game, max_hours=2.0):
+    """Match odds by both teams and first-pitch time.
 
-    This prevents doubleheaders from sharing the same sportsbook event merely because
-    they have the same home team. If start times are unavailable or ambiguous, return
-    None instead of attaching potentially wrong prices.
+    Even a single sportsbook event must be close to the MLB start time. This prevents
+    one quoted event from being attached to both legs of a doubleheader.
     """
     candidates = [g for g in (odds_games or []) if _same_matchup(g, mlb_game)]
     if not candidates:
         return None
-    if len(candidates) == 1:
-        return candidates[0]
-
     target = parse_utc(mlb_game.get('start_time_utc'))
     if target is None:
-        return None
+        return candidates[0] if len(candidates) == 1 else None
     scored = []
     for g in candidates:
         dt = parse_utc(g.get('commence_time'))
