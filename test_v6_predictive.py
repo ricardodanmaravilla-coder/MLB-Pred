@@ -4,6 +4,7 @@ import pandas as pd
 from modules.advanced_stats import enrich_team_frames
 from modules.metric_quality import batting_metric, pitching_metric, row_pitching_value
 from modules.ml_mlb import PredictorMLMLB
+from modules.scanner_engine import moneyline_candidate, total_candidate, runline_candidate
 
 
 def test_metric_quality_prefers_real_sources_only_with_coverage():
@@ -26,8 +27,6 @@ def test_metric_quality_prefers_real_sources_only_with_coverage():
 
 def test_current_historical_metric_source_is_consistent():
     bat=pd.read_csv('data/mlb_batting.csv'); pit=pd.read_csv('data/mlb_pitching.csv')
-    # Until the enrichment job has broad real-FanGraphs coverage, training must stay
-    # entirely on the legacy metric family instead of mixing scales across seasons.
     assert batting_metric(bat) in ('OPS_Index','wRC+')
     assert pitching_metric(pit) in ('ERA','FIP','xFIP')
     if 'wRC+_Source' in bat.columns:
@@ -58,6 +57,28 @@ def test_feature_vector_and_model_selection():
     m2=PredictorMLMLB(); assert m2.entrenar(bat,pit,games)
     assert m2.loaded_from_cache is True
     assert (m2.classifier_family,m2.runs_family,m2.diff_family) == (m.classifier_family,m.runs_family,m.diff_family)
+
+
+def test_precision_first_market_abstention():
+    # Moneyline: old 55/55 zone must abstain; strong 60/61 consensus can pass.
+    weak_ml=moneyline_candidate('Home',57,60,1.95,.50)
+    assert weak_ml is not None and not weak_ml.accepted
+    strong_ml=moneyline_candidate('Home',60,61,1.95,.50)
+    assert strong_ml is not None and strong_ml.accepted
+
+    # Totals: weak Over and marginal Under are deliberately rejected.
+    weak_over=total_candidate('Over 8.5',55,58,1.95,.50)
+    assert weak_over is not None and not weak_over.accepted
+    strong_over=total_candidate('Over 8.5',58,60,1.95,.50)
+    assert strong_over is not None and strong_over.accepted
+    weak_under=total_candidate('Under 8.5',53,60,1.95,.50)
+    assert weak_under is not None and not weak_under.accepted
+
+    # Run line now requires exceptional agreement/edge rather than base-rate comfort.
+    old_style_rl=runline_candidate('Away +1.5',60,60,1.90,.55)
+    assert old_style_rl is not None and not old_style_rl.accepted
+    strong_rl=runline_candidate('Away +1.5',63,64,1.90,.55)
+    assert strong_rl is not None and strong_rl.accepted
 
 
 def test_advanced_enrichment_is_fail_soft_with_empty_frames():
