@@ -9,7 +9,6 @@ from pathlib import Path
 from datetime import datetime, timezone
 import base64
 import io
-import json
 import os
 
 import pandas as pd
@@ -125,6 +124,22 @@ def sync_google_snapshot(rows):
         return {'ok': False, 'configured': False, 'inserted': 0, 'updated': 0, 'message': str(exc)[:240]}
 
 
+def _show_google_status(status):
+    """Expose Sheets status in Streamlit without making the ledger depend on UI success."""
+    try:
+        import streamlit as st
+        if not status.get('configured'):
+            st.warning('Google Sheets: no configurado. Revisa GOOGLE_SHEETS_ID y GOOGLE_SERVICE_ACCOUNT_JSON en Secrets.')
+        elif status.get('ok'):
+            inserted = int(status.get('inserted', 0) or 0)
+            updated = int(status.get('updated', 0) or 0)
+            st.success(f'Google Sheets conectado: {inserted} fila(s) nueva(s), {updated} actualizada(s).')
+        else:
+            st.error(f"Google Sheets NO pudo guardar: {status.get('message', 'error desconocido')}")
+    except Exception:
+        pass
+
+
 def append_snapshot(rows, path='data/picks_ledger.csv'):
     if not rows:
         return 0
@@ -147,6 +162,7 @@ def append_snapshot(rows, path='data/picks_ledger.csv'):
     except Exception as exc:
         print(f'Ledger remote sync failed: {exc}')
     google_status = sync_google_snapshot(new.to_dict('records'))
+    _show_google_status(google_status)
     if google_status.get('configured') and not google_status.get('ok'):
         print(f"Google Sheets sync failed: {google_status.get('message')}")
     return len(new)
