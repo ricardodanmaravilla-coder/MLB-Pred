@@ -13,7 +13,6 @@ import os
 import pandas as pd
 import requests
 
-
 LEDGER_COLUMNS = [
     'snapshot_utc','game_date','game_pk','away','home','market','selection','line','odds',
     'prob_ml','prob_mc','prob_combined','market_no_vig','edge_pp','ev_pct',
@@ -24,118 +23,77 @@ LEDGER_COLUMNS = [
 
 
 def _secret(name, default=''):
-    value = os.getenv(name, '').strip()
-    if value:
-        return value
+    value=os.getenv(name,'').strip()
+    if value: return value
     try:
         import streamlit as st
-        value = str(st.secrets.get(name, default)).strip()
-        return value
-    except Exception:
-        return str(default).strip()
+        return str(st.secrets.get(name,default)).strip()
+    except Exception: return str(default).strip()
 
 
 def _github_config():
-    token = _secret('GITHUB_TOKEN')
-    repo = _secret('LEDGER_GITHUB_REPO', 'ricardodanmaravilla-coder/MLB-Pred')
-    branch = _secret('LEDGER_GITHUB_BRANCH', 'main') or 'main'
-    remote_path = _secret('LEDGER_GITHUB_PATH', 'data/picks_ledger.csv') or 'data/picks_ledger.csv'
-    return token, repo, branch, remote_path
-
+    token=_secret('GITHUB_TOKEN'); repo=_secret('LEDGER_GITHUB_REPO','ricardodanmaravilla-coder/MLB-Pred'); branch=_secret('LEDGER_GITHUB_BRANCH','main') or 'main'; remote_path=_secret('LEDGER_GITHUB_PATH','data/picks_ledger.csv') or 'data/picks_ledger.csv'
+    return token,repo,branch,remote_path
 
 def persistent_backend_available():
-    token, repo, _, _ = _github_config()
-    return bool(token and repo and '/' in repo)
+    token,repo,_,_=_github_config(); return bool(token and repo and '/' in repo)
 
-
-def _merge_rows(old, new):
-    out = pd.concat([old, new], ignore_index=True) if not old.empty else new.copy()
+def _normalize_columns(df):
+    df=df.copy()
     for c in LEDGER_COLUMNS:
-        if c not in out.columns:
-            out[c] = None
-    keys = ['game_date','game_pk','away','home','market','selection','line','odds']
-    out = out.drop_duplicates(subset=keys, keep='last')
-    return out[LEDGER_COLUMNS]
+        if c not in df.columns: df[c]=None
+    return df[LEDGER_COLUMNS]
 
+def _merge_rows(old,new):
+    out=pd.concat([old,new],ignore_index=True) if not old.empty else new.copy(); out=_normalize_columns(out)
+    return out.drop_duplicates(subset=['game_date','game_pk','away','home','market','selection','line','odds'],keep='last')[LEDGER_COLUMNS]
 
 def _remote_read():
-    token, repo, branch, remote_path = _github_config()
-    if not (token and repo):
-        return pd.DataFrame(columns=LEDGER_COLUMNS), None
-    url = f'https://api.github.com/repos/{repo}/contents/{remote_path}'
-    headers = {'Authorization': f'Bearer {token}', 'Accept': 'application/vnd.github+json'}
-    r = requests.get(url, headers=headers, params={'ref': branch}, timeout=15)
-    if r.status_code == 404:
-        return pd.DataFrame(columns=LEDGER_COLUMNS), None
-    r.raise_for_status()
-    payload = r.json()
-    raw = base64.b64decode(payload.get('content', '')).decode('utf-8')
-    df = pd.read_csv(io.StringIO(raw)) if raw.strip() else pd.DataFrame(columns=LEDGER_COLUMNS)
-    return df, payload.get('sha')
+    token,repo,branch,remote_path=_github_config()
+    if not (token and repo): return pd.DataFrame(columns=LEDGER_COLUMNS),None
+    url=f'https://api.github.com/repos/{repo}/contents/{remote_path}'; headers={'Authorization':f'Bearer {token}','Accept':'application/vnd.github+json'}
+    r=requests.get(url,headers=headers,params={'ref':branch},timeout=15)
+    if r.status_code==404: return pd.DataFrame(columns=LEDGER_COLUMNS),None
+    r.raise_for_status(); payload=r.json(); raw=base64.b64decode(payload.get('content','')).decode('utf-8')
+    df=pd.read_csv(io.StringIO(raw)) if raw.strip() else pd.DataFrame(columns=LEDGER_COLUMNS)
+    return _normalize_columns(df),payload.get('sha')
 
-
-def _remote_write(df, previous_sha=None):
-    token, repo, branch, remote_path = _github_config()
-    if not (token and repo):
-        return False
-    url = f'https://api.github.com/repos/{repo}/contents/{remote_path}'
-    headers = {'Authorization': f'Bearer {token}', 'Accept': 'application/vnd.github+json'}
-    content = base64.b64encode(df.to_csv(index=False).encode('utf-8')).decode('ascii')
-    body = {'message': 'Persist MLB pick ledger snapshot', 'content': content, 'branch': branch}
-    if previous_sha:
-        body['sha'] = previous_sha
-    r = requests.put(url, headers=headers, json=body, timeout=20)
-    r.raise_for_status()
-    return True
-
+def _remote_write(df,previous_sha=None):
+    token,repo,branch,remote_path=_github_config()
+    if not (token and repo): return False
+    url=f'https://api.github.com/repos/{repo}/contents/{remote_path}'; headers={'Authorization':f'Bearer {token}','Accept':'application/vnd.github+json'}
+    content=base64.b64encode(df.to_csv(index=False).encode('utf-8')).decode('ascii'); body={'message':'Persist MLB pick ledger snapshot','content':content,'branch':branch}
+    if previous_sha: body['sha']=previous_sha
+    r=requests.put(url,headers=headers,json=body,timeout=20); r.raise_for_status(); return True
 
 def _sync_remote(new):
-    if not persistent_backend_available():
-        return False
+    if not persistent_backend_available(): return False
     for _ in range(2):
-        old, sha = _remote_read()
-        merged = _merge_rows(old, new)
-        try:
-            return _remote_write(merged, sha)
+        old,sha=_remote_read(); merged=_merge_rows(old,new)
+        try: return _remote_write(merged,sha)
         except requests.HTTPError as exc:
-            if exc.response is None or exc.response.status_code not in (409, 422):
-                raise
+            if exc.response is None or exc.response.status_code not in (409,422): raise
     return False
 
-
-def append_snapshot(rows, path='data/picks_ledger.csv'):
-    if not rows:
-        return 0
-    p = Path(path)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    now = datetime.now(timezone.utc).isoformat()
-    clean = []
+def append_snapshot(rows,path='data/picks_ledger.csv'):
+    if not rows: return 0
+    p=Path(path); p.parent.mkdir(parents=True,exist_ok=True); now=datetime.now(timezone.utc).isoformat(); clean=[]
     for row in rows:
-        d = {c: row.get(c) for c in LEDGER_COLUMNS}
-        d['snapshot_utc'] = d.get('snapshot_utc') or now
-        d['model_version'] = d.get('model_version') or 'v5'
-        d['result_status'] = d.get('result_status') or 'pending'
-        clean.append(d)
-    new = pd.DataFrame(clean, columns=LEDGER_COLUMNS)
-    old = load_ledger(path)
-    out = _merge_rows(old, new)
-    out.to_csv(p, index=False)
-    try:
-        _sync_remote(new)
-    except Exception as exc:
-        print(f'Ledger remote sync failed: {exc}')
+        d={c:row.get(c) for c in LEDGER_COLUMNS}; d['snapshot_utc']=d.get('snapshot_utc') or now; d['model_version']=d.get('model_version') or 'v6'; d['result_status']=d.get('result_status') or 'pending'; clean.append(d)
+    new=pd.DataFrame(clean,columns=LEDGER_COLUMNS); out=_merge_rows(load_ledger(path),new); out.to_csv(p,index=False)
+    try: _sync_remote(new)
+    except Exception as exc: print(f'Ledger remote sync failed: {exc}')
     return len(new)
-
-
 def load_ledger(path='data/picks_ledger.csv'):
-    p = Path(path)
-    if not p.exists():
-        return pd.DataFrame(columns=LEDGER_COLUMNS)
-    try:
-        df = pd.read_csv(p)
-    except Exception:
-        return pd.DataFrame(columns=LEDGER_COLUMNS)
-    for c in LEDGER_COLUMNS:
-        if c not in df.columns:
-            df[c] = None
-    return df[LEDGER_COLUMNS]
+    p=Path(path)
+    if not p.exists(): return pd.DataFrame(columns=LEDGER_COLUMNS)
+    try: return _normalize_columns(pd.read_csv(p))
+    except Exception: return pd.DataFrame(columns=LEDGER_COLUMNS)
+def load_best_ledger(path='data/picks_ledger.csv'):
+    """Return remote persistent ledger when configured and readable, else local."""
+    if persistent_backend_available():
+        try:
+            remote,_=_remote_read()
+            if not remote.empty: return remote
+        except Exception as exc: print(f'Ledger remote read failed: {exc}')
+    return load_ledger(path)
