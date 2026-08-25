@@ -20,7 +20,7 @@ class PredictorMLMLB:
         self.bat_scale, self.pit_scale = 100.0, 4.10
         self.current_history, self.current_h2h = {}, {}
         self.sigma_runs, self.sigma_diff = 3.5, 4.2
-        self.prob_calibrator = None
+        self.prob_shrink = 1.0
 
     @staticmethod
     def _new_classifier():
@@ -39,15 +39,8 @@ class PredictorMLMLB:
                 float(off_l)/max(self.bat_scale,1e-6),float(off_v)/max(self.bat_scale,1e-6),float(pit_l)/max(self.pit_scale,1e-6),float(pit_v)/max(self.pit_scale,1e-6),1.0]
 
     @staticmethod
-    def _safe_logit(prob):
-        p = float(np.clip(prob, 1e-5, 1.0 - 1e-5))
-        return math.log(p / (1.0 - p))
-
-    def _calibrate_probability(self, raw_prob):
-        if self.prob_calibrator is None:
-            return float(np.clip(raw_prob, 0.01, 0.99))
-        z = np.asarray([[self._safe_logit(raw_prob)]], dtype=float)
-        return float(np.clip(self.prob_calibrator.predict_proba(z)[0, 1], 0.01, 0.99))
+    def _shrink_probability(raw_prob, alpha):
+        return float(np.clip(0.5 + float(alpha) * (float(raw_prob) - 0.5), 0.01, 0.99))
 
     def entrenar(self, df_batting, df_pitching, df_games):
         try:
@@ -69,23 +62,20 @@ class PredictorMLMLB:
             X=np.asarray(X,float); yw=np.asarray(yw); yr=np.asarray(yr); yd=np.asarray(yd)
             cut=max(100,int(len(X)*.80))
 
-            # Chronological residual calibration for totals/run line.
             self.modelo_carreras.fit(X[:cut],yr[:cut]); self.modelo_handicap.fit(X[:cut],yd[:cut])
             self.sigma_runs=float(max(1.0,np.std(yr[cut:]-self.modelo_carreras.predict(X[cut:]))))
             self.sigma_diff=float(max(1.0,np.std(yd[cut:]-self.modelo_handicap.predict(X[cut:]))))
 
-            # Platt-style chronological calibration for moneyline. Fit the base
-            # classifier only on the early block, then fit a one-dimensional
-            # logistic calibrator on later raw log-odds. This can correct both
-            # slope (overconfidence) and intercept (base-rate bias), unlike a
-            # simple symmetric shrink around 50%.
             temp_classifier = self._new_classifier()
             temp_classifier.fit(X[:cut], yw[:cut])
             raw_cal = temp_classifier.predict_proba(X[cut:])[:,1]
-            logit_cal = np.asarray([[self._safe_logit(p)] for p in raw_cal], dtype=float)
-            calibrator = LogisticRegression(C=1e4, max_iter=1000, solver='lbfgs', random_state=42)
-            calibrator.fit(logit_cal, yw[cut:])
-            self.prob_calibrator = calibrator
+            best_alpha, best_brier = 1.0, float('inf')
+            for alpha in np.linspace(0.45, 1.00, 56):
+                cal = 0.5 + alpha * (raw_cal - 0.5)
+                score = float(np.mean((cal - yw[cut:]) ** 2))
+                if score < best_brier:
+                    best_brier, best_alpha = score, float(alpha)
+            self.prob_shrink = best_alpha
 
             self.modelo_ganador = self._new_classifier(); self.modelo_ganador.fit(X,yw)
             self.modelo_carreras.fit(X,yr); self.modelo_handicap.fit(X,yd)
@@ -107,8 +97,8 @@ class PredictorMLMLB:
             loc,vis=normalize_team(loc_abbr),normalize_team(vis_abbr)
             f=np.asarray([self._feature_row(self.current_history,self.current_h2h,loc,vis,float(wrc_loc),float(wrc_vis),float(xfip_loc),float(xfip_vis))],float)
             raw_local=float(self.modelo_ganador.predict_proba(f)[0,1])
-            p_local=self._calibrate_probability(raw_local); p_vis=1.0-p_local
+            p_local=self._shrink_probability(raw_local,self.prob_shrink); p_vis=1.0-p_local
             runs=float(self.modelo_carreras.predict(f)[0]); diff=float(self.modelo_handicap.predict(f)[0])
-            return {'Probabilidad_Local':round(p_local*100,2),'Probabilidad_Visita':round(p_vis*100,2),'Probabilidad_Local_Raw':round(raw_local*100,2),'Calibracion':'PLATT_CHRONOLOGICAL','Proyeccion_Carreras':round(runs,2),'Proyeccion_Handicap_Local':round(diff,2),'Sigma_Carreras':round(self.sigma_runs,3),'Sigma_Handicap':round(self.sigma_diff,3)}
+            return {'Probabilidad_Local':round(p_local*100,2),'Probabilidad_Visita':round(p_vis*100,2),'Probabilidad_Local_Raw':round(raw_local*100,2),'Prob_Shrink':round(self.prob_shrink,3),'Proyeccion_Carreras':round(runs,2),'Proyeccion_Handicap_Local':round(diff,2),'Sigma_Carreras':round(self.sigma_runs,3),'Sigma_Handicap':round(self.sigma_diff,3)}
         except Exception as e:
-            print(f'Error en predicción ML: {e}'); return {'Probabilidad_Local':50.,'Probabilidad_Visita':50.,'Probabilidad_Local_Raw':50.,'Calibracion':'FALLBACK','Proyeccion_Carreras':8.5,'Proyeccion_Handicap_Local':0.,'Sigma_Carreras':3.5,'Sigma_Handicap':4.2}
+            print(f'Error en predicción ML: {e}'); return {'Probabilidad_Local':50.,'Probabilidad_Visita':50.,'Probabilidad_Local_Raw':50.,'Prob_Shrink':1.0,'Proyeccion_Carreras':8.5,'Proyeccion_Handicap_Local':0.,'Sigma_Carreras':3.5,'Sigma_Handicap':4.2}
