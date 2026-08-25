@@ -8,7 +8,8 @@ import math
 
 from modules.montecarlo_mlb import simular_partido_mlb
 from modules.odds_mlb import analizar_apuestas_mlb
-from modules.ml_mlb import PredictorMLMLB
+from modules.ml_mlb import PredictorMLMLB, preferred_batting_column, preferred_pitching_column
+from modules.blend_calibration import market_blend_weights
 from modules.scanner_engine import (
     no_vig_two_way, moneyline_candidate, total_candidate, runline_candidate
 )
@@ -143,39 +144,30 @@ def _team_prior_stat(df, team, column, fallback):
 
 
 def _current_offensive_index(df, team, fallback=100.0):
-    """Return current team offense centered at league average = 100.
-
-    The repository legacy wRC+ column is OPS*100, not real wRC+. Monte Carlo
-    needs a centered multiplier, so normalize the latest-season OPS index by
-    that season's league median before passing it to the simulator.
-    """
+    """Current offense centered at league average, preferring real FanGraphs wRC+."""
     try:
         if df is None or df.empty or 'Team' not in df.columns:
             return float(fallback)
-        col = 'OPS_Index' if 'OPS_Index' in df.columns else ('wRC+' if 'wRC+' in df.columns else None)
+        col = preferred_batting_column(df)
         if col is None:
             return float(fallback)
         x=df.copy(); x['_v']=pd.to_numeric(x[col],errors='coerce')
         if 'Season' in x.columns:
-            x['_s']=pd.to_numeric(x['Season'],errors='coerce')
-            latest=x['_s'].dropna().max()
-            season=x[x['_s']==latest]
+            x['_s']=pd.to_numeric(x['Season'],errors='coerce'); latest=x['_s'].dropna().max(); season=x[x['_s']==latest]
         else:
             season=x
         team_rows=season[season['Team']==team]
-        if team_rows.empty:
-            team_rows=x[x['Team']==team]
-        if team_rows.empty:
-            return float(fallback)
-        team_val=float(team_rows['_v'].dropna().iloc[-1])
-        league_vals=season['_v'].dropna()
-        center=float(league_vals.median()) if len(league_vals) else float(x['_v'].dropna().median())
-        if not center or pd.isna(center):
-            return float(fallback)
+        if team_rows.empty: team_rows=x[x['Team']==team]
+        vals=team_rows['_v'].dropna()
+        if vals.empty: return float(fallback)
+        team_val=float(vals.iloc[-1])
+        if col == 'wRC+':
+            return float(np.clip(team_val, 70.0, 130.0))
+        league=season['_v'].dropna(); center=float(league.median()) if len(league) else float(x['_v'].dropna().median())
+        if not center or pd.isna(center): return float(fallback)
         return float(np.clip((team_val/center)*100.0,75.0,125.0))
     except Exception:
         return float(fallback)
-
 
 def _starter_run_prevention(df, pitcher_name):
     """Resolve a starter safely. The legacy xFIP column currently contains ERA.
@@ -195,7 +187,7 @@ def _starter_run_prevention(df, pitcher_name):
             if fallback['Name'].nunique()!=1:
                 return None
             match=fallback
-        col='ERA' if 'ERA' in match.columns else ('xFIP' if 'xFIP' in match.columns else None)
+        col=next((c for c in ('xFIP','FIP','ERA') if c in match.columns and pd.to_numeric(match[c],errors='coerce').notna().any()), None)
         if col is None:
             return None
         val=pd.to_numeric(match.iloc[-1][col],errors='coerce')
@@ -430,7 +422,7 @@ def obtener_cartelera_y_cuotas_automaticas():
     return partidos
 
 # --- INTERFAZ ---
-st.title("⚾ MLB Quant Analytics Pro (Montecarlo + Kelly)")
+st.title("⚾ MLB Quant Analytics Pro V6")
 st.markdown("Sistema autónomo de Sabermetría, Clima en Vivo, Simulación Cuántica de Duelos, Escáner Global y Criterio de Kelly.")
 
 if df_bat.empty or df_pit.empty:
@@ -454,6 +446,7 @@ else:
                 with st.spinner("Escaneando duelos y procesando simulaciones avanzadas..."):
                     recomendaciones = []
                     diagnostico_totales = []
+                    blend_weights = market_blend_weights()
                     errores_datos = []
                     
                     for llave, datos_partido in partidos_hoy.items():
@@ -531,8 +524,8 @@ else:
 
                             # ML histórico: misma definición de features que en entrenamiento
                             # (fortaleza agregada de temporada anterior + resultados rolling).
-                            bat_col_ml = 'OPS_Index' if 'OPS_Index' in df_bat.columns else 'wRC+'
-                            pit_col_ml = 'ERA' if 'ERA' in df_pit.columns else 'xFIP'
+                            bat_col_ml = preferred_batting_column(df_bat) or 'OPS_Index'
+                            pit_col_ml = preferred_pitching_column(df_pit) or 'ERA'
                             ml_off_loc = _team_prior_stat(df_bat, loc_abbr, bat_col_ml, wrc_loc)
                             ml_off_vis = _team_prior_stat(df_bat, vis_abbr, bat_col_ml, wrc_vis)
                             ml_pit_loc = _team_prior_stat(df_pit, loc_abbr, pit_col_ml, bullpen_loc_era)
@@ -577,17 +570,17 @@ else:
                             )
 
                             candidatos = [
-                                (moneyline_candidate(f"Gana Local ({datos_partido['local']})", prob_ml_loc, prob_mc_loc, cuota_loc, mkt_loc_scanner), None),
-                                (moneyline_candidate(f"Gana Visita ({datos_partido['visita']})", prob_ml_vis, prob_mc_vis, cuota_vis, mkt_vis_scanner), None),
+                                (moneyline_candidate(f"Gana Local ({datos_partido['local']})", prob_ml_loc, prob_mc_loc, cuota_loc, mkt_loc_scanner, blend_weight_ml=blend_weights['Moneyline']['ml_weight']), None),
+                                (moneyline_candidate(f"Gana Visita ({datos_partido['visita']})", prob_ml_vis, prob_mc_vis, cuota_vis, mkt_vis_scanner, blend_weight_ml=blend_weights['Moneyline']['ml_weight']), None),
                             ]
                             if datos_partido.get("cuota_over") is not None:
-                                candidatos.append((total_candidate(f"Over {linea_casino}", prob_ml_over, prob_mc_over, datos_partido.get("cuota_over"), mkt_over_scanner, carreras_dict.get(f"Push {linea_casino}", 0.0)), linea_casino))
+                                candidatos.append((total_candidate(f"Over {linea_casino}", prob_ml_over, prob_mc_over, datos_partido.get("cuota_over"), mkt_over_scanner, carreras_dict.get(f"Push {linea_casino}", 0.0), blend_weight_ml=blend_weights['Totales']['ml_weight']), linea_casino))
                             if datos_partido.get("cuota_under") is not None:
-                                candidatos.append((total_candidate(f"Under {linea_casino}", prob_ml_under, prob_mc_under, datos_partido.get("cuota_under"), mkt_under_scanner, carreras_dict.get(f"Push {linea_casino}", 0.0)), linea_casino))
+                                candidatos.append((total_candidate(f"Under {linea_casino}", prob_ml_under, prob_mc_under, datos_partido.get("cuota_under"), mkt_under_scanner, carreras_dict.get(f"Push {linea_casino}", 0.0), blend_weight_ml=blend_weights['Totales']['ml_weight']), linea_casino))
                             if spread_loc is not None and datos_partido.get("cuota_spread_loc") is not None:
-                                candidatos.append((runline_candidate(f"Hándicap {spread_loc:+.1f} ({datos_partido['local']})", prob_ml_spread_loc, prob_mc_spread_loc, datos_partido.get("cuota_spread_loc"), mkt_sp_loc_scanner, carreras_dict.get(f"Push Spread Local {spread_loc:+.1f}", 0.0)), spread_loc))
+                                candidatos.append((runline_candidate(f"Hándicap {spread_loc:+.1f} ({datos_partido['local']})", prob_ml_spread_loc, prob_mc_spread_loc, datos_partido.get("cuota_spread_loc"), mkt_sp_loc_scanner, carreras_dict.get(f"Push Spread Local {spread_loc:+.1f}", 0.0), blend_weight_ml=blend_weights['Hándicap']['ml_weight']), spread_loc))
                             if spread_vis is not None and datos_partido.get("cuota_spread_vis") is not None:
-                                candidatos.append((runline_candidate(f"Hándicap {spread_vis:+.1f} ({datos_partido['visita']})", prob_ml_spread_vis, prob_mc_spread_vis, datos_partido.get("cuota_spread_vis"), mkt_sp_vis_scanner, carreras_dict.get(f"Push Spread Visita {spread_vis:+.1f}", 0.0)), spread_vis))
+                                candidatos.append((runline_candidate(f"Hándicap {spread_vis:+.1f} ({datos_partido['visita']})", prob_ml_spread_vis, prob_mc_spread_vis, datos_partido.get("cuota_spread_vis"), mkt_sp_vis_scanner, carreras_dict.get(f"Push Spread Visita {spread_vis:+.1f}", 0.0), blend_weight_ml=blend_weights['Hándicap']['ml_weight']), spread_vis))
 
                             for cand, market_line in candidatos:
                                 if cand is None:
@@ -638,7 +631,7 @@ else:
                                 'disagreement_pp': rr['_Disagreement'], 'score': rr['_Score'],
                                 'starter_away': rr['_StarterAway'], 'starter_home': rr['_StarterHome'],
                                 'park_factor': rr['_Park'], 'temperature_f': rr['_Temp'], 'wind_mph': rr['_Wind'], 'wind_direction': rr['_WindDir'],
-                                'model_version': 'v5', 'result_status': 'pending'
+                                'model_version': 'v6', 'result_status': 'pending'
                             })
                         try:
                             append_snapshot(ledger_rows)
@@ -765,8 +758,8 @@ else:
                     
                     # V4.2: el modo individual usa exactamente el mismo motor de selección
                     # que el scanner global: ML + Monte Carlo + mercado no-vig + edge + EV.
-                    bat_col_ml = 'OPS_Index' if 'OPS_Index' in df_bat.columns else 'wRC+'
-                    pit_col_ml = 'ERA' if 'ERA' in df_pit.columns else 'xFIP'
+                    bat_col_ml = preferred_batting_column(df_bat) or 'OPS_Index'
+                    pit_col_ml = preferred_pitching_column(df_pit) or 'ERA'
                     ml_off_loc = _team_prior_stat(df_bat, loc_abbr, bat_col_ml, wrc_loc)
                     ml_off_vis = _team_prior_stat(df_bat, vis_abbr, bat_col_ml, wrc_vis)
                     ml_pit_loc = _team_prior_stat(df_pit, loc_abbr, pit_col_ml, bullpen_loc_era)
@@ -799,18 +792,19 @@ else:
                     mkt_over, mkt_under = no_vig_two_way(cuotas_reales.get('Cuota_Over'), cuotas_reales.get('Cuota_Under'))
                     mkt_sp_loc, mkt_sp_vis = no_vig_two_way(cuotas_reales.get('Cuota_Spread_Local'), cuotas_reales.get('Cuota_Spread_Visita'))
 
+                    blend_weights = market_blend_weights()
                     candidatos_ind = [
-                        moneyline_candidate(f"Gana Local ({datos_partido['local']})", prob_ml_loc, prob_mc_loc, cuotas_reales['Moneyline_Local'], mkt_loc),
-                        moneyline_candidate(f"Gana Visita ({datos_partido['visita']})", prob_ml_vis, prob_mc_vis, cuotas_reales['Moneyline_Visita'], mkt_vis),
+                        moneyline_candidate(f"Gana Local ({datos_partido['local']})", prob_ml_loc, prob_mc_loc, cuotas_reales['Moneyline_Local'], mkt_loc, blend_weight_ml=blend_weights['Moneyline']['ml_weight']),
+                        moneyline_candidate(f"Gana Visita ({datos_partido['visita']})", prob_ml_vis, prob_mc_vis, cuotas_reales['Moneyline_Visita'], mkt_vis, blend_weight_ml=blend_weights['Moneyline']['ml_weight']),
                     ]
                     if cuotas_reales.get('Cuota_Over') is not None:
-                        candidatos_ind.append(total_candidate(f"Over {linea_casino}", prob_ml_over, prob_mc_over, cuotas_reales['Cuota_Over'], mkt_over, carreras_dict.get(f"Push {linea_casino}", 0.0)))
+                        candidatos_ind.append(total_candidate(f"Over {linea_casino}", prob_ml_over, prob_mc_over, cuotas_reales['Cuota_Over'], mkt_over, carreras_dict.get(f"Push {linea_casino}", 0.0), blend_weight_ml=blend_weights['Totales']['ml_weight']))
                     if cuotas_reales.get('Cuota_Under') is not None:
-                        candidatos_ind.append(total_candidate(f"Under {linea_casino}", prob_ml_under, prob_mc_under, cuotas_reales['Cuota_Under'], mkt_under, carreras_dict.get(f"Push {linea_casino}", 0.0)))
+                        candidatos_ind.append(total_candidate(f"Under {linea_casino}", prob_ml_under, prob_mc_under, cuotas_reales['Cuota_Under'], mkt_under, carreras_dict.get(f"Push {linea_casino}", 0.0), blend_weight_ml=blend_weights['Totales']['ml_weight']))
                     if spread_loc is not None and cuotas_reales.get('Cuota_Spread_Local') is not None:
-                        candidatos_ind.append(runline_candidate(f"Hándicap {spread_loc:+.1f} ({datos_partido['local']})", prob_ml_spread_loc, prob_mc_spread_loc, cuotas_reales['Cuota_Spread_Local'], mkt_sp_loc, carreras_dict.get(f"Push Spread Local {spread_loc:+.1f}", 0.0)))
+                        candidatos_ind.append(runline_candidate(f"Hándicap {spread_loc:+.1f} ({datos_partido['local']})", prob_ml_spread_loc, prob_mc_spread_loc, cuotas_reales['Cuota_Spread_Local'], mkt_sp_loc, carreras_dict.get(f"Push Spread Local {spread_loc:+.1f}", 0.0), blend_weight_ml=blend_weights['Hándicap']['ml_weight']))
                     if spread_vis is not None and cuotas_reales.get('Cuota_Spread_Visita') is not None:
-                        candidatos_ind.append(runline_candidate(f"Hándicap {spread_vis:+.1f} ({datos_partido['visita']})", prob_ml_spread_vis, prob_mc_spread_vis, cuotas_reales['Cuota_Spread_Visita'], mkt_sp_vis, carreras_dict.get(f"Push Spread Visita {spread_vis:+.1f}", 0.0)))
+                        candidatos_ind.append(runline_candidate(f"Hándicap {spread_vis:+.1f} ({datos_partido['visita']})", prob_ml_spread_vis, prob_mc_spread_vis, cuotas_reales['Cuota_Spread_Visita'], mkt_sp_vis, carreras_dict.get(f"Push Spread Visita {spread_vis:+.1f}", 0.0), blend_weight_ml=blend_weights['Hándicap']['ml_weight']))
 
                     veredicto_apuestas = []
                     for cand in candidatos_ind:
@@ -822,6 +816,7 @@ else:
                             'Prob. ML': f"{round(cand.prob_ml, 1)}%",
                             'Prob. MC': f"{round(cand.prob_mc, 1)}%",
                             'Prob. Combinada': f"{round(cand.probability, 1)}%",
+                            'Peso ML': f"{round(cand.blend_weight_ml*100, 0)}%",
                             'Push': f"{round(cand.push_probability, 1)}%" if cand.push_probability else "0.0%",
                             'Cuota': cand.odds,
                             'Edge': 'N/D' if cand.edge_pp is None else f"{round(cand.edge_pp, 2)} pp",
