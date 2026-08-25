@@ -98,9 +98,14 @@ def total_candidate(selection, prob_ml, prob_mc, odds, market_no_vig=None):
 
 
 def runline_candidate(selection, prob_ml, prob_mc, odds, market_no_vig=None):
+    # V4.1: the chronological holdout showed home +1.5 hit 63.30% versus a
+    # 63.45% unconditional base rate. That means the old 54/56% gates were too
+    # permissive for a naturally high-base-rate market and let +1.5 dominate
+    # the scanner without enough incremental predictive value. Run lines now
+    # require stronger independent agreement and materially larger market edge.
     return _candidate('Hándicap', selection, prob_ml, prob_mc, odds, market_no_vig,
-                      min_ml=54.0, min_mc=56.0, min_combined=56.0,
-                      max_disagreement=12.0, min_edge_pp=4.0, min_ev_pct=4.0)
+                      min_ml=58.0, min_mc=58.0, min_combined=60.0,
+                      max_disagreement=10.0, min_edge_pp=6.0, min_ev_pct=6.0)
 
 
 def top_candidates(candidates, limit=3):

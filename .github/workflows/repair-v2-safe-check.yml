@@ -1,4 +1,4 @@
-name: MLB repair-v4 checks
+name: MLB repair-v4.1 checks
 
 on:
   pull_request:
@@ -29,8 +29,6 @@ jobs:
           assert 1.0 <= r['Sigma_Carreras'] <= 10.0
           assert 1.0 <= r['Sigma_Handicap'] <= 10.0
           before=len(m.current_history.get('NYY',[])); m.actualizar_resultado('NYY','BOS',5,3); after=len(m.current_history.get('NYY',[])); assert after==before+1
-          # A normal Streamlit rerun creates a new Predictor object and calls entrenar again.
-          # It must now reuse fitted estimators instead of retraining sklearn models.
           m2=PredictorMLMLB(); assert m2.entrenar(bat,pit,games); assert m2.loaded_from_cache is True
           r2=m2.predecir_partido('NYY','BOS',72,71,4.1,4.2)
           assert r2['Modelo_Desde_Cache'] is True
@@ -75,9 +73,10 @@ jobs:
           weak_over=total_candidate('Over 8.5',53,58,1.95,a); assert not weak_over.accepted
           t=total_candidate('Over 8.5',56,58,1.95,a); assert t.accepted and t.edge_pp is not None
           u=total_candidate('Under 8.5',52.5,57,1.95,a); assert u.accepted
-          r=runline_candidate('Away +1.5',54,56,1.70,.62); assert not r.accepted
-          assert top_candidates([t,r],3)[0].selection=='Over 8.5'
-          print(t.to_dict(),u.to_dict(),r.to_dict())
+          weak_rl=runline_candidate('Away +1.5',54,56,1.70,.62); assert not weak_rl.accepted
+          strong_rl=runline_candidate('Away +1.5',62,64,1.90,.55); assert strong_rl.accepted
+          assert top_candidates([t,weak_rl],3)[0].selection=='Over 8.5'
+          print(t.to_dict(),u.to_dict(),weak_rl.to_dict(),strong_rl.to_dict())
           PY
       - name: No-vig odds smoke
         run: |
