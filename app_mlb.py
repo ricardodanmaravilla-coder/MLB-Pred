@@ -394,7 +394,8 @@ def obtener_cartelera_y_cuotas_automaticas():
                     away_pitcher = game.get('teams', {}).get('away', {}).get('probablePitcher', {}).get('fullName', 'Por Anunciar')
                     
                     if home and away:
-                        llave = f"⚾ {away} ({away_pitcher}) @ {home} ({home_pitcher})"
+                        game_pk = game.get("gamePk")
+                        llave = f"⚾ {away} ({away_pitcher}) @ {home} ({home_pitcher}) · #{game_pk}"
                         partidos[llave] = {
                             "local": home, "visita": away,
                             "pitcher_local": home_pitcher, "pitcher_visita": away_pitcher,
@@ -442,7 +443,7 @@ else:
         if not ODDS_API_KEY:
             st.warning("⚠️ ODDS_API_KEY no configurada en Secrets/entorno. La cartelera se muestra, pero no se emitirán apuestas sin cuotas reales.")
         if not persistent_backend_available():
-            st.caption("ℹ️ Ledger en modo local: configura GITHUB_TOKEN de escritura para persistencia entre reinicios.")
+            st.caption("ℹ️ Ledger en modo local: configura GITHUB_TOKEN y LEDGER_GITHUB_REPO para persistencia entre reinicios.")
         modo_app = st.sidebar.radio("Modo de Operación", ["🎯 Análisis Individual por Partido", "🔍 Escáner Automático de la Jornada (EV+)"])
         
         if modo_app == "🔍 Escáner Automático de la Jornada (EV+)":
@@ -458,13 +459,16 @@ else:
                     for llave, datos_partido in partidos_hoy.items():
                         loc_abbr = EQUIPOS_MAP.get(datos_partido["local"], "")
                         vis_abbr = EQUIPOS_MAP.get(datos_partido["visita"], "")
-                        if not loc_abbr or not vis_abbr: continue
+                        if not loc_abbr or not vis_abbr:
+                            errores_datos.append({"Partido": f"{datos_partido.get('visita','?')} @ {datos_partido.get('local','?')}", "Error": "Equipo no normalizable"})
+                            continue
                         
                         cuota_loc = datos_partido.get("cuota_loc")
                         cuota_vis = datos_partido.get("cuota_vis")
                         linea_casino = datos_partido.get("linea_carreras")
                         
                         if cuota_loc is None or cuota_vis is None or linea_casino is None:
+                            errores_datos.append({"Partido": f"{datos_partido['visita']} @ {datos_partido['local']}", "Error": "Cuotas/total no disponibles o no emparejados de forma segura"})
                             continue
                         
                         try:
@@ -476,7 +480,9 @@ else:
                             
                             if xfip_loc is None:
                                 team_pit_loc = df_pit[df_pit['Team'] == loc_abbr]
-                                if team_pit_loc.empty: continue
+                                if team_pit_loc.empty:
+                                    errores_datos.append({"Partido": f"{datos_partido['visita']} @ {datos_partido['local']}", "Error": "Sin pitching local para fallback"})
+                                    continue
                                 xfip_loc = float(team_pit_loc.iloc[-1]['xFIP'])
 
                             pitcher_vis_nombre = datos_partido["pitcher_visita"]
@@ -484,7 +490,9 @@ else:
                             
                             if xfip_vis is None:
                                 team_pit_vis = df_pit[df_pit['Team'] == vis_abbr]
-                                if team_pit_vis.empty: continue
+                                if team_pit_vis.empty:
+                                    errores_datos.append({"Partido": f"{datos_partido['visita']} @ {datos_partido['local']}", "Error": "Sin pitching visitante para fallback"})
+                                    continue
                                 xfip_vis = float(team_pit_vis.iloc[-1]['xFIP'])
 
                             team_bullpen_loc = df_pit[df_pit['Team'] == loc_abbr]
@@ -605,11 +613,13 @@ else:
                                     "Stake Kelly": f"{calcular_criterio_kelly(cand.probability, cand.odds, prob_push=cand.push_probability)}%",
                                     "_Score": cand.score,
                                     "_Home": datos_partido['local'], "_Away": datos_partido['visita'],
+                                    "_GamePk": datos_partido.get('game_pk'),
                                     "_Line": market_line, "_ProbCombined": cand.probability,
                                     "_MarketNoVig": cand.market_no_vig, "_Edge": cand.edge_pp,
                                     "_Disagreement": cand.disagreement_pp,
                                     "_StarterHome": datos_partido.get('pitcher_local'), "_StarterAway": datos_partido.get('pitcher_visita'),
                                     "_Park": park_factor, "_Temp": temp_scan, "_Wind": viento_scan, "_WindDir": dir_scan,
+                                    "_WeatherSource": weather_source,
                                 })
 
                         except Exception as e:
@@ -621,7 +631,7 @@ else:
                         ledger_rows = []
                         for _, rr in df_all.iterrows():
                             ledger_rows.append({
-                                'game_date': slate_date().isoformat(), 'away': rr['_Away'], 'home': rr['_Home'],
+                                'game_date': slate_date().isoformat(), 'game_pk': rr['_GamePk'], 'away': rr['_Away'], 'home': rr['_Home'],
                                 'market': rr['Mercado'], 'selection': rr['Apuesta'], 'line': rr['_Line'], 'odds': rr['Cuota'],
                                 'prob_ml': rr['Prob. ML'], 'prob_mc': rr['Prob. MC'], 'prob_combined': rr['_ProbCombined'],
                                 'market_no_vig': rr['_MarketNoVig'], 'edge_pp': rr['_Edge'], 'ev_pct': str(rr['EV+']).replace('%',''),
