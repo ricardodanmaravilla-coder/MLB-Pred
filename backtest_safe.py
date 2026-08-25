@@ -1,21 +1,38 @@
 import json
 
+import numpy as np
 import pandas as pd
 from sklearn.metrics import accuracy_score, brier_score_loss, log_loss, mean_absolute_error
 
+from modules.historical_mlb import prepare_games
 from modules.ml_mlb import PredictorMLMLB
 from modules.team_utils import normalize_team
+
+
+def calibration_bins(y, probs):
+    y = np.asarray(y, dtype=int)
+    p = np.asarray(probs, dtype=float)
+    bins = []
+    for lo, hi in [(0.35,0.45),(0.45,0.50),(0.50,0.55),(0.55,0.60),(0.60,0.65),(0.65,0.75)]:
+        mask = (p >= lo) & (p < hi)
+        n = int(mask.sum())
+        if not n:
+            continue
+        bins.append({
+            'range': f'{lo:.2f}-{hi:.2f}',
+            'n': n,
+            'avg_pred': round(float(p[mask].mean()), 4),
+            'actual_home_win': round(float(y[mask].mean()), 4),
+            'calibration_error_pp': round(float((p[mask].mean()-y[mask].mean())*100), 2),
+        })
+    return bins
 
 
 def main():
     bat = pd.read_csv('data/mlb_batting.csv')
     pit = pd.read_csv('data/mlb_pitching.csv')
-    games = pd.read_csv('data/mlb_games.csv')
-    games['Date'] = pd.to_datetime(games['Date'], errors='coerce')
-    games['Season'] = pd.to_numeric(games['Season'], errors='coerce')
-    games = games.dropna(subset=['Date','Season','Home_Score','Away_Score']).sort_values('Date').reset_index(drop=True)
+    games = prepare_games(pd.read_csv('data/mlb_games.csv'))
 
-    # Holdout cronológico: último 15% de los juegos.
     cut = int(len(games) * 0.85)
     train = games.iloc[:cut].copy()
     test = games.iloc[cut:].copy()
@@ -24,29 +41,35 @@ def main():
     if not model.entrenar(bat, pit, train):
         raise RuntimeError('No se pudo entrenar el modelo')
 
-    bat2 = bat.copy(); pit2 = pit.copy()
-    bat2['TeamKey'] = bat2['Team'].map(normalize_team); pit2['TeamKey'] = pit2['Team'].map(normalize_team)
-    bat2['Season'] = pd.to_numeric(bat2['Season'], errors='coerce'); pit2['Season'] = pd.to_numeric(pit2['Season'], errors='coerce')
-    bat2['wRC+'] = pd.to_numeric(bat2['wRC+'], errors='coerce'); pit2['xFIP'] = pd.to_numeric(pit2['xFIP'], errors='coerce')
-    bd = bat2.dropna(subset=['TeamKey','Season','wRC+']).set_index(['TeamKey','Season'])['wRC+'].to_dict()
-    pdict = pit2.dropna(subset=['TeamKey','Season','xFIP']).set_index(['TeamKey','Season'])['xFIP'].to_dict()
-    bmed = float(bat2['wRC+'].median()); pmed = float(pit2['xFIP'].median())
+    bc = 'OPS_Index' if 'OPS_Index' in bat.columns else 'wRC+'
+    pc = 'ERA' if 'ERA' in pit.columns else 'xFIP'
+    b = bat.copy(); p = pit.copy()
+    b['K'] = b['Team'].map(normalize_team); p['K'] = p['Team'].map(normalize_team)
+    b['Season'] = pd.to_numeric(b['Season'], errors='coerce'); p['Season'] = pd.to_numeric(p['Season'], errors='coerce')
+    b[bc] = pd.to_numeric(b[bc], errors='coerce'); p[pc] = pd.to_numeric(p[pc], errors='coerce')
+    bd = b.dropna(subset=['K','Season',bc]).set_index(['K','Season'])[bc].to_dict()
+    pdict = p.dropna(subset=['K','Season',pc]).set_index(['K','Season'])[pc].to_dict()
+    bmed = float(b[bc].median()); pmed = float(p[pc].median())
 
     y, probs, runs_true, runs_pred = [], [], [], []
     for _, r in test.iterrows():
         h, a, season = normalize_team(r['Home']), normalize_team(r['Away']), int(r['Season'])
         sy = season - 1
-        wh = float(bd.get((h, sy), bmed)); wa = float(bd.get((a, sy), bmed))
-        ph = float(pdict.get((h, sy), pmed)); pa = float(pdict.get((a, sy), pmed))
-        pred = model.predecir_partido(h, a, wh, wa, ph, pa)
+        pred = model.predecir_partido(
+            h, a,
+            float(bd.get((h, sy), bmed)), float(bd.get((a, sy), bmed)),
+            float(pdict.get((h, sy), pmed)), float(pdict.get((a, sy), pmed)),
+        )
         probs.append(pred['Probabilidad_Local'] / 100.0)
         y.append(int(float(r['Home_Score']) > float(r['Away_Score'])))
         runs_true.append(float(r['Home_Score']) + float(r['Away_Score']))
         runs_pred.append(float(pred['Proyeccion_Carreras']))
 
-    picks = [int(p >= 0.5) for p in probs]
-    base_p = sum(y) / len(y)
-    baseline_probs = [base_p] * len(y)
+    probs = np.asarray(probs, dtype=float); y = np.asarray(y, dtype=int)
+    picks = (probs >= 0.5).astype(int)
+    base_p = float(y.mean())
+    baseline_probs = np.full(len(y), base_p)
+
     result = {
         'n_train': len(train),
         'n_test': len(test),
@@ -57,6 +80,10 @@ def main():
         'logloss': round(log_loss(y, probs, labels=[0,1]), 4),
         'baseline_logloss': round(log_loss(y, baseline_probs, labels=[0,1]), 4),
         'runs_mae': round(mean_absolute_error(runs_true, runs_pred), 3),
+        'calibration_bins': calibration_bins(y, probs),
+        'historical_odds_available': False,
+        'roi_claim_allowed': False,
+        'note': 'Este backtest valida predicción con resultados reales; el CSV no contiene cuotas históricas y no permite afirmar ROI histórico real.'
     }
     print(json.dumps(result, indent=2))
 
