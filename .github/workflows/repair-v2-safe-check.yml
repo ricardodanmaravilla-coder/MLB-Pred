@@ -14,13 +14,15 @@ jobs:
           python-version: '3.11'
       - run: pip install -r requirements.txt
       - name: Compile
-        run: python -m py_compile app_mlb.py minero_mlb.py minero_pitchers.py settle_picks.py backtest_safe.py backtest_markets.py test_streamlit_interaction.py test_v5_integrity.py test_v6_predictive.py test_google_sheets_tracking.py modules/*.py
+        run: python -m py_compile app_mlb.py minero_mlb.py minero_pitchers.py settle_picks.py backtest_safe.py backtest_markets.py test_streamlit_interaction.py test_v5_integrity.py test_v6_predictive.py test_google_sheets_tracking.py test_settlement_tracking.py modules/*.py
       - name: V5 integrity regression suite
         run: python test_v5_integrity.py
       - name: V6 predictive regression suite
         run: python test_v6_predictive.py
       - name: Google Sheets tracking regression suite
         run: python test_google_sheets_tracking.py
+      - name: Automatic settlement + Kelly MXN regression suite
+        run: python test_settlement_tracking.py
       - name: ML sequential, calibration, family-selection and rerun-cache smoke
         run: |
           python - <<'PY'
@@ -92,8 +94,9 @@ jobs:
           import tempfile, os
           from modules.pick_ledger import append_snapshot,load_ledger
           p=tempfile.mktemp(suffix='.csv')
-          n=append_snapshot([{'game_date':'2026-08-25','game_pk':123,'away':'BOS','home':'NYY','market':'Moneyline','selection':'NYY','odds':1.9}],p)
+          n=append_snapshot([{'game_date':'2026-08-25','game_pk':123,'away':'BOS','home':'NYY','market':'Moneyline','selection':'NYY','odds':1.9,'prob_combined':60,'ev_pct':14}],p)
           d=load_ledger(p); assert n==1 and len(d)==1 and int(d.iloc[0].game_pk)==123
+          assert float(d.iloc[0].bankroll_mxn)==5000.0 and float(d.iloc[0].kelly_pct)>0 and float(d.iloc[0].stake_mxn)>0
           os.remove(p)
           PY
       - name: Chronological holdout backtest

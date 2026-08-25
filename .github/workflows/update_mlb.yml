@@ -40,8 +40,17 @@ jobs:
           test -s data/mlb_pitching_individual.csv
           test -s data/mlb_bullpen.csv
 
-      - name: Liquidar picks pendientes
-        run: python settle_picks.py
+      - name: Liquidar picks pendientes y sincronizar Google Sheets
+        env:
+          GOOGLE_SHEETS_ID: ${{ secrets.GOOGLE_SHEETS_ID }}
+          GOOGLE_SHEETS_WORKSHEET: ${{ secrets.GOOGLE_SHEETS_WORKSHEET }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          BANKROLL_MXN: '5000'
+        run: |
+          if [ -z "$GOOGLE_SHEETS_ID" ] || [ -z "$GOOGLE_SERVICE_ACCOUNT_JSON" ]; then
+            echo "::warning::Google Sheets Actions secrets no configurados; el ledger se liquidará pero Sheets no podrá actualizarse automáticamente."
+          fi
+          python settle_picks.py
 
       - name: Validar CSV críticos
         run: |
