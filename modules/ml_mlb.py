@@ -1,3 +1,4 @@
+import hashlib
 import math
 import threading
 from collections import OrderedDict
@@ -24,16 +25,15 @@ _MODEL_CACHE_MAX = 2
 
 
 def _frame_signature(df, important_columns):
-    """Cheap, stable-enough signature for immutable CSV-backed training frames."""
-    if df is None:
-        return (0, 0, ())
-    cols = tuple(str(c) for c in df.columns)
-    sample = []
-    for col in important_columns:
-        if col in df.columns and len(df):
-            s = df[col]
-            sample.extend([str(s.iloc[0]), str(s.iloc[-1])])
-    return (int(len(df)), int(len(df.columns)), cols, tuple(sample))
+    """Content-sensitive signature so changed middle rows cannot reuse stale estimators."""
+    if df is None or df.empty:
+        return (0, 0, "")
+    cols = [c for c in important_columns if c in df.columns]
+    if not cols:
+        cols = list(df.columns)
+    hashed = pd.util.hash_pandas_object(df[cols], index=True).values.tobytes()
+    digest = hashlib.sha256(hashed).hexdigest()
+    return (int(len(df)), int(len(df.columns)), digest)
 
 
 def _cache_key(df_batting, df_pitching, df_games):

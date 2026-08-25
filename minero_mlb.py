@@ -43,7 +43,6 @@ def extraer_estadisticas_oficiales_mlb():
                         ops = _safe_float(stat.get("ops"))
                         stat["OPS"] = ops
                         stat["OPS_Index"] = None if ops is None else ops * 100.0
-                        # Compatibilidad temporal con app_mlb.py estable. NO es wRC+ real.
                         stat["wRC+"] = stat["OPS_Index"]
                         stat["wRC+_Source"] = "LEGACY_OPS_X100_NOT_REAL_WRCPLUS"
                         bateo_data.append(stat)
@@ -57,7 +56,6 @@ def extraer_estadisticas_oficiales_mlb():
                         stat["Season"] = year
                         era = _safe_float(stat.get("era"))
                         stat["ERA"] = era
-                        # Compatibilidad temporal con app_mlb.py estable. NO es xFIP real.
                         stat["xFIP"] = era
                         stat["xFIP_Source"] = "LEGACY_ERA_PROXY_NOT_REAL_XFIP"
                         pitcheo_data.append(stat)
@@ -117,14 +115,18 @@ def extraer_historico_juegos():
                     status = game.get("status", "Unknown")
                     if status in estados_ignorados or "away_score" not in game or "home_score" not in game:
                         continue
+                    game_date = game.get("game_date")
                     nuevos_juegos.append({
                         "GameID": game.get("game_id"),
-                        "Date": game.get("game_date"),
-                        "Season": str(game.get("game_date"))[:4],
+                        "Date": game_date,
+                        "Season": str(game_date)[:4],
+                        "GameType": game.get("game_type") or game.get("gameType"),
                         "Away": game.get("away_name"),
                         "Home": game.get("home_name"),
                         "Away_Score": game.get("away_score", 0),
                         "Home_Score": game.get("home_score", 0),
+                        "Away_Starter": game.get("away_probable_pitcher") or game.get("away_pitcher"),
+                        "Home_Starter": game.get("home_probable_pitcher") or game.get("home_pitcher"),
                         "Innings": game.get("current_inning", 9),
                         "Venue": game.get("venue_name", "Unknown"),
                     })

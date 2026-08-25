@@ -5,7 +5,12 @@ from .team_utils import normalize_team
 
 
 def prepare_games(df_games):
-    """Normalize historical results and exclude non-competitive spring games when possible."""
+    """Normalize completed historical results without leaking exhibition games.
+
+    Legacy rows have no GameType. When newer rows begin carrying GameType, preserve
+    those legacy rows using the old month heuristic instead of dropping the entire
+    historical corpus merely because the column now exists.
+    """
     if df_games is None or df_games.empty:
         return pd.DataFrame()
     g = df_games.copy()
@@ -18,11 +23,14 @@ def prepare_games(df_games):
         g['Season'] = g['Date'].dt.year
     g['Season'] = pd.to_numeric(g['Season'], errors='coerce')
     g = g.dropna(subset=['Date','Home','Away','Home_Score','Away_Score','Season'])
-    if 'GameType' in g.columns and g['GameType'].notna().any():
-        g = g[g['GameType'].astype(str).isin(['R','P'])]
+
+    if 'GameType' in g.columns:
+        gt = g['GameType']
+        known = gt.notna() & gt.astype(str).str.strip().ne('')
+        competitive_known = known & gt.astype(str).isin(['R','P'])
+        legacy_unknown = (~known) & (g['Date'].dt.month >= 4)
+        g = g[competitive_known | legacy_unknown]
     else:
-        # Legacy CSV has no game type. February/March rows are overwhelmingly spring training;
-        # exclude them from model training rather than treating exhibitions as MLB regular games.
         g = g[g['Date'].dt.month >= 4]
     return g.sort_values('Date').reset_index(drop=True)
 
@@ -44,7 +52,6 @@ def h2h_state(history_h2h, loc, vis, n=12):
     wins = float(np.mean([r[0] for r in rows]))
     rd = float(np.mean([r[1] for r in rows]))
     count = len(rows)
-    # Empirical Bayes shrinkage: small H2H samples stay close to neutral.
     weight = count / (count + 10.0)
     return 0.5 + (wins-0.5)*weight, rd*weight, count
 
