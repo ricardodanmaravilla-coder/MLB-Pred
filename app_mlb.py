@@ -625,8 +625,10 @@ else:
                                     "_GamePk": datos_partido.get('game_pk'),
                                     "_Line": market_line, "_ProbCombined": cand.probability,
                                     "_MarketNoVig": cand.market_no_vig, "_Edge": cand.edge_pp,
-                                    "_Disagreement": cand.disagreement_pp,
+                                    "_Disagreement": cand.disagreement_pp, "_BlendWeightML": cand.blend_weight_ml,
+                                    "_BatMetric": res_ml.get('Metrica_Bateo'), "_PitMetric": res_ml.get('Metrica_Pitcheo'),
                                     "_StarterHome": datos_partido.get('pitcher_local'), "_StarterAway": datos_partido.get('pitcher_visita'),
+                                    "_StarterIPHome": starter_ip_loc, "_StarterIPAway": starter_ip_vis,
                                     "_Park": park_factor, "_Temp": temp_scan, "_Wind": viento_scan, "_WindDir": dir_scan,
                                     "_WeatherSource": weather_source,
                                 })
@@ -643,11 +645,13 @@ else:
                                 'game_date': slate_date().isoformat(), 'game_pk': rr['_GamePk'], 'away': rr['_Away'], 'home': rr['_Home'],
                                 'market': rr['Mercado'], 'selection': rr['Apuesta'], 'line': rr['_Line'], 'odds': rr['Cuota'],
                                 'prob_ml': rr['Prob. ML'], 'prob_mc': rr['Prob. MC'], 'prob_combined': rr['_ProbCombined'],
-                                'market_no_vig': rr['_MarketNoVig'], 'edge_pp': rr['_Edge'], 'ev_pct': str(rr['EV+']).replace('%',''),
+                                'blend_weight_ml': rr['_BlendWeightML'], 'market_no_vig': rr['_MarketNoVig'], 'edge_pp': rr['_Edge'], 'ev_pct': str(rr['EV+']).replace('%',''),
                                 'disagreement_pp': rr['_Disagreement'], 'score': rr['_Score'],
+                                'batting_metric': rr['_BatMetric'], 'pitching_metric': rr['_PitMetric'],
                                 'starter_away': rr['_StarterAway'], 'starter_home': rr['_StarterHome'],
+                                'starter_ip_away': rr['_StarterIPAway'], 'starter_ip_home': rr['_StarterIPHome'],
                                 'park_factor': rr['_Park'], 'temperature_f': rr['_Temp'], 'wind_mph': rr['_Wind'], 'wind_direction': rr['_WindDir'],
-                                'model_version': 'v6', 'result_status': 'pending'
+                                'weather_source': rr['_WeatherSource'], 'model_version': 'v6', 'result_status': 'pending'
                             })
                         try:
                             append_snapshot(ledger_rows)
