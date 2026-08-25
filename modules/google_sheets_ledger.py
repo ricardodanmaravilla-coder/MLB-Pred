@@ -24,6 +24,19 @@ def _clean(value: Any):
     return str(value).replace("\n", " ").strip()
 
 
+def _runtime_secret(name: str, default: Any = ""):
+    """Read config from env first, then Streamlit Secrets, without making Streamlit mandatory."""
+    env_value = os.getenv(name)
+    if env_value is not None and str(env_value).strip():
+        return env_value
+    try:
+        import streamlit as st
+        value = st.secrets.get(name, default)
+        return value
+    except Exception:
+        return default
+
+
 def record_key(row: Mapping[str, Any]) -> str:
     return "|".join([
         _clean(row.get("game_date")),
@@ -36,7 +49,9 @@ def record_key(row: Mapping[str, Any]) -> str:
 
 def _credentials_payload(config: Mapping[str, Any] | None = None):
     config = dict(config or {})
-    raw = config.get("service_account_json") or os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "")
+    raw = config.get("service_account_json")
+    if raw in (None, ""):
+        raw = _runtime_secret("GOOGLE_SERVICE_ACCOUNT_JSON", "")
     if isinstance(raw, Mapping):
         return dict(raw)
     raw = str(raw or "").strip()
@@ -45,10 +60,18 @@ def _credentials_payload(config: Mapping[str, Any] | None = None):
     return json.loads(raw)
 
 
-def configured(config: Mapping[str, Any] | None = None) -> bool:
+def _sheet_id(config: Mapping[str, Any] | None = None) -> str:
     config = dict(config or {})
-    sheet_id = str(config.get("sheet_id") or os.getenv("GOOGLE_SHEETS_ID", "")).strip()
-    if not sheet_id:
+    return str(config.get("sheet_id") or _runtime_secret("GOOGLE_SHEETS_ID", "")).strip()
+
+
+def _worksheet_name(config: Mapping[str, Any] | None = None) -> str:
+    config = dict(config or {})
+    return str(config.get("worksheet") or _runtime_secret("GOOGLE_SHEETS_WORKSHEET", "MLB_Picks")).strip() or "MLB_Picks"
+
+
+def configured(config: Mapping[str, Any] | None = None) -> bool:
+    if not _sheet_id(config):
         return False
     try:
         return bool(_credentials_payload(config))
@@ -62,9 +85,8 @@ def sync_rows(rows: Iterable[Mapping[str, Any]], config: Mapping[str, Any] | Non
     if not rows:
         return {"ok": True, "configured": configured(config), "inserted": 0, "updated": 0, "message": "no rows"}
 
-    config = dict(config or {})
-    sheet_id = str(config.get("sheet_id") or os.getenv("GOOGLE_SHEETS_ID", "")).strip()
-    worksheet_name = str(config.get("worksheet") or os.getenv("GOOGLE_SHEETS_WORKSHEET", "MLB_Picks")).strip() or "MLB_Picks"
+    sheet_id = _sheet_id(config)
+    worksheet_name = _worksheet_name(config)
     try:
         creds_payload = _credentials_payload(config)
         if not sheet_id or not creds_payload:
