@@ -1,3 +1,5 @@
+import hashlib
+
 import numpy as np
 import pandas as pd
 
@@ -32,11 +34,6 @@ def _games(df):
 
 
 def obtener_h2h_detalle(df_games, loc_abbr, vis_abbr, n=12):
-    """Historical H2H diagnostic only.
-
-    V3 deliberately does not blend this back into Monte Carlo because H2H is
-    already represented by the historical ML model. This prevents double count.
-    """
     g = _games(df_games)
     if g.empty:
         return 50.0, 0
@@ -64,7 +61,6 @@ def obtener_h2h(df_games, loc_abbr, vis_abbr):
 
 
 def obtener_carreras_recientes(df_games, equipo_abbr, n=10):
-    """Kept for UI diagnostics/backward compatibility; not blended into MC V3."""
     g = _games(df_games)
     if g.empty:
         return None
@@ -76,28 +72,24 @@ def obtener_carreras_recientes(df_games, equipo_abbr, n=10):
 
 def _spread_probability(diff, side, line):
     line = float(line)
-    if side == 'local':
-        return float(np.mean((diff + line) > 0) * 100.0)
-    return float(np.mean((-diff + line) > 0) * 100.0)
+    margin = diff + line if side == 'local' else -diff + line
+    return float(np.mean(margin > 0) * 100.0)
+
+
+def _spread_push_probability(diff, side, line):
+    line = float(line)
+    margin = diff + line if side == 'local' else -diff + line
+    return float(np.mean(np.isclose(margin, 0.0)) * 100.0)
 
 
 def _resolve_extra_innings(home, away, tied_mask, exp_home, exp_away, rng):
-    """Resolve tied regulation simulations consistently for ML/totals/spreads.
-
-    Previous code simply awarded one run to one team. V3 simulates extra innings
-    with the automatic runner environment and keeps those extra runs in all markets.
-    """
     idx = np.flatnonzero(tied_mask)
     if len(idx) == 0:
         return home, away, 0
-
-    # Approximate per-extra-inning run environment. The ghost runner increases scoring;
-    # keep the multiplier modest and derive team rates from the pregame run expectation.
     lam_h = max(0.25, min(1.25, (float(exp_home) / 9.0) * 1.35))
     lam_a = max(0.25, min(1.25, (float(exp_away) / 9.0) * 1.35))
     active = idx.copy()
     innings_used = 0
-
     for inning in range(1, 7):
         if len(active) == 0:
             break
@@ -107,15 +99,16 @@ def _resolve_extra_innings(home, away, tied_mask, exp_home, exp_away, rng):
         away[active] += add_a
         home[active] += add_h
         active = active[home[active] == away[active]]
-
-    # Extremely rare unresolved ties after six extras: resolve with one additional
-    # run but preserve the run in totals/spreads and only on the remaining simulations.
     if len(active):
         home_win = rng.random(len(active)) < 0.52
         home[active] += home_win.astype(int)
         away[active] += (~home_win).astype(int)
-
     return home, away, innings_used
+
+
+def _stable_seed(parts):
+    raw = '|'.join(str(x) for x in parts).encode('utf-8', errors='ignore')
+    return int.from_bytes(hashlib.sha256(raw).digest()[:8], 'big') % (2**32 - 1)
 
 
 def simular_partido_mlb(
@@ -135,6 +128,7 @@ def simular_partido_mlb(
     linea_carreras_casino,
     df_games=None,
     num_simulaciones=50000,
+    simulation_seed=None,
 ):
     if linea_carreras_casino is None or float(linea_carreras_casino) <= 0:
         raise ValueError('Línea de carreras de casino requerida y no disponible.')
@@ -145,19 +139,10 @@ def simular_partido_mlb(
         raise ValueError(f'Datos incompletos para simular {visita} @ {local}.')
 
     loc, vis = normalize_team(local), normalize_team(visita)
-
-    # Offensive index. Legacy wRC+ may actually be an OPS-based index, but it is
-    # still centered around the historical scale used by this project.
     bat_l = np.clip(float(wrc_loc) / 100.0, 0.75, 1.25)
     bat_v = np.clip(float(wrc_vis) / 100.0, 0.75, 1.25)
-
-    # The individual-pitcher file currently stores ERA in the legacy xFIP column.
-    # Treat it explicitly as starter run prevention, not true xFIP.
     sp_l = np.clip(float(pitcher_loc_xfip) / 4.10, 0.70, 1.30)
     sp_v = np.clip(float(pitcher_vis_xfip) / 4.10, 0.70, 1.30)
-
-    # Production does not yet have a true bullpen-only CSV. This input is therefore
-    # team pitching ERA and gets a smaller weight so the starter is not double-counted.
     team_pitch_l = np.clip(float(bullpen_loc_era) / 4.10, 0.75, 1.30)
     team_pitch_v = np.clip(float(bullpen_vis_era) / 4.10, 0.75, 1.30)
 
@@ -168,19 +153,24 @@ def simular_partido_mlb(
     except (TypeError, ValueError):
         altitude = 1.0
 
-    # V3 contextual MC: no recent-form or H2H blending here. Those are owned by ML.
-    # Starter receives 72% and aggregate team pitching 28% as a conservative proxy
-    # until a real bullpen-only data source is persisted in production.
     opp_pitch_for_home = sp_v * 0.72 + team_pitch_v * 0.28
     opp_pitch_for_away = sp_l * 0.72 + team_pitch_l * 0.28
-
     exp_l = 4.55 * bat_l * opp_pitch_for_home * park * climate * altitude
     exp_v = 4.45 * bat_v * opp_pitch_for_away * park * climate * altitude
     exp_l = float(np.clip(exp_l, 1.5, 8.5))
     exp_v = float(np.clip(exp_v, 1.5, 8.5))
 
     sims = int(np.clip(num_simulaciones, 5000, 100000))
-    rng = np.random.default_rng()
+    if simulation_seed is None:
+        simulation_seed = _stable_seed([
+            loc, vis, round(float(pitcher_loc_xfip), 3), round(float(pitcher_vis_xfip), 3),
+            round(float(wrc_loc), 3), round(float(wrc_vis), 3),
+            round(float(bullpen_loc_era), 3), round(float(bullpen_vis_era), 3),
+            round(float(park_factor), 3), round(float(altitud_ft or 0), 1),
+            round(float(viento_mph or 0), 1), str(direccion_viento), round(float(temp_f or 72), 1),
+            round(float(linea_carreras_casino), 2), sims,
+        ])
+    rng = np.random.default_rng(int(simulation_seed))
     dispersion = 14.5
 
     home = rng.negative_binomial(dispersion, dispersion / (dispersion + exp_l), sims)
@@ -198,7 +188,7 @@ def simular_partido_mlb(
         'Promedio_Total': round(float(np.mean(totals)), 2),
         f'Over {linea_carreras_casino}': round(float(np.mean(totals > line) * 100.0), 2),
         f'Under {linea_carreras_casino}': round(float(np.mean(totals < line) * 100.0), 2),
-        f'Push {linea_carreras_casino}': round(float(np.mean(totals == line) * 100.0), 2),
+        f'Push {linea_carreras_casino}': round(float(np.mean(np.isclose(totals, line)) * 100.0), 2),
     }
     for spread in np.arange(-5.5, 6.0, 0.5):
         if abs(spread) < 1e-9:
@@ -206,6 +196,8 @@ def simular_partido_mlb(
         spread = float(spread)
         runs[f'Spread Local {spread:+.1f}'] = round(_spread_probability(diff, 'local', spread), 2)
         runs[f'Spread Visita {spread:+.1f}'] = round(_spread_probability(diff, 'visita', spread), 2)
+        runs[f'Push Spread Local {spread:+.1f}'] = round(_spread_push_probability(diff, 'local', spread), 2)
+        runs[f'Push Spread Visita {spread:+.1f}'] = round(_spread_push_probability(diff, 'visita', spread), 2)
 
     h2h, h2h_n = obtener_h2h_detalle(df_games, loc, vis)
     pexp = (exp_l + exp_v) ** 0.285
@@ -216,18 +208,13 @@ def simular_partido_mlb(
         'Carreras': runs,
         'Metadatos': {
             'Pythagenpat_Loc': round(float(pyth), 2),
-            'H2H_Loc': round(h2h, 2),
-            'H2H_Muestra': h2h_n,
-            'H2H_Peso': 0.0,
-            'H2H_Usado_En_Probabilidad': False,
-            'Forma_Reciente_Usada_En_MC': False,
-            'Factor_Clima': round(climate, 4),
-            'Factor_Altitud_Residual': round(altitude, 4),
-            'Carreras_Exp_Local': round(exp_l, 2),
-            'Carreras_Exp_Visita': round(exp_v, 2),
+            'H2H_Loc': round(h2h, 2), 'H2H_Muestra': h2h_n, 'H2H_Peso': 0.0,
+            'H2H_Usado_En_Probabilidad': False, 'Forma_Reciente_Usada_En_MC': False,
+            'Factor_Clima': round(climate, 4), 'Factor_Altitud_Residual': round(altitude, 4),
+            'Carreras_Exp_Local': round(exp_l, 2), 'Carreras_Exp_Visita': round(exp_v, 2),
             'Empates_Regulacion': int(regulation_ties.sum()),
             'Max_Extra_Innings_Simulados': int(max_extra_innings),
             'Pitching_Agregado_Es_Proxy_Bullpen': True,
-            'Simulaciones': sims,
+            'Simulaciones': sims, 'Simulation_Seed': int(simulation_seed),
         },
     }
