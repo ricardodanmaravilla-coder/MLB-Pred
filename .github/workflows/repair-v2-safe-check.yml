@@ -14,11 +14,13 @@ jobs:
           python-version: '3.11'
       - run: pip install -r requirements.txt
       - name: Compile
-        run: python -m py_compile app_mlb.py minero_mlb.py minero_pitchers.py settle_picks.py backtest_safe.py backtest_markets.py test_streamlit_interaction.py test_v5_integrity.py test_v6_predictive.py modules/*.py
+        run: python -m py_compile app_mlb.py minero_mlb.py minero_pitchers.py settle_picks.py backtest_safe.py backtest_markets.py test_streamlit_interaction.py test_v5_integrity.py test_v6_predictive.py test_google_sheets_tracking.py modules/*.py
       - name: V5 integrity regression suite
         run: python test_v5_integrity.py
       - name: V6 predictive regression suite
         run: python test_v6_predictive.py
+      - name: Google Sheets tracking regression suite
+        run: python test_google_sheets_tracking.py
       - name: ML sequential, calibration, family-selection and rerun-cache smoke
         run: |
           python - <<'PY'
