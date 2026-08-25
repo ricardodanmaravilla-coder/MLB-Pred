@@ -32,10 +32,8 @@ def main():
     bat = pd.read_csv('data/mlb_batting.csv')
     pit = pd.read_csv('data/mlb_pitching.csv')
     games = prepare_games(pd.read_csv('data/mlb_games.csv'))
-
     cut = int(len(games) * 0.85)
-    train = games.iloc[:cut].copy()
-    test = games.iloc[cut:].copy()
+    train = games.iloc[:cut].copy(); test = games.iloc[cut:].copy()
 
     model = PredictorMLMLB()
     if not model.entrenar(bat, pit, train):
@@ -55,35 +53,26 @@ def main():
     for _, r in test.iterrows():
         h, a, season = normalize_team(r['Home']), normalize_team(r['Away']), int(r['Season'])
         sy = season - 1
-        pred = model.predecir_partido(
-            h, a,
-            float(bd.get((h, sy), bmed)), float(bd.get((a, sy), bmed)),
-            float(pdict.get((h, sy), pmed)), float(pdict.get((a, sy), pmed)),
-        )
-        probs.append(pred['Probabilidad_Local'] / 100.0)
-        y.append(int(float(r['Home_Score']) > float(r['Away_Score'])))
-        runs_true.append(float(r['Home_Score']) + float(r['Away_Score']))
-        runs_pred.append(float(pred['Proyeccion_Carreras']))
+        pred = model.predecir_partido(h, a, float(bd.get((h, sy), bmed)), float(bd.get((a, sy), bmed)), float(pdict.get((h, sy), pmed)), float(pdict.get((a, sy), pmed)))
+        hs, as_ = float(r['Home_Score']), float(r['Away_Score'])
+        probs.append(pred['Probabilidad_Local'] / 100.0); y.append(int(hs > as_))
+        runs_true.append(hs + as_); runs_pred.append(float(pred['Proyeccion_Carreras']))
+        # True walk-forward: after predicting this game, the result becomes available
+        # for the rolling state used by the next chronological game.
+        model.actualizar_resultado(h, a, hs, as_)
 
     probs = np.asarray(probs, dtype=float); y = np.asarray(y, dtype=int)
-    picks = (probs >= 0.5).astype(int)
-    base_p = float(y.mean())
-    baseline_probs = np.full(len(y), base_p)
-
+    picks = (probs >= 0.5).astype(int); base_p = float(y.mean()); baseline_probs = np.full(len(y), base_p)
     result = {
-        'n_train': len(train),
-        'n_test': len(test),
+        'n_train': len(train),'n_test': len(test),
         'accuracy': round(accuracy_score(y, picks), 4),
         'baseline_accuracy_home_rate': round(max(base_p, 1-base_p), 4),
-        'brier': round(brier_score_loss(y, probs), 4),
-        'baseline_brier': round(brier_score_loss(y, baseline_probs), 4),
-        'logloss': round(log_loss(y, probs, labels=[0,1]), 4),
-        'baseline_logloss': round(log_loss(y, baseline_probs, labels=[0,1]), 4),
+        'brier': round(brier_score_loss(y, probs), 4),'baseline_brier': round(brier_score_loss(y, baseline_probs), 4),
+        'logloss': round(log_loss(y, probs, labels=[0,1]), 4),'baseline_logloss': round(log_loss(y, baseline_probs, labels=[0,1]), 4),
         'runs_mae': round(mean_absolute_error(runs_true, runs_pred), 3),
         'calibration_bins': calibration_bins(y, probs),
-        'historical_odds_available': False,
-        'roi_claim_allowed': False,
-        'note': 'Este backtest valida predicción con resultados reales; el CSV no contiene cuotas históricas y no permite afirmar ROI histórico real.'
+        'historical_odds_available': False,'roi_claim_allowed': False,
+        'note': 'Walk-forward real: cada resultado se incorpora solo después de su predicción. Sin cuotas históricas no se afirma ROI.'
     }
     print(json.dumps(result, indent=2))
 
