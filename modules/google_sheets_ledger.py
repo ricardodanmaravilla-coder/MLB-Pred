@@ -9,13 +9,14 @@ import json
 import os
 from typing import Iterable, Mapping, Any
 
-SHEET_HEADERS = [
+LEGACY_HEADERS = [
     "record_key", "snapshot_utc", "game_date", "game_pk", "away", "home", "market",
     "selection", "line", "odds", "prob_ml", "prob_mc", "prob_combined",
     "market_no_vig", "edge_pp", "ev_pct", "disagreement_pp", "score",
     "starter_away", "starter_home", "park_factor", "temperature_f", "wind_mph",
     "wind_direction", "model_version", "result_status", "result_value", "profit_units"
 ]
+SHEET_HEADERS = LEGACY_HEADERS + ["kelly_pct", "bankroll_mxn", "stake_mxn", "profit_mxn"]
 
 
 def _clean(value: Any):
@@ -78,15 +79,14 @@ def configured(config: Mapping[str, Any] | None = None) -> bool:
 
 
 def _schema_action(values):
-    """Return ok/reset/fallback without mutating anything.
-
-    reset: worksheet has no real data, so replacing its header is safe.
-    fallback: preserve incompatible existing data and use a dedicated V6 worksheet.
-    """
+    """Return ok/extend/reset/fallback without mutating anything."""
     if not values:
         return "reset"
-    if values[0] == SHEET_HEADERS:
+    header = values[0]
+    if header == SHEET_HEADERS:
         return "ok"
+    if header == LEGACY_HEADERS:
+        return "extend"
     data_rows = values[1:]
     has_real_data = any(any(_clean(cell) for cell in row) for row in data_rows)
     return "fallback" if has_real_data else "reset"
@@ -97,14 +97,16 @@ def _ensure_schema(book, ws, worksheet_name, gspread):
     action = _schema_action(values)
     if action == "ok":
         return ws, values, worksheet_name, "schema ok"
+    if action == "extend":
+        ws.update([SHEET_HEADERS], range_name=f"A1:{_column_letter(len(SHEET_HEADERS))}1", value_input_option="RAW")
+        values[0] = SHEET_HEADERS
+        return ws, values, worksheet_name, "tracking columns added"
     if action == "reset":
         ws.clear()
         ws.append_row(SHEET_HEADERS, value_input_option="RAW")
         return ws, [SHEET_HEADERS], worksheet_name, "header repaired"
 
-    # Preserve any incompatible data already present. Use a stable V6 worksheet
-    # so repeated scanner runs do not create a new tab every time.
-    fallback_name = f"{worksheet_name}_V6"
+    fallback_name = f"{worksheet_name}_V7"
     try:
         target = book.worksheet(fallback_name)
     except gspread.WorksheetNotFound:
@@ -113,11 +115,24 @@ def _ensure_schema(book, ws, worksheet_name, gspread):
     fallback_action = _schema_action(fallback_values)
     if fallback_action == "fallback":
         return None, fallback_values, fallback_name, "fallback worksheet also has incompatible data"
-    if fallback_action == "reset":
-        target.clear()
-        target.append_row(SHEET_HEADERS, value_input_option="RAW")
-        fallback_values = [SHEET_HEADERS]
+    if fallback_action in ("reset", "extend"):
+        if fallback_action == "reset":
+            target.clear()
+            target.append_row(SHEET_HEADERS, value_input_option="RAW")
+            fallback_values = [SHEET_HEADERS]
+        else:
+            target.update([SHEET_HEADERS], range_name=f"A1:{_column_letter(len(SHEET_HEADERS))}1", value_input_option="RAW")
+            fallback_values[0] = SHEET_HEADERS
     return target, fallback_values, fallback_name, f"using {fallback_name}; original preserved"
+
+
+def _column_letter(number: int) -> str:
+    letters = ""
+    n = int(number)
+    while n > 0:
+        n, rem = divmod(n - 1, 26)
+        letters = chr(65 + rem) + letters
+    return letters or "A"
 
 
 def sync_rows(rows: Iterable[Mapping[str, Any]], config: Mapping[str, Any] | None = None):
@@ -164,6 +179,7 @@ def sync_rows(rows: Iterable[Mapping[str, Any]], config: Mapping[str, Any] | Non
 
         append_payload = []
         update_payload = []
+        last_col = _column_letter(len(SHEET_HEADERS))
         for row in rows:
             key = record_key(row)
             enriched = dict(row)
@@ -171,7 +187,7 @@ def sync_rows(rows: Iterable[Mapping[str, Any]], config: Mapping[str, Any] | Non
             cells = [_clean(enriched.get(h)) for h in SHEET_HEADERS]
             existing_row = key_to_row.get(key)
             if existing_row:
-                update_payload.append({"range": f"A{existing_row}:AB{existing_row}", "values": [cells]})
+                update_payload.append({"range": f"A{existing_row}:{last_col}{existing_row}", "values": [cells]})
             else:
                 append_payload.append(cells)
                 key_to_row[key] = -1
