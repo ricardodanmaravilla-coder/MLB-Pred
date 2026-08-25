@@ -5,3 +5,5 @@ pybaseball>=2.2,<3
 MLB-StatsAPI>=1.7,<2
 scikit-learn>=1.4,<2
 numpy>=1.26,<3
+gspread>=6.1,<7
+google-auth>=2.30,<3
