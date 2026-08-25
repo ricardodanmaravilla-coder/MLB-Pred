@@ -19,22 +19,24 @@ jobs:
         run: python test_v5_integrity.py
       - name: V6 predictive regression suite
         run: python test_v6_predictive.py
-      - name: ML sequential, calibration and rerun-cache smoke
+      - name: ML sequential, calibration, ensemble and rerun-cache smoke
         run: |
           python - <<'PY'
           import pandas as pd
           from modules.ml_mlb import PredictorMLMLB
           bat=pd.read_csv('data/mlb_batting.csv'); pit=pd.read_csv('data/mlb_pitching.csv'); games=pd.read_csv('data/mlb_games.csv')
-          m=PredictorMLMLB(); assert m.entrenar(bat,pit,games)
-          assert m.loaded_from_cache is False
-          r=m.predecir_partido('NYY','BOS',72,71,4.1,4.2)
+          m=PredictorMLMLB(); assert m.entrenar(bat,pit,games); assert m.loaded_from_cache is False
+          r=m.predecir_partido('NYY','BOS',100,100,4.1,4.2)
           assert 0<=r['Probabilidad_Local']<=100 and abs(r['Probabilidad_Local']+r['Probabilidad_Visita']-100)<.2
           assert 0.35 <= r['Prob_Shrink'] <= 1.0
+          assert 0.0 <= r['Peso_Clasificador_NoLineal'] <= 0.5
+          assert r['Ganancia_Brier_Validacion_Ensemble'] >= 0
           assert 1.0 <= r['Sigma_Carreras'] <= 10.0 and 1.0 <= r['Sigma_Handicap'] <= 10.0
-          assert r['Metrica_Bateo'] in ('OPS_Index','wRC+') and r['Metrica_Pitcheo'] in ('ERA','FIP','xFIP')
+          assert r['Metrica_Bateo'] in ('Offense_Index','OPS_Index','wRC+') and r['Metrica_Pitcheo'] in ('ERA','FIP','xFIP')
           before=len(m.current_history.get('NYY',[])); m.actualizar_resultado('NYY','BOS',5,3); assert len(m.current_history.get('NYY',[]))==before+1
           m2=PredictorMLMLB(); assert m2.entrenar(bat,pit,games); assert m2.loaded_from_cache is True
-          r2=m2.predecir_partido('NYY','BOS',72,71,4.1,4.2); assert r2['Probabilidad_Local']==r['Probabilidad_Local']
+          r2=m2.predecir_partido('NYY','BOS',100,100,4.1,4.2); assert r2['Probabilidad_Local']==r['Probabilidad_Local']
+          assert r2['Peso_Clasificador_NoLineal']==r['Peso_Clasificador_NoLineal']
           print(r,r2)
           PY
       - name: Monte Carlo deterministic and workload smoke
@@ -56,7 +58,7 @@ jobs:
           python - <<'PY'
           import pandas as pd
           from modules.team_utils import normalize_team
-          b=pd.read_csv('data/mlb_bullpen.csv'); assert b['Team'].map(normalize_team).nunique()==30; assert b['ERA'].between(1.5,8.0).all()
+          b=pd.read_csv('data/mlb_bullpen.csv'); assert b['Team'].map(normalize_team).nunique()==30; assert b['ERA'].between(1.5,8.0).all(); assert 'FIP' in b.columns
           PY
       - name: Scanner engine adaptive push-aware smoke
         run: |
@@ -83,8 +85,8 @@ jobs:
           python - <<'PY'
           import tempfile, os
           from modules.pick_ledger import append_snapshot,load_ledger
-          p=tempfile.mktemp(suffix='.csv'); n=append_snapshot([{'game_date':'2026-08-25','game_pk':123,'away':'BOS','home':'NYY','market':'Moneyline','selection':'NYY','odds':1.9}],p)
-          d=load_ledger(p); assert n==1 and len(d)==1 and int(d.iloc[0].game_pk)==123; os.remove(p)
+          p=tempfile.mktemp(suffix='.csv'); n=append_snapshot([{'game_date':'2026-08-25','game_pk':123,'away':'BOS','home':'NYY','market':'Moneyline','selection':'NYY','odds':1.9,'blend_weight_ml':.5,'batting_metric':'Offense_Index','pitching_metric':'FIP'}],p)
+          d=load_ledger(p); assert n==1 and len(d)==1 and int(d.iloc[0].game_pk)==123 and d.iloc[0].batting_metric=='Offense_Index'; os.remove(p)
           PY
       - name: Chronological holdout backtest
         run: python backtest_safe.py | tee backtest_safe_output.txt
