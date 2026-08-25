@@ -13,13 +13,18 @@ from .historical_mlb import prepare_games, team_state, h2h_state, append_game
 class PredictorMLMLB:
     """Pre-game MLB model: real historical results + prior-season team strength."""
     def __init__(self):
-        self.modelo_ganador = make_pipeline(StandardScaler(), LogisticRegression(C=0.35, max_iter=2000, solver='lbfgs', random_state=42))
+        self.modelo_ganador = self._new_classifier()
         self.modelo_carreras = GradientBoostingRegressor(n_estimators=140, max_depth=2, learning_rate=0.035, loss='huber', random_state=42)
         self.modelo_handicap = GradientBoostingRegressor(n_estimators=140, max_depth=2, learning_rate=0.035, loss='huber', random_state=42)
         self.entrenado = False
         self.bat_scale, self.pit_scale = 100.0, 4.10
         self.current_history, self.current_h2h = {}, {}
         self.sigma_runs, self.sigma_diff = 3.5, 4.2
+        self.prob_shrink = 1.0
+
+    @staticmethod
+    def _new_classifier():
+        return make_pipeline(StandardScaler(), LogisticRegression(C=0.35, max_iter=2000, solver='lbfgs', random_state=42))
 
     @staticmethod
     def _stats_dict(df, col):
@@ -32,6 +37,10 @@ class PredictorMLMLB:
         hwin, hrd, hn = h2h_state(h2h,loc,vis,12)
         return [w5l,w5v,w20l,w20v,rf5l,rf5v,ra5l,ra5v,rd5l,rd5v,rd20l,rd20v,hwin,hrd,min(hn,12)/12.0,
                 float(off_l)/max(self.bat_scale,1e-6),float(off_v)/max(self.bat_scale,1e-6),float(pit_l)/max(self.pit_scale,1e-6),float(pit_v)/max(self.pit_scale,1e-6),1.0]
+
+    @staticmethod
+    def _shrink_probability(raw_prob, alpha):
+        return float(np.clip(0.5 + float(alpha) * (float(raw_prob) - 0.5), 0.01, 0.99))
 
     def entrenar(self, df_batting, df_pitching, df_games):
         try:
@@ -52,10 +61,28 @@ class PredictorMLMLB:
             if len(X) < 1000: return False
             X=np.asarray(X,float); yw=np.asarray(yw); yr=np.asarray(yr); yd=np.asarray(yd)
             cut=max(100,int(len(X)*.80))
+
+            # Chronological residual calibration for totals/run line.
             self.modelo_carreras.fit(X[:cut],yr[:cut]); self.modelo_handicap.fit(X[:cut],yd[:cut])
             self.sigma_runs=float(max(1.0,np.std(yr[cut:]-self.modelo_carreras.predict(X[cut:]))))
             self.sigma_diff=float(max(1.0,np.std(yd[cut:]-self.modelo_handicap.predict(X[cut:]))))
-            self.modelo_ganador.fit(X,yw); self.modelo_carreras.fit(X,yr); self.modelo_handicap.fit(X,yd)
+
+            # Chronological probability shrinkage. The raw classifier historically
+            # became overconfident above ~60%. Learn one conservative shrink factor
+            # on a later calibration block instead of hard-coding a cap.
+            temp_classifier = self._new_classifier()
+            temp_classifier.fit(X[:cut], yw[:cut])
+            raw_cal = temp_classifier.predict_proba(X[cut:])[:,1]
+            best_alpha, best_brier = 1.0, float('inf')
+            for alpha in np.linspace(0.45, 1.00, 56):
+                cal = 0.5 + alpha * (raw_cal - 0.5)
+                score = float(np.mean((cal - yw[cut:]) ** 2))
+                if score < best_brier:
+                    best_brier, best_alpha = score, float(alpha)
+            self.prob_shrink = best_alpha
+
+            self.modelo_ganador = self._new_classifier(); self.modelo_ganador.fit(X,yw)
+            self.modelo_carreras.fit(X,yr); self.modelo_handicap.fit(X,yd)
             self.current_history,self.current_h2h=hist,hh; self.entrenado=True; return True
         except Exception as e:
             print(f'Error entrenando ML MLB: {e}'); self.entrenado=False; return False
@@ -73,7 +100,9 @@ class PredictorMLMLB:
             if not self.entrenado: raise RuntimeError('Modelo no entrenado')
             loc,vis=normalize_team(loc_abbr),normalize_team(vis_abbr)
             f=np.asarray([self._feature_row(self.current_history,self.current_h2h,loc,vis,float(wrc_loc),float(wrc_vis),float(xfip_loc),float(xfip_vis))],float)
-            pr=self.modelo_ganador.predict_proba(f)[0]; runs=float(self.modelo_carreras.predict(f)[0]); diff=float(self.modelo_handicap.predict(f)[0])
-            return {'Probabilidad_Local':round(float(pr[1])*100,2),'Probabilidad_Visita':round(float(pr[0])*100,2),'Proyeccion_Carreras':round(runs,2),'Proyeccion_Handicap_Local':round(diff,2),'Sigma_Carreras':round(self.sigma_runs,3),'Sigma_Handicap':round(self.sigma_diff,3)}
+            raw_local=float(self.modelo_ganador.predict_proba(f)[0,1])
+            p_local=self._shrink_probability(raw_local,self.prob_shrink); p_vis=1.0-p_local
+            runs=float(self.modelo_carreras.predict(f)[0]); diff=float(self.modelo_handicap.predict(f)[0])
+            return {'Probabilidad_Local':round(p_local*100,2),'Probabilidad_Visita':round(p_vis*100,2),'Probabilidad_Local_Raw':round(raw_local*100,2),'Prob_Shrink':round(self.prob_shrink,3),'Proyeccion_Carreras':round(runs,2),'Proyeccion_Handicap_Local':round(diff,2),'Sigma_Carreras':round(self.sigma_runs,3),'Sigma_Handicap':round(self.sigma_diff,3)}
         except Exception as e:
-            print(f'Error en predicción ML: {e}'); return {'Probabilidad_Local':50.,'Probabilidad_Visita':50.,'Proyeccion_Carreras':8.5,'Proyeccion_Handicap_Local':0.,'Sigma_Carreras':3.5,'Sigma_Handicap':4.2}
+            print(f'Error en predicción ML: {e}'); return {'Probabilidad_Local':50.,'Probabilidad_Visita':50.,'Probabilidad_Local_Raw':50.,'Prob_Shrink':1.0,'Proyeccion_Carreras':8.5,'Proyeccion_Handicap_Local':0.,'Sigma_Carreras':3.5,'Sigma_Handicap':4.2}
