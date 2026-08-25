@@ -2,6 +2,7 @@
 
 Production and validation use one source of truth. Totals/run lines correctly
 account for sportsbook pushes on integer lines instead of treating refunds as losses.
+V6 deliberately favors precision over pick volume: weak/marginal signals abstain.
 """
 
 from dataclasses import dataclass, asdict
@@ -93,29 +94,36 @@ def _candidate(market, selection, prob_ml, prob_mc, odds, market_no_vig,
         market_no_vig=None if market_no_vig is None else round(float(market_no_vig)*100.0,3),
         edge_pp=None if edge_pp is None else round(edge_pp,3), ev_pct=round(ev_pct,3),
         disagreement_pp=round(disagreement,3), score=round(score,4), accepted=accepted,
-        reason='Cumple filtros' if accepted else '; '.join(fails),
+        reason='Cumple filtros V6 precisión' if accepted else '; '.join(fails),
     )
 
 
 def moneyline_candidate(selection, prob_ml, prob_mc, odds, market_no_vig=None):
+    # Walk-forward: chosen-side precision rises materially once ML confidence is
+    # ~58%+. Require MC confirmation too; volume is intentionally sacrificed.
     return _candidate('Moneyline', selection, prob_ml, prob_mc, odds, market_no_vig,
-                      min_ml=55.0, min_mc=55.0, min_combined=55.0,
-                      max_disagreement=15.0, min_edge_pp=2.5, min_ev_pct=3.0)
+                      min_ml=58.0, min_mc=58.0, min_combined=58.0,
+                      max_disagreement=10.0, min_edge_pp=4.0, min_ev_pct=4.0)
 
 
 def total_candidate(selection, prob_ml, prob_mc, odds, market_no_vig=None, prob_push_mc=0.0):
     is_over = str(selection).strip().lower().startswith('over')
-    min_ml = 54.0 if is_over else 52.0
+    # O8.5 signals below 54% were historically noise; >=56% was the cleanest
+    # observed bucket. Under samples above 54% are sparse, so keep a strict 54%
+    # floor plus stronger MC/combined/market confirmation instead of overfitting.
+    min_ml = 56.0 if is_over else 54.0
     return _candidate('Totales', selection, prob_ml, prob_mc, odds, market_no_vig,
-                      min_ml=min_ml, min_mc=52.0, min_combined=54.0,
-                      max_disagreement=15.0, min_edge_pp=4.0, min_ev_pct=4.0,
+                      min_ml=min_ml, min_mc=54.0, min_combined=56.0,
+                      max_disagreement=10.0, min_edge_pp=5.0, min_ev_pct=5.0,
                       push_pct=prob_push_mc)
 
 
 def runline_candidate(selection, prob_ml, prob_mc, odds, market_no_vig=None, prob_push_mc=0.0):
+    # Historical +1.5 hit rate barely beats (and often trails) its high base rate.
+    # Therefore only exceptional consensus/edge is allowed through.
     return _candidate('Hándicap', selection, prob_ml, prob_mc, odds, market_no_vig,
-                      min_ml=58.0, min_mc=58.0, min_combined=60.0,
-                      max_disagreement=10.0, min_edge_pp=6.0, min_ev_pct=6.0,
+                      min_ml=60.0, min_mc=60.0, min_combined=62.0,
+                      max_disagreement=8.0, min_edge_pp=7.0, min_ev_pct=7.0,
                       push_pct=prob_push_mc)
 
 

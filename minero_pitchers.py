@@ -2,15 +2,14 @@ import os
 import requests
 import pandas as pd
 
+from modules.advanced_stats import enrich_pitcher_frame, fetch_fangraphs_team_season
 from modules.team_utils import normalize_team
 
-
 BASE = 'https://statsapi.mlb.com/api/v1'
-HEADERS = {'User-Agent': 'MLB-Pred/5.0'}
+HEADERS = {'User-Agent': 'MLB-Pred/6.0'}
 
 
 def _innings_to_float(value):
-    """Convert baseball IP notation (12.1 = 12 1/3, 12.2 = 12 2/3)."""
     try:
         text = str(value or '0')
         whole, _, frac = text.partition('.')
@@ -40,13 +39,37 @@ def _mlb_teams():
     return out
 
 
-def minar_stats_pitchers(season=None):
-    """Persist starters plus a conservative reliever-usage bullpen proxy.
+def _fangraphs_relievers(season):
+    try:
+        _, _, rel = fetch_fangraphs_team_season(int(season))
+    except Exception as exc:
+        print(f'⚠️ Bullpen FanGraphs no disponible: {exc}')
+        return pd.DataFrame()
+    if rel is None or rel.empty:
+        return pd.DataFrame()
+    rows = []
+    for _, r in rel.iterrows():
+        team = normalize_team(r.get('Team'))
+        try:
+            era = float(r.get('ERA'))
+        except (TypeError, ValueError):
+            continue
+        row = {'Team': team, 'ERA': era, 'Season': int(season), 'Source': 'FANGRAPHS_REAL_RELIEVERS'}
+        for c in ('xFIP','FIP','K-BB%','WHIP','GB%','HR/9','IP'):
+            try:
+                row[c] = float(r.get(c))
+            except (TypeError, ValueError):
+                row[c] = None
+        rows.append(row)
+    df = pd.DataFrame(rows).dropna(subset=['Team']).drop_duplicates('Team', keep='last') if rows else pd.DataFrame()
+    return df
 
-    StatsAPI's season aggregate does not split each pitcher's ERA by role. Instead of
-    excluding every pitcher who made one start, estimate relief workload from the share
-    of appearances that were not starts. This retains swingmen while down-weighting
-    pitchers whose season line mostly comes from starting.
+
+def minar_stats_pitchers(season=None):
+    """Persist starters/swingmen plus strongest available bullpen metrics.
+
+    MLB StatsAPI is the durable baseline. FanGraphs is overlaid when reachable so
+    production can use real xFIP/FIP/K-BB% rather than treating ERA as xFIP.
     """
     season = int(season or pd.Timestamp.utcnow().year)
     print(f'⚾ [INICIO] Extrayendo pitchers MLB {season} por equipo...')
@@ -54,8 +77,7 @@ def minar_stats_pitchers(season=None):
     starters_path = 'data/mlb_pitching_individual.csv'
     bullpen_path = 'data/mlb_bullpen.csv'
 
-    rows = []
-    failures = []
+    rows, failures = [], []
     try:
         teams = _mlb_teams()
         if len(teams) < 25:
@@ -86,6 +108,7 @@ def minar_stats_pitchers(season=None):
                     rows.append({
                         'Name': str(name), 'Team': team_abbr, 'ERA': era,
                         'xFIP': era, 'xFIP_Source': 'LEGACY_ERA_NOT_REAL_XFIP',
+                        'FIP': None, 'K-BB%': None, 'WHIP': stat.get('whip'),
                         'GS': gs, 'G': g, 'IP': ip, 'ReliefApps': relief_apps,
                         'ReliefShare': round(relief_share, 4), 'Season': season,
                     })
@@ -96,31 +119,41 @@ def minar_stats_pitchers(season=None):
         if df.empty:
             raise RuntimeError('StatsAPI no devolvió lanzadores utilizables')
         df = df.drop_duplicates(subset=['Name', 'Team'], keep='last')
+        df = enrich_pitcher_frame(df, season)
 
-        starters = df[df['GS'] > 0].copy().sort_values(['Team','ERA','Name'])
+        starters = df[df['GS'] > 0].copy()
+        sort_metric = 'xFIP' if 'xFIP' in starters.columns else 'ERA'
+        starters = starters.sort_values(['Team', sort_metric, 'Name'])
         starters.to_csv(starters_path, index=False)
 
-        relief = df[(df['ReliefApps'] >= 3) & (df['IP'] >= 3.0)].copy()
-        relief['ReliefIPProxy'] = relief['IP'] * relief['ReliefShare']
-        relief = relief[relief['ReliefIPProxy'] >= 1.0]
-        bullpen_rows = []
-        for team_code, grp in relief.groupby('Team'):
-            ip = float(grp['ReliefIPProxy'].sum())
-            if ip <= 0:
-                continue
-            era_weighted = float((grp['ERA'] * grp['ReliefIPProxy']).sum() / ip)
-            bullpen_rows.append({
-                'Team': normalize_team(team_code), 'ERA': round(era_weighted, 3),
-                'IP': round(ip, 1), 'Relievers': int(len(grp)), 'Season': season,
-                'Source': 'RELIEF_APPEARANCE_SHARE_WEIGHTED_ERA_PROXY',
-            })
-        bullpen = pd.DataFrame(bullpen_rows).drop_duplicates('Team', keep='last').sort_values('Team') if bullpen_rows else pd.DataFrame()
+        bullpen_fg = _fangraphs_relievers(season)
+        if bullpen_fg is not None and len(bullpen_fg) >= 25:
+            bullpen = bullpen_fg.sort_values('Team')
+        else:
+            relief = df[(df['ReliefApps'] >= 3) & (df['IP'] >= 3.0)].copy()
+            relief['ReliefIPProxy'] = relief['IP'] * relief['ReliefShare']
+            relief = relief[relief['ReliefIPProxy'] >= 1.0]
+            bullpen_rows = []
+            for team_code, grp in relief.groupby('Team'):
+                ip = float(grp['ReliefIPProxy'].sum())
+                if ip <= 0:
+                    continue
+                era_weighted = float((pd.to_numeric(grp['ERA'], errors='coerce') * grp['ReliefIPProxy']).sum() / ip)
+                bullpen_rows.append({
+                    'Team': normalize_team(team_code), 'ERA': round(era_weighted, 3),
+                    'xFIP': None, 'FIP': None, 'IP': round(ip, 1),
+                    'Relievers': int(len(grp)), 'Season': season,
+                    'Source': 'RELIEF_APPEARANCE_SHARE_WEIGHTED_ERA_PROXY',
+                })
+            bullpen = pd.DataFrame(bullpen_rows).drop_duplicates('Team', keep='last').sort_values('Team') if bullpen_rows else pd.DataFrame()
+
         if len(bullpen) < 25:
-            raise RuntimeError(f'Bullpen proxy incompleto: solo {len(bullpen)} equipos')
+            raise RuntimeError(f'Bullpen incompleto: solo {len(bullpen)} equipos')
         bullpen.to_csv(bullpen_path, index=False)
 
-        print(f'✅ Abridores/swingmen guardados: {len(starters)}')
-        print(f'✅ Bullpen proxy separado guardado: {len(bullpen)} equipos')
+        real_starters = int(starters.get('xFIP_Source', pd.Series(dtype=str)).astype(str).str.contains('FANGRAPHS_REAL').sum())
+        print(f'✅ Abridores/swingmen guardados: {len(starters)}; xFIP real: {real_starters}')
+        print(f"✅ Bullpen guardado: {len(bullpen)} equipos; fuente={bullpen['Source'].iloc[0] if 'Source' in bullpen else 'unknown'}")
         if failures:
             print(f'⚠️ Equipos con error parcial: {failures}')
         return starters, bullpen
