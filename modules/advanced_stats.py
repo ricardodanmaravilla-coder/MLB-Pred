@@ -1,7 +1,7 @@
 """Optional advanced MLB statistics enrichment.
 
 This module is deliberately fail-soft: production keeps the official MLB StatsAPI
-baseline when FanGraphs/pybaseball is unavailable.  When available, real FanGraphs
+baseline when FanGraphs/pybaseball is unavailable. When available, real FanGraphs
 wRC+, FIP/xFIP and reliever metrics replace legacy proxies and are explicitly tagged.
 """
 from __future__ import annotations
@@ -34,11 +34,7 @@ def _copy_metric(src, dst, source_col, target_col):
 
 
 def fetch_fangraphs_team_season(season: int):
-    """Return batting, all-pitching and reliever team tables for one season.
-
-    Imports pybaseball lazily so an upstream outage/import incompatibility never
-    prevents the StatsAPI miner from producing usable files.
-    """
+    """Return batting, all-pitching and reliever team tables for one season."""
     from pybaseball import team_batting, team_pitching, team_pitching_relievers
 
     bat = team_batting(int(season), int(season), ind=1)
@@ -78,7 +74,8 @@ def enrich_team_frames(base_batting: pd.DataFrame, base_pitching: pd.DataFrame,
                 _copy_metric(fg_bat, keep, c, c)
             keep = keep.dropna(subset=['Team']).drop_duplicates(['Team','Season'])
             if 'wRC+' in keep.columns:
-                keep['wRC+_Source'] = 'FANGRAPHS_REAL_WRCPLUS'
+                keep['wRC+_Source'] = None
+                keep.loc[pd.to_numeric(keep['wRC+'], errors='coerce').notna(), 'wRC+_Source'] = 'FANGRAPHS_REAL_WRCPLUS'
             bat = bat.merge(keep, on=['Team','Season'], how='left', suffixes=('', '_FG'))
             for c in ('wRC+','wOBA','ISO','BB%','K%','BABIP','WAR','wRC+_Source'):
                 fg = f'{c}_FG'
@@ -92,7 +89,8 @@ def enrich_team_frames(base_batting: pd.DataFrame, base_pitching: pd.DataFrame,
                 _copy_metric(fg_pit, keep, c, c)
             keep = keep.dropna(subset=['Team']).drop_duplicates(['Team','Season'])
             if 'xFIP' in keep.columns:
-                keep['xFIP_Source'] = 'FANGRAPHS_REAL_XFIP'
+                keep['xFIP_Source'] = None
+                keep.loc[pd.to_numeric(keep['xFIP'], errors='coerce').notna(), 'xFIP_Source'] = 'FANGRAPHS_REAL_XFIP'
             pit = pit.merge(keep, on=['Team','Season'], how='left', suffixes=('', '_FG'))
             for c in ('ERA','FIP','xFIP','WHIP','K-BB%','GB%','HR/9','WAR','xFIP_Source'):
                 fg = f'{c}_FG'
@@ -122,7 +120,11 @@ def enrich_team_frames(base_batting: pd.DataFrame, base_pitching: pd.DataFrame,
 
 
 def enrich_pitcher_frame(base: pd.DataFrame, season: int):
-    """Overlay real FanGraphs FIP/xFIP/K-BB% onto current individual pitchers."""
+    """Overlay real FanGraphs FIP/xFIP/K-BB% onto current individual pitchers.
+
+    A row is tagged FANGRAPHS_REAL_XFIP only when the FanGraphs-side xFIP value
+    itself matched. Legacy ERA-derived xFIP fallbacks remain explicitly legacy.
+    """
     if base is None or base.empty:
         return base
     try:
@@ -147,12 +149,21 @@ def enrich_pitcher_frame(base: pd.DataFrame, season: int):
     out['Team'] = out['Team'].map(normalize_team)
     keys = ['Name','Team'] if 'Team' in adv.columns else ['Name']
     out = out.merge(adv, on=keys, how='left', suffixes=('', '_FG'))
+
+    # Capture the provenance mask before combine_first can fill missing FG values
+    # from legacy StatsAPI columns.
+    real_xfip = (
+        pd.to_numeric(out['xFIP_FG'], errors='coerce').notna()
+        if 'xFIP_FG' in out.columns else pd.Series(False, index=out.index)
+    )
+
     for c in ('ERA','FIP','xFIP','WHIP','K-BB%','GB%','HR/9','IP','GS','G'):
         fgcol = f'{c}_FG'
         if fgcol in out.columns:
             out[c] = out[fgcol].combine_first(out[c] if c in out.columns else pd.Series(index=out.index, dtype=float))
             out.drop(columns=[fgcol], inplace=True)
-    if 'xFIP' in out.columns:
-        real = pd.to_numeric(out['xFIP'], errors='coerce').notna()
-        out.loc[real, 'xFIP_Source'] = 'FANGRAPHS_REAL_XFIP'
+
+    if 'xFIP_Source' not in out.columns:
+        out['xFIP_Source'] = None
+    out.loc[real_xfip, 'xFIP_Source'] = 'FANGRAPHS_REAL_XFIP'
     return out
