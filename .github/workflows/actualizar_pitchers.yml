@@ -1,8 +1,6 @@
-name: Actualizar Pitchers y Bullpen MLB
+name: Actualizar Pitchers y Bullpen MLB (manual)
 
 on:
-  schedule:
-    - cron: '0 11 * * *'
   workflow_dispatch:
 
 permissions:
@@ -12,30 +10,30 @@ jobs:
   minar_pitchers:
     runs-on: ubuntu-latest
     steps:
-      - name: 📥 Copiar repositorio
+      - name: Copiar repositorio
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: 🐍 Configurar Python
+      - name: Configurar Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: 📦 Instalar dependencias
-        run: pip install pandas requests
+      - name: Instalar dependencias
+        run: pip install -r requirements.txt
 
-      - name: ⛏️ Ejecutar minero pitchers/bullpen
+      - name: Ejecutar minero pitchers/bullpen
         run: |
           python minero_pitchers.py
           test -s data/mlb_pitching_individual.csv
           test -s data/mlb_bullpen.csv
 
-      - name: 🚀 Subir datos al repositorio
+      - name: Subir datos al repositorio
         run: |
           git config user.name "GitHub Actions Bot"
           git config user.email "actions@github.com"
           git add data/mlb_pitching_individual.csv data/mlb_bullpen.csv
-          git commit -m "🤖 Actualización pitchers y bullpen MLB" || exit 0
+          git commit -m "Actualización manual pitchers y bullpen MLB" || exit 0
           git pull origin main --rebase
           git push origin HEAD:main
