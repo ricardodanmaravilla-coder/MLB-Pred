@@ -24,7 +24,7 @@ jobs:
           m=PredictorMLMLB(); assert m.entrenar(bat,pit,games)
           r=m.predecir_partido('NYY','BOS',72,71,4.1,4.2)
           assert 0<=r['Probabilidad_Local']<=100 and abs(r['Probabilidad_Local']+r['Probabilidad_Visita']-100)<.2
-          assert r['Calibracion']=='PLATT_CHRONOLOGICAL'
+          assert 0.45 <= r['Prob_Shrink'] <= 1.0
           before=len(m.current_history.get('NYY',[])); m.actualizar_resultado('NYY','BOS',5,3); after=len(m.current_history.get('NYY',[])); assert after==before+1
           assert r['Sigma_Carreras']>0 and r['Sigma_Handicap']>0
           print(r)
