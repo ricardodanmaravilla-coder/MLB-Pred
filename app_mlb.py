@@ -139,6 +139,68 @@ def _team_prior_stat(df, team, column, fallback):
         return float(fallback)
 
 
+def _current_offensive_index(df, team, fallback=100.0):
+    """Return current team offense centered at league average = 100.
+
+    The repository legacy wRC+ column is OPS*100, not real wRC+. Monte Carlo
+    needs a centered multiplier, so normalize the latest-season OPS index by
+    that season's league median before passing it to the simulator.
+    """
+    try:
+        if df is None or df.empty or 'Team' not in df.columns:
+            return float(fallback)
+        col = 'OPS_Index' if 'OPS_Index' in df.columns else ('wRC+' if 'wRC+' in df.columns else None)
+        if col is None:
+            return float(fallback)
+        x=df.copy(); x['_v']=pd.to_numeric(x[col],errors='coerce')
+        if 'Season' in x.columns:
+            x['_s']=pd.to_numeric(x['Season'],errors='coerce')
+            latest=x['_s'].dropna().max()
+            season=x[x['_s']==latest]
+        else:
+            season=x
+        team_rows=season[season['Team']==team]
+        if team_rows.empty:
+            team_rows=x[x['Team']==team]
+        if team_rows.empty:
+            return float(fallback)
+        team_val=float(team_rows['_v'].dropna().iloc[-1])
+        league_vals=season['_v'].dropna()
+        center=float(league_vals.median()) if len(league_vals) else float(x['_v'].dropna().median())
+        if not center or pd.isna(center):
+            return float(fallback)
+        return float(np.clip((team_val/center)*100.0,75.0,125.0))
+    except Exception:
+        return float(fallback)
+
+
+def _starter_run_prevention(df, pitcher_name):
+    """Resolve a starter safely. The legacy xFIP column currently contains ERA.
+
+    Prefer exact full-name matching. A last-name fallback is allowed only when
+    it identifies one unique player, preventing accidental matches for common surnames.
+    """
+    try:
+        if not pitcher_name or pitcher_name == 'Por Anunciar' or df is None or df.empty or 'Name' not in df.columns:
+            return None
+        names=df['Name'].astype(str)
+        exact=df[names.str.casefold()==str(pitcher_name).casefold()]
+        match=exact
+        if match.empty:
+            last=str(pitcher_name).split()[-1].casefold()
+            fallback=df[names.str.split().str[-1].str.casefold()==last]
+            if fallback['Name'].nunique()!=1:
+                return None
+            match=fallback
+        col='ERA' if 'ERA' in match.columns else ('xFIP' if 'xFIP' in match.columns else None)
+        if col is None:
+            return None
+        val=pd.to_numeric(match.iloc[-1][col],errors='coerce')
+        return None if pd.isna(val) else float(val)
+    except Exception:
+        return None
+
+
 def calcular_criterio_kelly(probabilidad_real, cuota_decimal, fraccion=0.25):
     """Calcula el porcentaje óptimo de bankroll a apostar usando el Criterio de Kelly Fraccionado"""
     try:
@@ -401,18 +463,11 @@ else:
                             continue
                         
                         try:
-                            team_bat_loc = df_bat[df_bat['Team'] == loc_abbr]
-                            wrc_loc = float(team_bat_loc.iloc[-1]['wRC+']) if not team_bat_loc.empty else 100.0
-                            
-                            team_bat_vis = df_bat[df_bat['Team'] == vis_abbr]
-                            wrc_vis = float(team_bat_vis.iloc[-1]['wRC+']) if not team_bat_vis.empty else 100.0
+                            wrc_loc = _current_offensive_index(df_bat, loc_abbr)
+                            wrc_vis = _current_offensive_index(df_bat, vis_abbr)
                             
                             pitcher_loc_nombre = datos_partido["pitcher_local"]
-                            xfip_loc = None
-                            if pitcher_loc_nombre != "Por Anunciar" and not df_pit_ind.empty:
-                                match_loc = df_pit_ind[df_pit_ind['Name'].str.contains(pitcher_loc_nombre.split()[-1], case=False, na=False)]
-                                if not match_loc.empty:
-                                    xfip_loc = float(match_loc.iloc[-1]['xFIP'])
+                            xfip_loc = _starter_run_prevention(df_pit_ind, pitcher_loc_nombre)
                             
                             if xfip_loc is None:
                                 team_pit_loc = df_pit[df_pit['Team'] == loc_abbr]
@@ -420,11 +475,7 @@ else:
                                 xfip_loc = float(team_pit_loc.iloc[-1]['xFIP'])
 
                             pitcher_vis_nombre = datos_partido["pitcher_visita"]
-                            xfip_vis = None
-                            if pitcher_vis_nombre != "Por Anunciar" and not df_pit_ind.empty:
-                                match_vis = df_pit_ind[df_pit_ind['Name'].str.contains(pitcher_vis_nombre.split()[-1], case=False, na=False)]
-                                if not match_vis.empty:
-                                    xfip_vis = float(match_vis.iloc[-1]['xFIP'])
+                            xfip_vis = _starter_run_prevention(df_pit_ind, pitcher_vis_nombre)
                             
                             if xfip_vis is None:
                                 team_pit_vis = df_pit[df_pit['Team'] == vis_abbr]
@@ -633,21 +684,14 @@ else:
                         st.stop()
 
                     try:
-                        team_bat_loc = df_bat[df_bat['Team'] == loc_abbr]
-                        wrc_loc = float(team_bat_loc.iloc[-1]['wRC+']) if not team_bat_loc.empty else 100.0
-                        
-                        team_bat_vis = df_bat[df_bat['Team'] == vis_abbr]
-                        wrc_vis = float(team_bat_vis.iloc[-1]['wRC+']) if not team_bat_vis.empty else 100.0
+                        wrc_loc = _current_offensive_index(df_bat, loc_abbr)
+                        wrc_vis = _current_offensive_index(df_bat, vis_abbr)
                     except Exception as e:
-                        st.error(f"Error procesando wRC+ de bateo: {e}")
+                        st.error(f"Error procesando índice ofensivo: {e}")
                         st.stop()
                     
                     pitcher_loc_nombre = datos_partido["pitcher_local"]
-                    xfip_loc = None
-                    if pitcher_loc_nombre != "Por Anunciar" and not df_pit_ind.empty:
-                        match_loc = df_pit_ind[df_pit_ind['Name'].str.contains(pitcher_loc_nombre.split()[-1], case=False, na=False)]
-                        if not match_loc.empty:
-                            xfip_loc = float(match_loc.iloc[-1]['xFIP']) 
+                    xfip_loc = _starter_run_prevention(df_pit_ind, pitcher_loc_nombre)
                     
                     if xfip_loc is None:
                         team_pit_loc = df_pit[df_pit['Team'] == loc_abbr]
@@ -657,11 +701,7 @@ else:
                         xfip_loc = float(team_pit_loc.iloc[-1]['xFIP']) 
 
                     pitcher_vis_nombre = datos_partido["pitcher_visita"]
-                    xfip_vis = None
-                    if pitcher_vis_nombre != "Por Anunciar" and not df_pit_ind.empty:
-                        match_vis = df_pit_ind[df_pit_ind['Name'].str.contains(pitcher_vis_nombre.split()[-1], case=False, na=False)]
-                        if not match_vis.empty:
-                            xfip_vis = float(match_vis.iloc[-1]['xFIP']) 
+                    xfip_vis = _starter_run_prevention(df_pit_ind, pitcher_vis_nombre)
                     
                     if xfip_vis is None:
                         team_pit_vis = df_pit[df_pit['Team'] == vis_abbr]
