@@ -493,7 +493,10 @@ else:
                                 if team_pit_loc.empty:
                                     errores_datos.append({"Partido": f"{datos_partido['visita']} @ {datos_partido['local']}", "Error": "Sin pitching local para fallback"})
                                     continue
-                                xfip_loc = float(team_pit_loc.iloc[-1]['xFIP'])
+                                xfip_loc, _ = row_pitching_value(team_pit_loc.iloc[-1], None)
+                                if xfip_loc is None:
+                                    errores_datos.append({"Partido": f"{datos_partido['visita']} @ {datos_partido['local']}", "Error": "Sin métrica válida de pitching local"})
+                                    continue
 
                             pitcher_vis_nombre = datos_partido["pitcher_visita"]
                             xfip_vis = _starter_run_prevention(df_pit_ind, pitcher_vis_nombre)
@@ -503,7 +506,10 @@ else:
                                 if team_pit_vis.empty:
                                     errores_datos.append({"Partido": f"{datos_partido['visita']} @ {datos_partido['local']}", "Error": "Sin pitching visitante para fallback"})
                                     continue
-                                xfip_vis = float(team_pit_vis.iloc[-1]['xFIP'])
+                                xfip_vis, _ = row_pitching_value(team_pit_vis.iloc[-1], None)
+                                if xfip_vis is None:
+                                    errores_datos.append({"Partido": f"{datos_partido['visita']} @ {datos_partido['local']}", "Error": "Sin métrica válida de pitching visitante"})
+                                    continue
 
                             team_bullpen_loc = df_pit[df_pit['Team'] == loc_abbr]
                             team_era_loc = float(team_bullpen_loc.iloc[-1]['ERA']) if not team_bullpen_loc.empty else 4.0
@@ -648,7 +654,7 @@ else:
                                 'disagreement_pp': rr['_Disagreement'], 'score': rr['_Score'],
                                 'starter_away': rr['_StarterAway'], 'starter_home': rr['_StarterHome'],
                                 'park_factor': rr['_Park'], 'temperature_f': rr['_Temp'], 'wind_mph': rr['_Wind'], 'wind_direction': rr['_WindDir'],
-                                'model_version': 'v5', 'result_status': 'pending'
+                                'model_version': 'v6', 'result_status': 'pending'
                             })
                         try:
                             append_snapshot(ledger_rows)
@@ -717,7 +723,10 @@ else:
                         if team_pit_loc.empty:
                             st.error("❌ No hay datos de pitcheo reales para el local.")
                             st.stop()
-                        xfip_loc = float(team_pit_loc.iloc[-1]['xFIP']) 
+                        xfip_loc, _ = row_pitching_value(team_pit_loc.iloc[-1], None)
+                        if xfip_loc is None:
+                            st.error("❌ No hay una métrica válida de pitcheo para el local.")
+                            st.stop()
 
                     pitcher_vis_nombre = datos_partido["pitcher_visita"]
                     xfip_vis = _starter_run_prevention(df_pit_ind, pitcher_vis_nombre)
@@ -727,7 +736,10 @@ else:
                         if team_pit_vis.empty:
                             st.error("❌ No hay datos de pitcheo reales para el visitante.")
                             st.stop()
-                        xfip_vis = float(team_pit_vis.iloc[-1]['xFIP']) 
+                        xfip_vis, _ = row_pitching_value(team_pit_vis.iloc[-1], None)
+                        if xfip_vis is None:
+                            st.error("❌ No hay una métrica válida de pitcheo para el visitante.")
+                            st.stop()
 
                     team_bullpen_loc = df_pit[df_pit['Team'] == loc_abbr]
                     team_era_loc = float(team_bullpen_loc.iloc[-1]['ERA']) if not team_bullpen_loc.empty else 4.0
