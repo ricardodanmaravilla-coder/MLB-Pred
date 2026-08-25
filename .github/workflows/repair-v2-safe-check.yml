@@ -1,4 +1,4 @@
-name: MLB V5 integrity checks
+name: MLB V6 predictive + integrity checks
 
 on:
   pull_request:
@@ -14,10 +14,12 @@ jobs:
           python-version: '3.11'
       - run: pip install -r requirements.txt
       - name: Compile
-        run: python -m py_compile app_mlb.py minero_mlb.py minero_pitchers.py settle_picks.py backtest_safe.py backtest_markets.py test_streamlit_interaction.py test_v5_integrity.py modules/*.py
+        run: python -m py_compile app_mlb.py minero_mlb.py minero_pitchers.py settle_picks.py backtest_safe.py backtest_markets.py test_streamlit_interaction.py test_v5_integrity.py test_v6_predictive.py modules/*.py
       - name: V5 integrity regression suite
         run: python test_v5_integrity.py
-      - name: ML sequential, calibration and rerun-cache smoke
+      - name: V6 predictive regression suite
+        run: python test_v6_predictive.py
+      - name: ML sequential, calibration, family-selection and rerun-cache smoke
         run: |
           python - <<'PY'
           import pandas as pd
@@ -25,16 +27,18 @@ jobs:
           bat=pd.read_csv('data/mlb_batting.csv'); pit=pd.read_csv('data/mlb_pitching.csv'); games=pd.read_csv('data/mlb_games.csv')
           m=PredictorMLMLB(); assert m.entrenar(bat,pit,games)
           assert m.loaded_from_cache is False
-          r=m.predecir_partido('NYY','BOS',72,71,4.1,4.2)
+          r=m.predecir_partido('NYY','BOS',100,100,4.1,4.2)
           assert 0<=r['Probabilidad_Local']<=100 and abs(r['Probabilidad_Local']+r['Probabilidad_Visita']-100)<.2
           assert 0.35 <= r['Prob_Shrink'] <= 1.0
           assert 1.0 <= r['Sigma_Carreras'] <= 10.0
           assert 1.0 <= r['Sigma_Handicap'] <= 10.0
+          assert r['Classifier_Family'] in ('logistic','histgb')
+          assert r['Runs_Family'] in ('gbr','histgb') and r['Diff_Family'] in ('gbr','histgb')
           before=len(m.current_history.get('NYY',[])); m.actualizar_resultado('NYY','BOS',5,3); after=len(m.current_history.get('NYY',[])); assert after==before+1
           m2=PredictorMLMLB(); assert m2.entrenar(bat,pit,games); assert m2.loaded_from_cache is True
-          r2=m2.predecir_partido('NYY','BOS',72,71,4.1,4.2)
-          assert r2['Modelo_Desde_Cache'] is True
-          assert r2['Probabilidad_Local'] == r['Probabilidad_Local']
+          r2=m2.predecir_partido('NYY','BOS',100,100,4.1,4.2)
+          assert r2['Modelo_Desde_Cache'] is True and r2['Probabilidad_Local'] == r['Probabilidad_Local']
+          assert r2['Classifier_Family']==r['Classifier_Family'] and r2['Runs_Family']==r['Runs_Family']
           print(r, r2)
           PY
       - name: Monte Carlo deterministic smoke
@@ -50,7 +54,6 @@ jobs:
           assert 7.5 <= r['Carreras']['Promedio_Total'] <= 11.0
           assert 'Push 8.0' in r['Carreras'] and 'Push Spread Local +2.0' in r['Carreras']
           assert r['Metadatos']['H2H_Usado_En_Probabilidad'] is False
-          print(r['Moneyline'],r['Carreras']['Promedio_Total'],r['Metadatos']['Simulation_Seed'])
           PY
       - name: Persisted bullpen sanity
         run: |
