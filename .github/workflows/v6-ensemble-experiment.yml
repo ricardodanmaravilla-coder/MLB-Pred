@@ -1,0 +1,32 @@
+name: V6 ensemble walk-forward experiment
+on:
+  push:
+    branches: [improve/v6-max-predictive]
+    paths:
+      - .github/workflows/v6-ensemble-experiment.yml
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: improve/v6-max-predictive
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt
+      - name: Predictive regressions
+        run: python test_v6_predictive.py
+      - name: Winner model diagnostics
+        run: |
+          python - <<'PY'
+          import pandas as pd
+          from modules.ml_mlb import PredictorMLMLB
+          m=PredictorMLMLB(); assert m.entrenar(pd.read_csv('data/mlb_batting.csv'),pd.read_csv('data/mlb_pitching.csv'),pd.read_csv('data/mlb_games.csv'))
+          r=m.predecir_partido('NYY','BOS',100,100,4.0,4.0)
+          print({'nonlinear_weight':r['Peso_Clasificador_NoLineal'],'ensemble_validation_gain':r['Ganancia_Brier_Validacion_Ensemble'],'batting_metric':r['Metrica_Bateo'],'pitching_metric':r['Metrica_Pitcheo']})
+          PY
+      - name: Walk-forward backtests
+        run: |
+          python backtest_safe.py | tee /tmp/v6_ensemble_safe.txt
+          python backtest_markets.py | tee /tmp/v6_ensemble_markets.txt
