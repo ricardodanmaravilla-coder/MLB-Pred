@@ -1,4 +1,4 @@
-name: V6 real metrics enrichment experiment
+name: V6 official advanced metrics experiment
 
 on:
   push:
@@ -22,24 +22,24 @@ jobs:
         with:
           python-version: '3.11'
       - run: pip install -r requirements.txt
-      - name: Mine team and game data
+      - name: Mine official team metrics
         run: python minero_mlb.py
-      - name: Mine pitcher and bullpen data
+      - name: Mine official pitcher and bullpen FIP
         run: python minero_pitchers.py
-      - name: Require real team advanced metrics and safe pitcher fallback
+      - name: Validate official advanced metrics
         run: |
           python - <<'PY'
           import pandas as pd
           b=pd.read_csv('data/mlb_batting.csv'); p=pd.read_csv('data/mlb_pitching.csv'); s=pd.read_csv('data/mlb_pitching_individual.csv'); r=pd.read_csv('data/mlb_bullpen.csv')
-          real_b=b.get('wRC+_Source',pd.Series(dtype=str)).astype(str).str.contains('FANGRAPHS_REAL').sum()
-          real_p=p.get('xFIP_Source',pd.Series(dtype=str)).astype(str).str.contains('FANGRAPHS_REAL').sum()
-          real_s=s.get('xFIP_Source',pd.Series(dtype=str)).astype(str).str.contains('FANGRAPHS_REAL').sum()
-          real_r=r.get('Source',pd.Series(dtype=str)).astype(str).str.contains('FANGRAPHS_REAL').sum()
-          print({'real_team_batting':int(real_b),'real_team_pitching':int(real_p),'real_pitchers':int(real_s),'real_bullpens':int(real_r),'starter_rows':len(s),'bullpen_teams':r['Team'].nunique()})
-          assert real_b >= 120, real_b
-          assert real_p >= 120, real_p
-          assert len(s) >= 250
+          print({'team_batting_rows':len(b),'team_pitching_rows':len(p),'starter_rows':len(s),'bullpen_teams':r['Team'].nunique()})
+          assert pd.to_numeric(b['Offense_Index'],errors='coerce').notna().sum() >= 120
+          assert pd.to_numeric(b['ISO'],errors='coerce').notna().sum() >= 120
+          assert pd.to_numeric(p['FIP'],errors='coerce').notna().sum() >= 120
+          assert pd.to_numeric(p['K-BB%'],errors='coerce').notna().sum() >= 120
+          assert pd.to_numeric(s['FIP'],errors='coerce').notna().sum() >= 250
+          assert pd.to_numeric(r['FIP'],errors='coerce').notna().sum() >= 29
           assert r['Team'].nunique() >= 29
+          assert p['xFIP_Source'].astype(str).str.contains('FIP_USED_NOT_XFIP').all()
           PY
       - name: Walk-forward evaluation on enriched data
         run: |
@@ -49,7 +49,7 @@ jobs:
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add data/mlb_batting.csv data/mlb_pitching.csv data/mlb_pitching_individual.csv data/mlb_bullpen.csv data/mlb_games.csv data/mlb_bullpen_advanced.csv || true
-          git commit -m 'V6 persist validated FanGraphs team metrics' || exit 0
+          git add data/mlb_batting.csv data/mlb_pitching.csv data/mlb_pitching_individual.csv data/mlb_bullpen.csv data/mlb_games.csv
+          git commit -m 'V6 persist validated official advanced metrics' || exit 0
           git pull origin improve/v6-max-predictive --rebase
           git push origin HEAD:improve/v6-max-predictive
