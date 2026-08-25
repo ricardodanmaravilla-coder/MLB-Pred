@@ -7,10 +7,10 @@ NYY,Yankee Stadium,54,102,117
 ATL,Truist Park,978,101,105
 LAD,Dodger Stadium,267,100,108
 HOU,Minute Maid Park,40,99,97
-SDP,Petco Park,13,95,98
-SFG,Oracle Park,15,94,86
+SD,Petco Park,13,95,98
+SF,Oracle Park,15,94,86
 SEA,T-Mobile Park,10,91,92
-ARI,Chase Field,1086,102,105
+AZ,Chase Field,1086,102,105
 BAL,Oriole Park at Camden Yards,33,98,105
 CHC,Wrigley Field,610,100,104
 CLE,Progressive Field,580,98,95
@@ -25,7 +25,7 @@ STL,Busch Stadium,455,96,89
 TB,Tropicana Field,40,95,93
 TEX,Globe Life Field,600,99,102
 TOR,Rogers Centre,250,100,101
-WSN,Nationals Park,20,99,98
-CHW,Guaranteed Rate Field,25,98,104
+WSH,Nationals Park,20,99,98
+CWS,Guaranteed Rate Field,25,98,104
 MIA,loanDepot park,12,93,85
 MIL,American Family Field,632,101,108
