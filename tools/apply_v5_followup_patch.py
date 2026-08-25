@@ -1,5 +1,6 @@
 from pathlib import Path
 
+# Serialized rerun marker: apply only after the branch stopped receiving concurrent writes.
 p = Path('app_mlb.py')
 t = p.read_text(encoding='utf-8')
 
@@ -11,7 +12,6 @@ def rep(old, new, label, expected=1):
         raise SystemExit(f'{label}: expected {expected}, found {n}')
     t = t.replace(old, new)
 
-# Prevent duplicate labels overwriting doubleheaders in the in-memory slate.
 rep(
 '''                        llave = f"⚾ {away} ({away_pitcher}) @ {home} ({home_pitcher})"
 ''',
@@ -19,8 +19,6 @@ rep(
                         llave = f"⚾ {away} ({away_pitcher}) @ {home} ({home_pitcher}) · #{game_pk}"
 ''',
 'doubleheader key')
-
-# Log instead of silently dropping malformed slate rows.
 rep(
 '''                        if not loc_abbr or not vis_abbr: continue
 ''',
@@ -29,7 +27,6 @@ rep(
                             continue
 ''',
 'unknown team diagnostics')
-
 rep(
 '''                        if cuota_loc is None or cuota_vis is None or linea_casino is None:
                             continue
@@ -39,7 +36,6 @@ rep(
                             continue
 ''',
 'missing odds diagnostics')
-
 rep(
 '''                                if team_pit_loc.empty: continue
 ''',
@@ -56,8 +52,6 @@ rep(
                                     continue
 ''',
 'away pitching diagnostics')
-
-# Carry game identity and weather provenance into the hidden scanner state.
 rep(
 '''                                    "_Home": datos_partido['local'], "_Away": datos_partido['visita'],
                                     "_Line": market_line, "_ProbCombined": cand.probability,
@@ -74,14 +68,12 @@ rep(
                                     "_WeatherSource": weather_source,
 ''',
 'weather source state')
-
 rep(
 '''                                'game_date': slate_date().isoformat(), 'away': rr['_Away'], 'home': rr['_Home'],
 ''',
 '''                                'game_date': slate_date().isoformat(), 'game_pk': rr['_GamePk'], 'away': rr['_Away'], 'home': rr['_Home'],
 ''',
 'ledger game pk')
-
 rep(
 '''            st.caption("ℹ️ Ledger en modo local: configura GITHUB_TOKEN de escritura para persistencia entre reinicios.")
 ''',
