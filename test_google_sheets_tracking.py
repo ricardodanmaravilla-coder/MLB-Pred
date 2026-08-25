@@ -2,7 +2,7 @@ import os
 import sys
 from types import SimpleNamespace
 from modules.google_sheets_ledger import (
-    record_key, sync_rows, SHEET_HEADERS, _sheet_id, _credentials_payload
+    record_key, sync_rows, SHEET_HEADERS, _sheet_id, _credentials_payload, _schema_action
 )
 
 
@@ -64,6 +64,19 @@ def test_streamlit_secrets_are_read_when_env_is_empty():
             sys.modules['streamlit'] = old_streamlit
         else:
             sys.modules.pop('streamlit', None)
+
+
+def test_header_mismatch_empty_sheet_is_repairable():
+    assert _schema_action([]) == 'reset'
+    assert _schema_action([['Columna equivocada']]) == 'reset'
+
+
+def test_header_mismatch_with_existing_data_is_preserved():
+    assert _schema_action([['Viejo encabezado'], ['dato importante']]) == 'fallback'
+
+
+def test_correct_header_is_accepted():
+    assert _schema_action([SHEET_HEADERS]) == 'ok'
 
 
 def test_sheet_schema_keeps_tracking_fields():
