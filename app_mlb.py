@@ -13,6 +13,7 @@ from modules.scanner_engine import (
     no_vig_two_way, moneyline_candidate, total_candidate, runline_candidate
 )
 from modules.pick_ledger import append_snapshot, persistent_backend_available
+from modules.metric_quality import batting_metric, pitching_metric, row_pitching_value
 from modules.game_context import (
     slate_date, park_for_team, match_odds_game, market_from_event, conservative_auto_weather
 )
@@ -152,7 +153,7 @@ def _current_offensive_index(df, team, fallback=100.0):
     try:
         if df is None or df.empty or 'Team' not in df.columns:
             return float(fallback)
-        col = 'OPS_Index' if 'OPS_Index' in df.columns else ('wRC+' if 'wRC+' in df.columns else None)
+        col = batting_metric(df)
         if col is None:
             return float(fallback)
         x=df.copy(); x['_v']=pd.to_numeric(x[col],errors='coerce')
@@ -168,6 +169,11 @@ def _current_offensive_index(df, team, fallback=100.0):
         if team_rows.empty:
             return float(fallback)
         team_val=float(team_rows['_v'].dropna().iloc[-1])
+        # Real FanGraphs wRC+ is already league/park adjusted around 100.
+        if col == 'wRC+' and 'wRC+_Source' in season.columns:
+            src = season.loc[team_rows.index[-1], 'wRC+_Source'] if team_rows.index[-1] in season.index else ''
+            if 'FANGRAPHS_REAL' in str(src):
+                return float(np.clip(team_val,70.0,130.0))
         league_vals=season['_v'].dropna()
         center=float(league_vals.median()) if len(league_vals) else float(x['_v'].dropna().median())
         if not center or pd.isna(center):
@@ -195,11 +201,8 @@ def _starter_run_prevention(df, pitcher_name):
             if fallback['Name'].nunique()!=1:
                 return None
             match=fallback
-        col='ERA' if 'ERA' in match.columns else ('xFIP' if 'xFIP' in match.columns else None)
-        if col is None:
-            return None
-        val=pd.to_numeric(match.iloc[-1][col],errors='coerce')
-        return None if pd.isna(val) else float(val)
+        value, used = row_pitching_value(match.iloc[-1], None)
+        return None if value is None else float(value)
     except Exception:
         return None
 
@@ -214,6 +217,9 @@ def _load_bullpen_proxy():
         if df.empty or 'Team' not in df.columns or 'ERA' not in df.columns:
             return pd.DataFrame()
         df['ERA']=pd.to_numeric(df['ERA'],errors='coerce')
+        for c in ('xFIP','FIP'):
+            if c in df.columns:
+                df[c]=pd.to_numeric(df[c],errors='coerce')
         if 'Season' in df.columns:
             df['Season']=pd.to_numeric(df['Season'],errors='coerce')
         return df.dropna(subset=['Team','ERA'])
@@ -229,7 +235,8 @@ def _bullpen_era(team, fallback):
             return float(fallback)
         if 'Season' in rows.columns:
             rows=rows.sort_values('Season')
-        return float(rows.iloc[-1]['ERA'])
+        value, used = row_pitching_value(rows.iloc[-1], fallback)
+        return float(value)
     except Exception:
         return float(fallback)
 
@@ -444,6 +451,9 @@ else:
             st.warning("⚠️ ODDS_API_KEY no configurada en Secrets/entorno. La cartelera se muestra, pero no se emitirán apuestas sin cuotas reales.")
         if not persistent_backend_available():
             st.caption("ℹ️ Ledger en modo local: configura GITHUB_TOKEN y LEDGER_GITHUB_REPO para persistencia entre reinicios.")
+        bat_active = batting_metric(df_bat) or 'N/D'
+        pit_active = pitching_metric(df_pit) or 'N/D'
+        st.sidebar.caption(f"V6 métricas activas · Ofensiva: {bat_active} · Pitcheo: {pit_active}")
         modo_app = st.sidebar.radio("Modo de Operación", ["🎯 Análisis Individual por Partido", "🔍 Escáner Automático de la Jornada (EV+)"])
         
         if modo_app == "🔍 Escáner Automático de la Jornada (EV+)":
@@ -531,8 +541,8 @@ else:
 
                             # ML histórico: misma definición de features que en entrenamiento
                             # (fortaleza agregada de temporada anterior + resultados rolling).
-                            bat_col_ml = 'OPS_Index' if 'OPS_Index' in df_bat.columns else 'wRC+'
-                            pit_col_ml = 'ERA' if 'ERA' in df_pit.columns else 'xFIP'
+                            bat_col_ml = batting_metric(df_bat) or ('OPS_Index' if 'OPS_Index' in df_bat.columns else 'wRC+')
+                            pit_col_ml = pitching_metric(df_pit) or ('ERA' if 'ERA' in df_pit.columns else 'xFIP')
                             ml_off_loc = _team_prior_stat(df_bat, loc_abbr, bat_col_ml, wrc_loc)
                             ml_off_vis = _team_prior_stat(df_bat, vis_abbr, bat_col_ml, wrc_vis)
                             ml_pit_loc = _team_prior_stat(df_pit, loc_abbr, pit_col_ml, bullpen_loc_era)
@@ -765,8 +775,8 @@ else:
                     
                     # V4.2: el modo individual usa exactamente el mismo motor de selección
                     # que el scanner global: ML + Monte Carlo + mercado no-vig + edge + EV.
-                    bat_col_ml = 'OPS_Index' if 'OPS_Index' in df_bat.columns else 'wRC+'
-                    pit_col_ml = 'ERA' if 'ERA' in df_pit.columns else 'xFIP'
+                    bat_col_ml = batting_metric(df_bat) or ('OPS_Index' if 'OPS_Index' in df_bat.columns else 'wRC+')
+                    pit_col_ml = pitching_metric(df_pit) or ('ERA' if 'ERA' in df_pit.columns else 'xFIP')
                     ml_off_loc = _team_prior_stat(df_bat, loc_abbr, bat_col_ml, wrc_loc)
                     ml_off_vis = _team_prior_stat(df_bat, vis_abbr, bat_col_ml, wrc_vis)
                     ml_pit_loc = _team_prior_stat(df_pit, loc_abbr, pit_col_ml, bullpen_loc_era)
