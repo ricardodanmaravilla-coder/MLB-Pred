@@ -1,8 +1,7 @@
 """Forward audit ledger for MLB recommendations.
 
-The local CSV remains the safe fallback. When GITHUB_TOKEN and LEDGER_GITHUB_REPO
-are configured, snapshots are also persisted to the repository so Streamlit restarts
-do not erase the audit trail.
+The local CSV remains the safe fallback. When a GitHub token is configured, snapshots
+can also be persisted to the repository so Streamlit restarts do not erase the audit trail.
 """
 
 from pathlib import Path
@@ -24,11 +23,23 @@ LEDGER_COLUMNS = [
 ]
 
 
+def _secret(name, default=''):
+    value = os.getenv(name, '').strip()
+    if value:
+        return value
+    try:
+        import streamlit as st
+        value = str(st.secrets.get(name, default)).strip()
+        return value
+    except Exception:
+        return str(default).strip()
+
+
 def _github_config():
-    token = os.getenv('GITHUB_TOKEN', '').strip()
-    repo = os.getenv('LEDGER_GITHUB_REPO', '').strip()
-    branch = os.getenv('LEDGER_GITHUB_BRANCH', 'main').strip() or 'main'
-    remote_path = os.getenv('LEDGER_GITHUB_PATH', 'data/picks_ledger.csv').strip() or 'data/picks_ledger.csv'
+    token = _secret('GITHUB_TOKEN')
+    repo = _secret('LEDGER_GITHUB_REPO', 'ricardodanmaravilla-coder/MLB-Pred')
+    branch = _secret('LEDGER_GITHUB_BRANCH', 'main') or 'main'
+    remote_path = _secret('LEDGER_GITHUB_PATH', 'data/picks_ledger.csv') or 'data/picks_ledger.csv'
     return token, repo, branch, remote_path
 
 
