@@ -12,7 +12,6 @@ ROOF_OR_DOME_TEAMS = {"AZ", "HOU", "MIA", "MIL", "SEA", "TB", "TEX", "TOR"}
 
 
 def slate_date(now=None):
-    """Return the MLB slate date in US Eastern time, independent of host timezone."""
     if now is None:
         now = datetime.now(timezone.utc)
     if now.tzinfo is None:
@@ -33,7 +32,6 @@ def parse_utc(value):
 
 
 def conservative_auto_weather(team, start_time_utc, temp_f, wind_mph, wind_dir, now=None):
-    """Use current weather only near first pitch and never assume a retractable roof is open."""
     target = normalize_team(team)
     if target in ROOF_OR_DOME_TEAMS:
         return 72, 0, "None", "neutral_roof_unknown"
@@ -49,7 +47,6 @@ def conservative_auto_weather(team, start_time_utc, temp_f, wind_mph, wind_dir, 
 
 
 def park_for_team(df_parks, team):
-    """Resolve a park row using the canonical team normalizer instead of raw aliases."""
     if df_parks is None or df_parks.empty:
         return None
     cols = list(df_parks.columns)
@@ -66,8 +63,7 @@ def park_for_team(df_parks, team):
     row = rows.iloc[-1]
     try:
         return {
-            'team': target,
-            'park_factor': float(row[pf_col]),
+            'team': target, 'park_factor': float(row[pf_col]),
             'altitude_ft': float(row[alt_col]),
             'stadium': row.get('Estadio', row.get('Stadium', 'Unknown')),
         }
@@ -83,11 +79,6 @@ def _same_matchup(odds_game, mlb_game):
 
 
 def match_odds_game(odds_games, mlb_game, max_hours=2.0):
-    """Match odds by both teams and first-pitch time.
-
-    Even a single sportsbook event must be close to the MLB start time. This prevents
-    one quoted event from being attached to both legs of a doubleheader.
-    """
     candidates = [g for g in (odds_games or []) if _same_matchup(g, mlb_game)]
     if not candidates:
         return None
@@ -112,8 +103,12 @@ def match_odds_game(odds_games, mlb_game, max_hours=2.0):
 
 
 def market_from_event(event, american_to_decimal):
-    """Extract one coherent bookmaker snapshot from a matched odds event."""
-    out = {
+    """Choose one bookmaker and keep all markets internally coherent.
+
+    Prefer the bookmaker with the most complete h2h/totals/spreads snapshot instead of
+    taking the first h2h book and accidentally discarding usable totals or run lines.
+    """
+    empty = {
         'linea_carreras': None, 'cuota_loc': None, 'cuota_vis': None,
         'cuota_over': None, 'cuota_under': None,
         'spread_loc': None, 'cuota_spread_loc': None,
@@ -121,34 +116,36 @@ def market_from_event(event, american_to_decimal):
         'bookmaker': None,
     }
     if not event:
-        return out
+        return dict(empty)
     home = event.get('home_team')
     away = event.get('away_team')
+    snapshots = []
     for bookmaker in event.get('bookmakers', []):
+        snap = dict(empty)
         found = set()
-        snap = dict(out)
         for market in bookmaker.get('markets', []):
             key = market.get('key')
             outcomes = market.get('outcomes', [])
             if key == 'h2h':
                 for o in outcomes:
-                    if normalize_team(o.get('name')) == normalize_team(home):
+                    name = normalize_team(o.get('name'))
+                    if name == normalize_team(home):
                         snap['cuota_loc'] = american_to_decimal(o.get('price'))
-                    elif normalize_team(o.get('name')) == normalize_team(away):
+                    elif name == normalize_team(away):
                         snap['cuota_vis'] = american_to_decimal(o.get('price'))
                 if snap['cuota_loc'] and snap['cuota_vis']:
                     found.add('h2h')
             elif key == 'totals':
-                points = set()
+                over_point = under_point = None
                 for o in outcomes:
-                    if o.get('point') is not None:
-                        points.add(float(o['point']))
                     if o.get('name') == 'Over':
+                        over_point = o.get('point')
                         snap['cuota_over'] = american_to_decimal(o.get('price'))
                     elif o.get('name') == 'Under':
+                        under_point = o.get('point')
                         snap['cuota_under'] = american_to_decimal(o.get('price'))
-                if len(points) == 1 and snap['cuota_over'] and snap['cuota_under']:
-                    snap['linea_carreras'] = points.pop()
+                if over_point is not None and under_point is not None and float(over_point) == float(under_point) and snap['cuota_over'] and snap['cuota_under']:
+                    snap['linea_carreras'] = float(over_point)
                     found.add('totals')
             elif key == 'spreads':
                 for o in outcomes:
@@ -160,9 +157,17 @@ def market_from_event(event, american_to_decimal):
                     elif name == normalize_team(away) and point is not None:
                         snap['spread_vis'] = float(point)
                         snap['cuota_spread_vis'] = american_to_decimal(o.get('price'))
-                if snap['cuota_spread_loc'] and snap['cuota_spread_vis']:
+                if (snap['spread_loc'] is not None and snap['spread_vis'] is not None
+                        and abs(snap['spread_loc'] + snap['spread_vis']) < 1e-9
+                        and snap['cuota_spread_loc'] and snap['cuota_spread_vis']):
                     found.add('spreads')
+                else:
+                    snap['spread_loc'] = snap['cuota_spread_loc'] = None
+                    snap['spread_vis'] = snap['cuota_spread_vis'] = None
         if 'h2h' in found:
             snap['bookmaker'] = bookmaker.get('title') or bookmaker.get('key')
-            return snap
-    return out
+            snapshots.append((len(found), snap))
+    if not snapshots:
+        return dict(empty)
+    snapshots.sort(key=lambda x: x[0], reverse=True)
+    return snapshots[0][1]
