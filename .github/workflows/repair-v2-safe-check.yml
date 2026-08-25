@@ -1,4 +1,4 @@
-name: MLB repair-v2-safe checks
+name: MLB repair-v3 checks
 
 on:
   pull_request:
@@ -14,59 +14,80 @@ jobs:
           python-version: '3.11'
       - run: pip install -r requirements.txt
       - name: Compile
-        run: python -m py_compile app_mlb.py minero_mlb.py backtest_safe.py backtest_markets.py test_streamlit_interaction.py modules/*.py
-      - name: ML smoke with repository data
+        run: python -m py_compile app_mlb.py minero_mlb.py minero_pitchers.py backtest_safe.py backtest_markets.py test_streamlit_interaction.py modules/*.py
+      - name: ML sequential and calibration smoke
         run: |
           python - <<'PY'
           import pandas as pd
           from modules.ml_mlb import PredictorMLMLB
-          bat = pd.read_csv('data/mlb_batting.csv')
-          pit = pd.read_csv('data/mlb_pitching.csv')
-          games = pd.read_csv('data/mlb_games.csv')
-          model = PredictorMLMLB()
-          assert model.entrenar(bat, pit, games)
-          r = model.predecir_partido('NYY', 'BOS', 72.0, 71.0, 4.1, 4.2)
-          assert 0 <= r['Probabilidad_Local'] <= 100
-          assert 0 <= r['Probabilidad_Visita'] <= 100
-          assert abs(r['Probabilidad_Local'] + r['Probabilidad_Visita'] - 100) < 0.2
-          assert r['Sigma_Carreras'] > 0
-          assert r['Sigma_Handicap'] > 0
+          bat=pd.read_csv('data/mlb_batting.csv'); pit=pd.read_csv('data/mlb_pitching.csv'); games=pd.read_csv('data/mlb_games.csv')
+          m=PredictorMLMLB(); assert m.entrenar(bat,pit,games)
+          r=m.predecir_partido('NYY','BOS',72,71,4.1,4.2)
+          assert 0<=r['Probabilidad_Local']<=100 and abs(r['Probabilidad_Local']+r['Probabilidad_Visita']-100)<.2
+          assert 0.45 <= r['Prob_Shrink'] <= 1.0
+          before=len(m.current_history.get('NYY',[])); m.actualizar_resultado('NYY','BOS',5,3); after=len(m.current_history.get('NYY',[])); assert after==before+1
+          assert r['Sigma_Carreras']>0 and r['Sigma_Handicap']>0
           print(r)
           PY
-      - name: Monte Carlo identity and markets smoke
+      - name: Monte Carlo V3 neutral-offense smoke
         run: |
           python - <<'PY'
           import pandas as pd
           from modules.montecarlo_mlb import simular_partido_mlb
-          games = pd.read_csv('data/mlb_games.csv')
-          r = simular_partido_mlb(
-              'New York Yankees','Boston Red Sox',4.0,4.2,72.0,71.0,4.1,4.3,100.0,0,
-              0,'',72,8.5,df_games=games,num_simulaciones=6000)
-          assert 0 <= r['Moneyline']['Gana Local'] <= 100
-          assert abs(r['Moneyline']['Gana Local'] + r['Moneyline']['Gana Visita'] - 100) < 0.01
-          for line in (-5.5, -2.5, -1.5, 0.5, 1.5, 3.5, 5.5):
-              assert f'Spread Local {line:+.1f}' in r['Carreras']
-              assert f'Spread Visita {line:+.1f}' in r['Carreras']
-          assert 'Over 8.5' in r['Carreras']
-          meta = r['Metadatos']
-          assert meta['H2H_Usado_En_Probabilidad'] is True
-          assert 0.0 <= meta['H2H_Peso'] <= 0.10
-          assert meta['H2H_Muestra'] >= 0
-          assert 0.88 <= meta['Factor_Clima'] <= 1.12
-          assert 1.0 <= meta['Factor_Altitud_Residual'] <= 1.008
-          print(r['Moneyline'], r['Carreras']['Promedio_Total'], meta)
+          g=pd.read_csv('data/mlb_games.csv')
+          r=simular_partido_mlb('New York Yankees','Boston Red Sox',4.0,4.2,100,100,4.1,4.3,100,0,0,'',72,8.5,df_games=g,num_simulaciones=8000)
+          assert abs(r['Moneyline']['Gana Local']+r['Moneyline']['Gana Visita']-100)<.01
+          assert 7.5 <= r['Carreras']['Promedio_Total'] <= 11.0, r['Carreras']['Promedio_Total']
+          for line in (-5.5,-2.5,-1.5,.5,1.5,3.5,5.5):
+            assert f'Spread Local {line:+.1f}' in r['Carreras'] and f'Spread Visita {line:+.1f}' in r['Carreras']
+          meta=r['Metadatos']
+          assert meta['H2H_Usado_En_Probabilidad'] is False and meta['H2H_Peso']==0.0
+          assert meta['Forma_Reciente_Usada_En_MC'] is False
+          assert meta['Pitching_Agregado_Es_Proxy_Bullpen'] is True
+          assert meta['Empates_Regulacion']>=0
+          assert 0.88<=meta['Factor_Clima']<=1.12 and 1.0<=meta['Factor_Altitud_Residual']<=1.008
+          print(r['Moneyline'],r['Carreras']['Promedio_Total'],meta)
+          PY
+      - name: Persisted bullpen sanity
+        run: |
+          python - <<'PY'
+          import pandas as pd
+          b=pd.read_csv('data/mlb_bullpen.csv')
+          assert len(b) == 30, len(b)
+          assert b['Team'].nunique() == 30
+          assert 'OAK' in set(b['Team']) and 'ATH' not in set(b['Team'])
+          assert b['ERA'].between(1.5,8.0).all()
+          print(b[['Team','ERA','IP']].to_string(index=False))
+          PY
+      - name: Scanner engine smoke
+        run: |
+          python - <<'PY'
+          from modules.scanner_engine import no_vig_two_way,total_candidate,runline_candidate,top_candidates
+          a,b=no_vig_two_way(1.91,1.91); assert abs(a-.5)<1e-6 and abs(b-.5)<1e-6
+          weak_over=total_candidate('Over 8.5',53,58,1.95,a); assert not weak_over.accepted
+          t=total_candidate('Over 8.5',56,58,1.95,a); assert t.accepted and t.edge_pp is not None
+          u=total_candidate('Under 8.5',52.5,57,1.95,a); assert u.accepted
+          r=runline_candidate('Away +1.5',54,56,1.70,.62); assert not r.accepted
+          assert top_candidates([t,r],3)[0].selection=='Over 8.5'
+          print(t.to_dict(),u.to_dict(),r.to_dict())
           PY
       - name: No-vig odds smoke
         run: |
           python - <<'PY'
           from modules.odds_mlb import analizar_apuestas_mlb
-          mc = {'Moneyline': {'Gana Local': 58.0, 'Gana Visita': 42.0}, 'Carreras': {'Over 8.5': 55.0, 'Under 8.5': 45.0, 'Push 8.5': 0.0}}
-          ml = {'Probabilidad_Local': 56.0, 'Probabilidad_Visita': 44.0}
-          odds = {'Moneyline_Local': 1.9, 'Moneyline_Visita': 2.05, 'Cuota_Over': 1.95, 'Cuota_Under': 1.95}
-          df = analizar_apuestas_mlb(mc, ml, odds, 8.5)
-          assert 'Prob Mercado No-Vig' in df.columns
-          assert 'Edge' in df.columns
-          print(df.to_string(index=False))
+          mc={'Moneyline':{'Gana Local':58,'Gana Visita':42},'Carreras':{'Over 8.5':55,'Under 8.5':45,'Push 8.5':0}}
+          ml={'Probabilidad_Local':56,'Probabilidad_Visita':44}; odds={'Moneyline_Local':1.9,'Moneyline_Visita':2.05,'Cuota_Over':1.95,'Cuota_Under':1.95}
+          df=analizar_apuestas_mlb(mc,ml,odds,8.5); assert 'Prob Mercado No-Vig' in df.columns and 'Edge' in df.columns
+          PY
+      - name: Pick ledger smoke
+        run: |
+          python - <<'PY'
+          import tempfile, os
+          from modules.pick_ledger import append_snapshot,load_ledger
+          p=tempfile.mktemp(suffix='.csv')
+          n=append_snapshot([{'game_date':'2026-08-25','away':'BOS','home':'NYY','market':'Moneyline','selection':'NYY','odds':1.9}],p)
+          assert n==1 and len(load_ledger(p))==1
+          os.remove(p)
           PY
       - name: Chronological holdout backtest
         run: python backtest_safe.py | tee backtest_safe_output.txt
@@ -75,22 +96,9 @@ jobs:
       - name: Stable Streamlit startup
         run: |
           streamlit run app_mlb.py --server.headless true --server.port 8501 > /tmp/streamlit.log 2>&1 &
-          PID=$!
-          READY=0
-          for i in {1..30}; do
-            if curl -fsS http://127.0.0.1:8501/_stcore/health; then
-              READY=1
-              break
-            fi
-            sleep 1
-          done
-          if [ "$READY" -eq 1 ]; then
-            kill $PID || true
-            wait $PID 2>/dev/null || true
-            exit 0
-          fi
-          cat /tmp/streamlit.log
-          kill $PID || true
-          exit 1
+          PID=$!; READY=0
+          for i in {1..30}; do if curl -fsS http://127.0.0.1:8501/_stcore/health; then READY=1; break; fi; sleep 1; done
+          if [ "$READY" -eq 1 ]; then kill $PID || true; wait $PID 2>/dev/null || true; exit 0; fi
+          cat /tmp/streamlit.log; kill $PID || true; exit 1
       - name: Real Streamlit interaction smoke
         run: python test_streamlit_interaction.py
