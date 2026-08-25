@@ -21,6 +21,25 @@ def calibration_bins(y, probs):
     return bins
 
 
+def selective_precision(y, probs):
+    y=np.asarray(y,dtype=int); p=np.asarray(probs,dtype=float)
+    picks=(p>=.5).astype(int); confidence=np.maximum(p,1-p); correct=(picks==y)
+    out=[]
+    for threshold in (.52,.54,.55,.56,.58,.60,.62,.65):
+        mask=confidence>=threshold; n=int(mask.sum())
+        if not n:
+            continue
+        out.append({
+            'min_confidence':round(threshold,2),
+            'n':n,
+            'coverage':round(n/len(y),4),
+            'hit_rate':round(float(correct[mask].mean()),4),
+            'avg_confidence':round(float(confidence[mask].mean()),4),
+            'calibration_error_pp':round(float((confidence[mask].mean()-correct[mask].mean())*100),2),
+        })
+    return out
+
+
 def main():
     bat=pd.read_csv('data/mlb_batting.csv'); pit=pd.read_csv('data/mlb_pitching.csv'); games=prepare_games(pd.read_csv('data/mlb_games.csv'))
     cut=int(len(games)*0.85); train=games.iloc[:cut].copy(); test=games.iloc[cut:].copy()
@@ -51,6 +70,7 @@ def main():
         'brier':round(brier_score_loss(y,probs),4),'baseline_brier':round(brier_score_loss(y,baseline_probs),4),
         'logloss':round(log_loss(y,probs,labels=[0,1]),4),'baseline_logloss':round(log_loss(y,baseline_probs,labels=[0,1]),4),
         'runs_mae':round(mean_absolute_error(runs_true,runs_pred),3),'calibration_bins':calibration_bins(y,probs),
+        'selective_moneyline_precision':selective_precision(y,probs),
         'internal_validation_brier':model.validation_brier,'internal_validation_runs_mae':model.validation_runs_mae,
         'historical_odds_available':False,'roi_claim_allowed':False,
         'note':'Walk-forward real; resultados se incorporan solo después de predecir. Sin cuotas históricas no se afirma ROI.'
