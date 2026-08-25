@@ -6,7 +6,7 @@ from modules.team_utils import normalize_team
 
 
 BASE = 'https://statsapi.mlb.com/api/v1'
-HEADERS = {'User-Agent': 'MLB-Pred/3.1'}
+HEADERS = {'User-Agent': 'MLB-Pred/5.0'}
 
 
 def _innings_to_float(value):
@@ -41,11 +41,12 @@ def _mlb_teams():
 
 
 def minar_stats_pitchers(season=None):
-    """Persist starters plus a reliever-only bullpen proxy from official MLB StatsAPI.
+    """Persist starters plus a conservative reliever-usage bullpen proxy.
 
-    The global player stats endpoint does not reliably include team metadata, so V3
-    queries each MLB team explicitly. This prevents UNK/missing-team pitcher rows.
-    `xFIP` remains only a legacy compatibility alias for ERA and is labeled as such.
+    StatsAPI's season aggregate does not split each pitcher's ERA by role. Instead of
+    excluding every pitcher who made one start, estimate relief workload from the share
+    of appearances that were not starts. This retains swingmen while down-weighting
+    pitchers whose season line mostly comes from starting.
     """
     season = int(season or pd.Timestamp.utcnow().year)
     print(f'⚾ [INICIO] Extrayendo pitchers MLB {season} por equipo...')
@@ -77,16 +78,16 @@ def minar_stats_pitchers(season=None):
                         era = float(era_raw)
                     except (TypeError, ValueError):
                         continue
+                    g = int(stat.get('gamesPlayed', 0) or 0)
+                    gs = int(stat.get('gamesStarted', 0) or 0)
+                    ip = _innings_to_float(stat.get('inningsPitched', 0))
+                    relief_apps = max(0, g - gs)
+                    relief_share = (relief_apps / g) if g > 0 else 0.0
                     rows.append({
-                        'Name': str(name),
-                        'Team': team_abbr,
-                        'ERA': era,
-                        'xFIP': era,
-                        'xFIP_Source': 'LEGACY_ERA_NOT_REAL_XFIP',
-                        'GS': int(stat.get('gamesStarted', 0) or 0),
-                        'G': int(stat.get('gamesPlayed', 0) or 0),
-                        'IP': _innings_to_float(stat.get('inningsPitched', 0)),
-                        'Season': season,
+                        'Name': str(name), 'Team': team_abbr, 'ERA': era,
+                        'xFIP': era, 'xFIP_Source': 'LEGACY_ERA_NOT_REAL_XFIP',
+                        'GS': gs, 'G': g, 'IP': ip, 'ReliefApps': relief_apps,
+                        'ReliefShare': round(relief_share, 4), 'Season': season,
                     })
             except Exception as e:
                 failures.append((team_abbr, str(e)))
@@ -99,23 +100,22 @@ def minar_stats_pitchers(season=None):
         starters = df[df['GS'] > 0].copy().sort_values(['Team','ERA','Name'])
         starters.to_csv(starters_path, index=False)
 
-        relievers = df[(df['GS'] == 0) & (df['IP'] >= 3.0)].copy()
+        relief = df[(df['ReliefApps'] >= 3) & (df['IP'] >= 3.0)].copy()
+        relief['ReliefIPProxy'] = relief['IP'] * relief['ReliefShare']
+        relief = relief[relief['ReliefIPProxy'] >= 1.0]
         bullpen_rows = []
-        for team_code, grp in relievers.groupby('Team'):
-            ip = float(grp['IP'].sum())
+        for team_code, grp in relief.groupby('Team'):
+            ip = float(grp['ReliefIPProxy'].sum())
             if ip <= 0:
                 continue
-            era_weighted = float((grp['ERA'] * grp['IP']).sum() / ip)
+            era_weighted = float((grp['ERA'] * grp['ReliefIPProxy']).sum() / ip)
             bullpen_rows.append({
-                'Team': normalize_team(team_code),
-                'ERA': round(era_weighted, 3),
-                'IP': round(ip, 1),
-                'Relievers': int(len(grp)),
-                'Season': season,
-                'Source': 'RELIEVER_ZERO_STARTS_IP_WEIGHTED_PROXY',
+                'Team': normalize_team(team_code), 'ERA': round(era_weighted, 3),
+                'IP': round(ip, 1), 'Relievers': int(len(grp)), 'Season': season,
+                'Source': 'RELIEF_APPEARANCE_SHARE_WEIGHTED_ERA_PROXY',
             })
         bullpen = pd.DataFrame(bullpen_rows).drop_duplicates('Team', keep='last').sort_values('Team') if bullpen_rows else pd.DataFrame()
-        if len(bullpen) < 20:
+        if len(bullpen) < 25:
             raise RuntimeError(f'Bullpen proxy incompleto: solo {len(bullpen)} equipos')
         bullpen.to_csv(bullpen_path, index=False)
 
