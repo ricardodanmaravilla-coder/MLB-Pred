@@ -2,7 +2,7 @@ import math
 import pandas as pd
 
 from modules.historical_mlb import prepare_games
-from modules.pick_ledger import LEDGER_COLUMNS, sync_google_snapshot
+from modules.pick_ledger import LEDGER_COLUMNS, sync_google_snapshot, enrich_tracking_row
 from modules.team_utils import normalize_team
 
 LEDGER = 'data/picks_ledger.csv'
@@ -63,6 +63,14 @@ def main():
     if ledger.empty:
         print('Ledger empty')
         return
+
+    # Migrate legacy rows in-memory so every settled pick can report Kelly/stake/profit MXN.
+    enriched_rows = [enrich_tracking_row(row.to_dict()) for _, row in ledger.iterrows()]
+    ledger = pd.DataFrame(enriched_rows)
+    for c in LEDGER_COLUMNS:
+        if c not in ledger.columns:
+            ledger[c] = None
+
     games = prepare_games(pd.read_csv(GAMES))
     if games.empty:
         raise RuntimeError('No completed games available')
@@ -92,15 +100,14 @@ def main():
         if settled_value is None:
             continue
         status, profit, score = settled_value
+        stake_mxn = max(0.0, _f(row.get('stake_mxn'), 0.0) or 0.0)
         ledger.at[idx, 'result_status'] = status
         ledger.at[idx, 'profit_units'] = profit
+        ledger.at[idx, 'profit_mxn'] = round(stake_mxn * profit, 2)
         ledger.at[idx, 'result_value'] = score
         settled += 1
         settled_indices.append(idx)
 
-    for c in LEDGER_COLUMNS:
-        if c not in ledger.columns:
-            ledger[c] = None
     ledger[LEDGER_COLUMNS].to_csv(LEDGER, index=False)
 
     if settled_indices:
@@ -108,6 +115,10 @@ def main():
         google_status = sync_google_snapshot(rows)
         if google_status.get('configured') and not google_status.get('ok'):
             print(f"Google Sheets settlement sync failed: {google_status.get('message')}")
+        elif google_status.get('configured'):
+            print(f"Google Sheets settlement sync OK: {google_status.get('updated', 0)} updated")
+        else:
+            print('Google Sheets settlement sync skipped: not configured in this runtime')
 
     print(f'Settled picks: {settled}')
 
