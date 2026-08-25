@@ -1,0 +1,56 @@
+name: V6 real metrics enrichment experiment
+
+on:
+  push:
+    branches: [improve/v6-max-predictive]
+    paths:
+      - .github/workflows/v6-enrich-data.yml
+
+permissions:
+  contents: write
+
+jobs:
+  enrich:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: improve/v6-max-predictive
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt
+      - name: Mine team and game data
+        run: python minero_mlb.py
+      - name: Mine pitcher and bullpen data
+        run: python minero_pitchers.py
+      - name: Require real advanced metrics
+        run: |
+          python - <<'PY'
+          import pandas as pd
+          b=pd.read_csv('data/mlb_batting.csv'); p=pd.read_csv('data/mlb_pitching.csv'); s=pd.read_csv('data/mlb_pitching_individual.csv'); r=pd.read_csv('data/mlb_bullpen.csv')
+          real_b=b.get('wRC+_Source',pd.Series(dtype=str)).astype(str).str.contains('FANGRAPHS_REAL').sum()
+          real_p=p.get('xFIP_Source',pd.Series(dtype=str)).astype(str).str.contains('FANGRAPHS_REAL').sum()
+          real_s=s.get('xFIP_Source',pd.Series(dtype=str)).astype(str).str.contains('FANGRAPHS_REAL').sum()
+          real_r=r.get('Source',pd.Series(dtype=str)).astype(str).str.contains('FANGRAPHS_REAL').sum()
+          print({'real_team_batting':int(real_b),'real_team_pitching':int(real_p),'real_pitchers':int(real_s),'real_bullpens':int(real_r)})
+          assert real_b >= 120, real_b
+          assert real_p >= 120, real_p
+          assert real_s >= 100, real_s
+          assert real_r >= 25, real_r
+          assert r['Team'].nunique() >= 29
+          PY
+      - name: Walk-forward evaluation on enriched data
+        run: |
+          python backtest_safe.py | tee /tmp/v6_backtest_safe.txt
+          python backtest_markets.py | tee /tmp/v6_backtest_markets.txt
+      - name: Commit validated enriched data
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add data/mlb_batting.csv data/mlb_pitching.csv data/mlb_pitching_individual.csv data/mlb_bullpen.csv data/mlb_games.csv data/mlb_bullpen_advanced.csv || true
+          git commit -m 'V6 persist validated FanGraphs advanced metrics' || exit 0
+          git pull origin improve/v6-max-predictive --rebase
+          git push origin HEAD:improve/v6-max-predictive
