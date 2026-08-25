@@ -201,6 +201,36 @@ def _starter_run_prevention(df, pitcher_name):
         return None
 
 
+@st.cache_data(ttl=3600)
+def _load_bullpen_proxy():
+    try:
+        path='data/mlb_bullpen.csv'
+        if not os.path.exists(path):
+            return pd.DataFrame()
+        df=pd.read_csv(path)
+        if df.empty or 'Team' not in df.columns or 'ERA' not in df.columns:
+            return pd.DataFrame()
+        df['ERA']=pd.to_numeric(df['ERA'],errors='coerce')
+        if 'Season' in df.columns:
+            df['Season']=pd.to_numeric(df['Season'],errors='coerce')
+        return df.dropna(subset=['Team','ERA'])
+    except Exception:
+        return pd.DataFrame()
+
+
+def _bullpen_era(team, fallback):
+    try:
+        df=_load_bullpen_proxy()
+        rows=df[df['Team'].astype(str).str.upper()==str(team).upper()]
+        if rows.empty:
+            return float(fallback)
+        if 'Season' in rows.columns:
+            rows=rows.sort_values('Season')
+        return float(rows.iloc[-1]['ERA'])
+    except Exception:
+        return float(fallback)
+
+
 def calcular_criterio_kelly(probabilidad_real, cuota_decimal, fraccion=0.25):
     """Calcula el porcentaje óptimo de bankroll a apostar usando el Criterio de Kelly Fraccionado"""
     try:
@@ -483,10 +513,12 @@ else:
                                 xfip_vis = float(team_pit_vis.iloc[-1]['xFIP'])
 
                             team_bullpen_loc = df_pit[df_pit['Team'] == loc_abbr]
-                            bullpen_loc_era = float(team_bullpen_loc.iloc[-1]['ERA']) if not team_bullpen_loc.empty else 4.0
+                            team_era_loc = float(team_bullpen_loc.iloc[-1]['ERA']) if not team_bullpen_loc.empty else 4.0
+                            bullpen_loc_era = _bullpen_era(loc_abbr, team_era_loc)
                             
                             team_bullpen_vis = df_pit[df_pit['Team'] == vis_abbr]
-                            bullpen_vis_era = float(team_bullpen_vis.iloc[-1]['ERA']) if not team_bullpen_vis.empty else 4.0
+                            team_era_vis = float(team_bullpen_vis.iloc[-1]['ERA']) if not team_bullpen_vis.empty else 4.0
+                            bullpen_vis_era = _bullpen_era(vis_abbr, team_era_vis)
                             
                             df_parks.columns = df_parks.columns.str.strip()
                             park_data = pd.DataFrame()
@@ -711,10 +743,12 @@ else:
                         xfip_vis = float(team_pit_vis.iloc[-1]['xFIP']) 
 
                     team_bullpen_loc = df_pit[df_pit['Team'] == loc_abbr]
-                    bullpen_loc_era = float(team_bullpen_loc.iloc[-1]['ERA']) if not team_bullpen_loc.empty else 4.0
+                    team_era_loc = float(team_bullpen_loc.iloc[-1]['ERA']) if not team_bullpen_loc.empty else 4.0
+                    bullpen_loc_era = _bullpen_era(loc_abbr, team_era_loc)
                     
                     team_bullpen_vis = df_pit[df_pit['Team'] == vis_abbr]
-                    bullpen_vis_era = float(team_bullpen_vis.iloc[-1]['ERA']) if not team_bullpen_vis.empty else 4.0
+                    team_era_vis = float(team_bullpen_vis.iloc[-1]['ERA']) if not team_bullpen_vis.empty else 4.0
+                    bullpen_vis_era = _bullpen_era(vis_abbr, team_era_vis)
                     
                     df_parks.columns = df_parks.columns.str.strip()
                     park_data = pd.DataFrame()
