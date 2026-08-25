@@ -1,5 +1,9 @@
 import os
-from modules.google_sheets_ledger import record_key, sync_rows, SHEET_HEADERS
+import sys
+from types import SimpleNamespace
+from modules.google_sheets_ledger import (
+    record_key, sync_rows, SHEET_HEADERS, _sheet_id, _credentials_payload
+)
 
 
 def test_record_key_is_stable_and_market_specific():
@@ -17,6 +21,7 @@ def test_record_key_is_stable_and_market_specific():
 def test_unconfigured_google_is_fail_soft():
     old_id = os.environ.pop('GOOGLE_SHEETS_ID', None)
     old_json = os.environ.pop('GOOGLE_SERVICE_ACCOUNT_JSON', None)
+    old_streamlit = sys.modules.pop('streamlit', None)
     try:
         status = sync_rows([{
             'game_date':'2026-08-25','game_pk':1,'market':'Moneyline',
@@ -28,6 +33,37 @@ def test_unconfigured_google_is_fail_soft():
     finally:
         if old_id is not None: os.environ['GOOGLE_SHEETS_ID'] = old_id
         if old_json is not None: os.environ['GOOGLE_SERVICE_ACCOUNT_JSON'] = old_json
+        if old_streamlit is not None: sys.modules['streamlit'] = old_streamlit
+
+
+def test_streamlit_secrets_are_read_when_env_is_empty():
+    old_id = os.environ.pop('GOOGLE_SHEETS_ID', None)
+    old_json = os.environ.pop('GOOGLE_SERVICE_ACCOUNT_JSON', None)
+    old_ws = os.environ.pop('GOOGLE_SHEETS_WORKSHEET', None)
+    old_streamlit = sys.modules.get('streamlit')
+    payload = {
+        'type':'service_account', 'project_id':'mlb-test', 'private_key_id':'x',
+        'private_key':'-----BEGIN PRIVATE KEY-----\nTEST\n-----END PRIVATE KEY-----\n',
+        'client_email':'mlb-test@example.iam.gserviceaccount.com', 'client_id':'1',
+        'token_uri':'https://oauth2.googleapis.com/token'
+    }
+    import json
+    sys.modules['streamlit'] = SimpleNamespace(secrets={
+        'GOOGLE_SHEETS_ID':'sheet-from-streamlit',
+        'GOOGLE_SHEETS_WORKSHEET':'MLB_Picks',
+        'GOOGLE_SERVICE_ACCOUNT_JSON':json.dumps(payload),
+    })
+    try:
+        assert _sheet_id({}) == 'sheet-from-streamlit'
+        assert _credentials_payload({})['project_id'] == 'mlb-test'
+    finally:
+        if old_id is not None: os.environ['GOOGLE_SHEETS_ID'] = old_id
+        if old_json is not None: os.environ['GOOGLE_SERVICE_ACCOUNT_JSON'] = old_json
+        if old_ws is not None: os.environ['GOOGLE_SHEETS_WORKSHEET'] = old_ws
+        if old_streamlit is not None:
+            sys.modules['streamlit'] = old_streamlit
+        else:
+            sys.modules.pop('streamlit', None)
 
 
 def test_sheet_schema_keeps_tracking_fields():
