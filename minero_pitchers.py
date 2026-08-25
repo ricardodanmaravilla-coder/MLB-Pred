@@ -2,6 +2,8 @@ import os
 import requests
 import pandas as pd
 
+from modules.team_utils import normalize_team
+
 
 BASE = 'https://statsapi.mlb.com/api/v1'
 HEADERS = {'User-Agent': 'MLB-Pred/3.1'}
@@ -31,7 +33,8 @@ def _mlb_teams():
     out = []
     for t in data.get('teams', []):
         tid = t.get('id')
-        abbr = t.get('abbreviation') or t.get('teamCode') or t.get('fileCode') or t.get('name')
+        raw = t.get('abbreviation') or t.get('teamCode') or t.get('fileCode') or t.get('name')
+        abbr = normalize_team(raw)
         if tid and abbr:
             out.append((int(tid), str(abbr).upper()))
     return out
@@ -96,8 +99,6 @@ def minar_stats_pitchers(season=None):
         starters = df[df['GS'] > 0].copy().sort_values(['Team','ERA','Name'])
         starters.to_csv(starters_path, index=False)
 
-        # Reliever-only proxy: pitchers with zero starts, weighted by innings.
-        # It deliberately excludes swingmen so starter innings are not counted again.
         relievers = df[(df['GS'] == 0) & (df['IP'] >= 3.0)].copy()
         bullpen_rows = []
         for team_code, grp in relievers.groupby('Team'):
@@ -106,14 +107,14 @@ def minar_stats_pitchers(season=None):
                 continue
             era_weighted = float((grp['ERA'] * grp['IP']).sum() / ip)
             bullpen_rows.append({
-                'Team': team_code,
+                'Team': normalize_team(team_code),
                 'ERA': round(era_weighted, 3),
                 'IP': round(ip, 1),
                 'Relievers': int(len(grp)),
                 'Season': season,
                 'Source': 'RELIEVER_ZERO_STARTS_IP_WEIGHTED_PROXY',
             })
-        bullpen = pd.DataFrame(bullpen_rows).sort_values('Team') if bullpen_rows else pd.DataFrame()
+        bullpen = pd.DataFrame(bullpen_rows).drop_duplicates('Team', keep='last').sort_values('Team') if bullpen_rows else pd.DataFrame()
         if len(bullpen) < 20:
             raise RuntimeError(f'Bullpen proxy incompleto: solo {len(bullpen)} equipos')
         bullpen.to_csv(bullpen_path, index=False)
