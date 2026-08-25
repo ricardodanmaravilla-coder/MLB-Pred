@@ -9,6 +9,10 @@ import math
 from modules.montecarlo_mlb import simular_partido_mlb
 from modules.odds_mlb import analizar_apuestas_mlb
 from modules.ml_mlb import PredictorMLMLB
+from modules.scanner_engine import (
+    no_vig_two_way, moneyline_candidate, total_candidate, runline_candidate
+)
+from modules.pick_ledger import append_snapshot
 
 # --- CONFIGURACIÓN ---
 st.set_page_config(page_title="MLB Quant Analytics", layout="wide", page_icon="⚾")
@@ -112,6 +116,27 @@ def _diagnostico_total(prob_ml, prob_mc, prob_comb, cuota, mercado_no_vig, desac
         return {"EV_pct": None if ev is None else round(ev,2), "Edge_pp": None if edge is None else round(edge,2), "Estado": "CANDIDATO" if not fails else "NO BET", "Motivo": "Cumple filtros O/U" if not fails else "; ".join(fails)}
     except Exception as e:
         return {"EV_pct":None,"Edge_pp":None,"Estado":"NO BET","Motivo":f"Error diagnóstico: {e}"}
+
+
+def _team_prior_stat(df, team, column, fallback):
+    try:
+        if df is None or df.empty or column not in df.columns or 'Team' not in df.columns:
+            return float(fallback)
+        x = df[df['Team'] == team].copy()
+        if x.empty:
+            return float(fallback)
+        if 'Season' in x.columns:
+            x['_SeasonNum'] = pd.to_numeric(x['Season'], errors='coerce')
+            target = datetime.date.today().year - 1
+            eligible = x[x['_SeasonNum'] <= target].sort_values('_SeasonNum')
+            if not eligible.empty:
+                val = pd.to_numeric(eligible.iloc[-1][column], errors='coerce')
+                if pd.notna(val):
+                    return float(val)
+        val = pd.to_numeric(x.iloc[-1][column], errors='coerce')
+        return float(val) if pd.notna(val) else float(fallback)
+    except Exception:
+        return float(fallback)
 
 
 def calcular_criterio_kelly(probabilidad_real, cuota_decimal, fraccion=0.25):
@@ -451,8 +476,17 @@ else:
                                 num_simulaciones=50000
                             )
 
-                            # Ejecutar Machine Learning
-                            res_ml = predictor_ml.predecir_partido(loc_abbr, vis_abbr, wrc_loc, wrc_vis, bullpen_loc_era, bullpen_vis_era, park_factor)  # ML trained on team pitching, not starter ERA
+                            # ML histórico: misma definición de features que en entrenamiento
+                            # (fortaleza agregada de temporada anterior + resultados rolling).
+                            bat_col_ml = 'OPS_Index' if 'OPS_Index' in df_bat.columns else 'wRC+'
+                            pit_col_ml = 'ERA' if 'ERA' in df_pit.columns else 'xFIP'
+                            ml_off_loc = _team_prior_stat(df_bat, loc_abbr, bat_col_ml, wrc_loc)
+                            ml_off_vis = _team_prior_stat(df_bat, vis_abbr, bat_col_ml, wrc_vis)
+                            ml_pit_loc = _team_prior_stat(df_pit, loc_abbr, pit_col_ml, bullpen_loc_era)
+                            ml_pit_vis = _team_prior_stat(df_pit, vis_abbr, pit_col_ml, bullpen_vis_era)
+                            res_ml = predictor_ml.predecir_partido(
+                                loc_abbr, vis_abbr, ml_off_loc, ml_off_vis, ml_pit_loc, ml_pit_vis, park_factor
+                            )
 
                             # --- PROBABILIDADES MONTECARLO ---
                             prob_mc_loc = res_mc['Moneyline']['Gana Local']
@@ -480,166 +514,82 @@ else:
                             prob_ml_spread_loc = estimar_prob_ml(proy_hc_loc, spread_loc, "spread_loc", res_ml.get("Sigma_Handicap")) if spread_loc is not None else 50.0
                             prob_ml_spread_vis = estimar_prob_ml(-proy_hc_loc, spread_vis, "spread_vis", res_ml.get("Sigma_Handicap")) if spread_vis is not None else 50.0
 
-                            # --- UMBRALES DINÁMICOS POR MERCADO ---
-                            umbral_ml = 55.0       # Moneyline
-                            umbral_totales = 52.0  # Totales: consenso + valor relativo al mercado
-                            umbral_handicap = 54.0 # Hándicap
-
-                            # --- EVALUACIÓN Y FILTRO INTELIGENTE ---
-                            # Mercado sin vig para filtrar valor real, sin cambiar las probabilidades del modelo.
-                            mkt_loc_scanner, mkt_vis_scanner = _prob_no_vig_dos_vias(cuota_loc, cuota_vis)
-                            mkt_over_scanner, mkt_under_scanner = _prob_no_vig_dos_vias(
+                            # --- MOTOR ÚNICO DE SELECCIÓN (producción = backtest) ---
+                            mkt_loc_scanner, mkt_vis_scanner = no_vig_two_way(cuota_loc, cuota_vis)
+                            mkt_over_scanner, mkt_under_scanner = no_vig_two_way(
                                 datos_partido.get("cuota_over"), datos_partido.get("cuota_under")
                             )
-                            mkt_sp_loc_scanner, mkt_sp_vis_scanner = _prob_no_vig_dos_vias(
+                            mkt_sp_loc_scanner, mkt_sp_vis_scanner = no_vig_two_way(
                                 datos_partido.get("cuota_spread_loc"), datos_partido.get("cuota_spread_vis")
                             )
 
-                            # Diagnóstico O/U: se registra aun cuando no llega al top 3.
-                            for lado, pml_t, pmc_t, cuota_t, mkt_t in [
-                                (f"Over {linea_casino}", prob_ml_over, prob_mc_over, datos_partido.get("cuota_over"), mkt_over_scanner),
-                                (f"Under {linea_casino}", prob_ml_under, prob_mc_under, datos_partido.get("cuota_under"), mkt_under_scanner),
-                            ]:
-                                if cuota_t is not None:
-                                    pcomb_t=(pml_t+pmc_t)/2.0
-                                    desac_t=abs(pml_t-pmc_t)
-                                    dg=_diagnostico_total(pml_t,pmc_t,pcomb_t,cuota_t,mkt_t,desac_t)
+                            candidatos = [
+                                (moneyline_candidate(f"Gana Local ({datos_partido['local']})", prob_ml_loc, prob_mc_loc, cuota_loc, mkt_loc_scanner), None),
+                                (moneyline_candidate(f"Gana Visita ({datos_partido['visita']})", prob_ml_vis, prob_mc_vis, cuota_vis, mkt_vis_scanner), None),
+                            ]
+                            if datos_partido.get("cuota_over") is not None:
+                                candidatos.append((total_candidate(f"Over {linea_casino}", prob_ml_over, prob_mc_over, datos_partido.get("cuota_over"), mkt_over_scanner), linea_casino))
+                            if datos_partido.get("cuota_under") is not None:
+                                candidatos.append((total_candidate(f"Under {linea_casino}", prob_ml_under, prob_mc_under, datos_partido.get("cuota_under"), mkt_under_scanner), linea_casino))
+                            if spread_loc is not None and datos_partido.get("cuota_spread_loc") is not None:
+                                candidatos.append((runline_candidate(f"Hándicap {spread_loc:+.1f} ({datos_partido['local']})", prob_ml_spread_loc, prob_mc_spread_loc, datos_partido.get("cuota_spread_loc"), mkt_sp_loc_scanner), spread_loc))
+                            if spread_vis is not None and datos_partido.get("cuota_spread_vis") is not None:
+                                candidatos.append((runline_candidate(f"Hándicap {spread_vis:+.1f} ({datos_partido['visita']})", prob_ml_spread_vis, prob_mc_spread_vis, datos_partido.get("cuota_spread_vis"), mkt_sp_vis_scanner), spread_vis))
+
+                            for cand, market_line in candidatos:
+                                if cand is None:
+                                    continue
+                                if cand.market == 'Totales':
                                     diagnostico_totales.append({
                                         "Partido": f"{datos_partido['visita']} @ {datos_partido['local']}",
-                                        "O/U": lado, "ML": round(pml_t,1), "MC": round(pmc_t,1),
-                                        "Combinada": round(pcomb_t,1), "Cuota": cuota_t,
-                                        "Edge_pp": dg["Edge_pp"], "EV_pct": dg["EV_pct"],
-                                        "Estado": dg["Estado"], "Motivo": dg["Motivo"],
+                                        "O/U": cand.selection, "ML": round(cand.prob_ml,1), "MC": round(cand.prob_mc,1),
+                                        "Combinada": round(cand.probability,1), "Cuota": cand.odds,
+                                        "Edge_pp": cand.edge_pp, "EV_pct": cand.ev_pct,
+                                        "Estado": "CANDIDATO" if cand.accepted else "NO BET", "Motivo": cand.reason,
                                     })
-
-                            # 1. Moneyline Local
-                            if prob_mc_loc >= umbral_ml and prob_ml_loc >= umbral_ml:
-                                prob_comb_loc = (prob_mc_loc + prob_ml_loc) / 2.0
-                                ev_loc = (prob_comb_loc / 100.0) * cuota_loc - 1.0
-                                if _pasa_valor(prob_comb_loc, cuota_loc, mkt_loc_scanner):
-                                    recomendaciones.append({
-                                        "Partido": f"{datos_partido['visita']} @ {datos_partido['local']}",
-                                        "Mercado": "Moneyline",
-                                        "Apuesta": f"Gana Local ({datos_partido['local']})",
-                                        "Prob. ML": f"{round(prob_ml_loc, 1)}%",
-                                        "Prob. MC": f"{round(prob_mc_loc, 1)}%",
-                                        "Cuota": cuota_loc,
-                                        "EV+": f"{round(ev_loc*100, 2)}%",
-                                        "Stake Kelly": f"{calcular_criterio_kelly(prob_comb_loc, cuota_loc)}%",
-                                        "_Score": _score_valor(prob_comb_loc, cuota_loc, mkt_loc_scanner, abs(prob_mc_loc-prob_ml_loc))
-                                    })
-
-                            # 2. Moneyline Visita
-                            if prob_mc_vis >= umbral_ml and prob_ml_vis >= umbral_ml:
-                                prob_comb_vis = (prob_mc_vis + prob_ml_vis) / 2.0
-                                ev_vis = (prob_comb_vis / 100.0) * cuota_vis - 1.0
-                                if _pasa_valor(prob_comb_vis, cuota_vis, mkt_vis_scanner):
-                                    recomendaciones.append({
-                                        "Partido": f"{datos_partido['visita']} @ {datos_partido['local']}",
-                                        "Mercado": "Moneyline",
-                                        "Apuesta": f"Gana Visita ({datos_partido['visita']})",
-                                        "Prob. ML": f"{round(prob_ml_vis, 1)}%",
-                                        "Prob. MC": f"{round(prob_mc_vis, 1)}%",
-                                        "Cuota": cuota_vis,
-                                        "EV+": f"{round(ev_vis*100, 2)}%",
-                                        "Stake Kelly": f"{calcular_criterio_kelly(prob_comb_vis, cuota_vis)}%",
-                                        "_Score": _score_valor(prob_comb_vis, cuota_vis, mkt_vis_scanner, abs(prob_mc_vis-prob_ml_vis))
-                                    })
-
-                            # 3. Totales Over: consenso + edge/EV, no un 59% absoluto casi inalcanzable.
-                            cuota_ov = datos_partido.get("cuota_over")
-                            if cuota_ov is not None:
-                                prob_comb_over = (prob_mc_over + prob_ml_over) / 2.0
-                                desac_over = abs(prob_mc_over - prob_ml_over)
-                                ev_over = (prob_comb_over / 100.0) * cuota_ov - 1.0
-                                if (prob_mc_over >= umbral_totales and prob_ml_over >= umbral_totales and
-                                    prob_comb_over >= 54.0 and desac_over <= 15.0 and
-                                    _pasa_valor(prob_comb_over, cuota_ov, mkt_over_scanner, min_ev=0.04, min_edge=0.04)):
-                                    recomendaciones.append({
-                                        "Partido": f"{datos_partido['visita']} @ {datos_partido['local']}",
-                                        "Mercado": "Totales",
-                                        "Apuesta": f"Over {linea_casino}",
-                                        "Prob. ML": f"{round(prob_ml_over, 1)}%",
-                                        "Prob. MC": f"{round(prob_mc_over, 1)}%",
-                                        "Cuota": cuota_ov,
-                                        "EV+": f"{round(ev_over*100, 2)}%",
-                                        "Stake Kelly": f"{calcular_criterio_kelly(prob_comb_over, cuota_ov)}%",
-                                        "_Score": _score_valor(prob_comb_over, cuota_ov, mkt_over_scanner, desac_over)
-                                    })
-
-                            # 4. Totales Under: mismo estándar que Over.
-                            cuota_un = datos_partido.get("cuota_under")
-                            if cuota_un is not None:
-                                prob_comb_under = (prob_mc_under + prob_ml_under) / 2.0
-                                desac_under = abs(prob_mc_under - prob_ml_under)
-                                ev_under = (prob_comb_under / 100.0) * cuota_un - 1.0
-                                if (prob_mc_under >= umbral_totales and prob_ml_under >= umbral_totales and
-                                    prob_comb_under >= 54.0 and desac_under <= 15.0 and
-                                    _pasa_valor(prob_comb_under, cuota_un, mkt_under_scanner, min_ev=0.04, min_edge=0.04)):
-                                    recomendaciones.append({
-                                        "Partido": f"{datos_partido['visita']} @ {datos_partido['local']}",
-                                        "Mercado": "Totales",
-                                        "Apuesta": f"Under {linea_casino}",
-                                        "Prob. ML": f"{round(prob_ml_under, 1)}%",
-                                        "Prob. MC": f"{round(prob_mc_under, 1)}%",
-                                        "Cuota": cuota_un,
-                                        "EV+": f"{round(ev_under*100, 2)}%",
-                                        "Stake Kelly": f"{calcular_criterio_kelly(prob_comb_under, cuota_un)}%",
-                                        "_Score": _score_valor(prob_comb_under, cuota_un, mkt_under_scanner, desac_under)
-                                    })
-                            
-                            # 5. Spread Local: consenso MC + ML; evita sesgo sistemático hacia +1.5.
-                            cuota_sp_loc = datos_partido.get("cuota_spread_loc")
-                            if spread_loc is not None and cuota_sp_loc is not None:
-                                prob_comb_sp_loc = (prob_mc_spread_loc + prob_ml_spread_loc) / 2.0
-                                desac_sp_loc = abs(prob_mc_spread_loc - prob_ml_spread_loc)
-                                ev_sp_loc = (prob_comb_sp_loc / 100.0) * cuota_sp_loc - 1.0
-                                
-                                if (prob_mc_spread_loc >= 56.0 and prob_ml_spread_loc >= 54.0 and
-                                    prob_comb_sp_loc >= 56.0 and desac_sp_loc <= 12.0 and
-                                    _pasa_valor(prob_comb_sp_loc, cuota_sp_loc, mkt_sp_loc_scanner, min_ev=0.04, min_edge=0.04)):
-                                    recomendaciones.append({
-                                        "Partido": f"{datos_partido['visita']} @ {datos_partido['local']}",
-                                        "Mercado": "Hándicap",
-                                        "Apuesta": f"Hándicap {spread_loc:+.1f} ({datos_partido['local']})",
-                                        "Prob. ML": f"{round(prob_ml_spread_loc, 1)}%",
-                                        "Prob. MC": f"{round(prob_mc_spread_loc, 1)}%",
-                                        "Cuota": cuota_sp_loc,
-                                        "EV+": f"{round(ev_sp_loc*100, 2)}%",
-                                        "Stake Kelly": f"{calcular_criterio_kelly(prob_comb_sp_loc, cuota_sp_loc)}%",
-                                        "_Score": _score_valor(prob_comb_sp_loc, cuota_sp_loc, mkt_sp_loc_scanner, desac_sp_loc)
-                                    })
-
-                            # 6. Spread Visita: mismo estándar de consenso que el local.
-                            cuota_sp_vis = datos_partido.get("cuota_spread_vis")
-                            if spread_vis is not None and cuota_sp_vis is not None:
-                                prob_comb_sp_vis = (prob_mc_spread_vis + prob_ml_spread_vis) / 2.0
-                                desac_sp_vis = abs(prob_mc_spread_vis - prob_ml_spread_vis)
-                                ev_sp_vis = (prob_comb_sp_vis / 100.0) * cuota_sp_vis - 1.0
-                                
-                                if (prob_mc_spread_vis >= 56.0 and prob_ml_spread_vis >= 54.0 and
-                                    prob_comb_sp_vis >= 56.0 and desac_sp_vis <= 12.0 and
-                                    _pasa_valor(prob_comb_sp_vis, cuota_sp_vis, mkt_sp_vis_scanner, min_ev=0.04, min_edge=0.04)):
-                                    recomendaciones.append({
-                                        "Partido": f"{datos_partido['visita']} @ {datos_partido['local']}",
-                                        "Mercado": "Hándicap",
-                                        "Apuesta": f"Hándicap {spread_vis:+.1f} ({datos_partido['visita']})",
-                                        "Prob. ML": f"{round(prob_ml_spread_vis, 1)}%",
-                                        "Prob. MC": f"{round(prob_mc_spread_vis, 1)}%",
-                                        "Cuota": cuota_sp_vis,
-                                        "EV+": f"{round(ev_sp_vis*100, 2)}%",
-                                        "Stake Kelly": f"{calcular_criterio_kelly(prob_comb_sp_vis, cuota_sp_vis)}%",
-                                        "_Score": _score_valor(prob_comb_sp_vis, cuota_sp_vis, mkt_sp_vis_scanner, desac_sp_vis)
-                                    })
+                                if not cand.accepted:
+                                    continue
+                                recomendaciones.append({
+                                    "Partido": f"{datos_partido['visita']} @ {datos_partido['local']}",
+                                    "Mercado": cand.market,
+                                    "Apuesta": cand.selection,
+                                    "Prob. ML": f"{round(cand.prob_ml,1)}%",
+                                    "Prob. MC": f"{round(cand.prob_mc,1)}%",
+                                    "Cuota": cand.odds,
+                                    "EV+": f"{round(cand.ev_pct,2)}%",
+                                    "Stake Kelly": f"{calcular_criterio_kelly(cand.probability, cand.odds)}%",
+                                    "_Score": cand.score,
+                                    "_Home": datos_partido['local'], "_Away": datos_partido['visita'],
+                                    "_Line": market_line, "_ProbCombined": cand.probability,
+                                    "_MarketNoVig": cand.market_no_vig, "_Edge": cand.edge_pp,
+                                    "_Disagreement": cand.disagreement_pp,
+                                    "_StarterHome": datos_partido.get('pitcher_local'), "_StarterAway": datos_partido.get('pitcher_visita'),
+                                    "_Park": park_factor, "_Temp": temp_scan, "_Wind": viento_scan, "_WindDir": dir_scan,
+                                })
 
                         except Exception as e:
                             continue
                     
                     if recomendaciones:
-                        df_recom = pd.DataFrame(recomendaciones)
-                        if "_Score" in df_recom.columns:
-                            df_recom = df_recom.sort_values("_Score", ascending=False).head(3).drop(columns=["_Score"])
-                        st.dataframe(df_recom, use_container_width=True, hide_index=True)
+                        df_all = pd.DataFrame(recomendaciones).sort_values("_Score", ascending=False).head(3)
+                        ledger_rows = []
+                        for _, rr in df_all.iterrows():
+                            ledger_rows.append({
+                                'game_date': datetime.date.today().isoformat(), 'away': rr['_Away'], 'home': rr['_Home'],
+                                'market': rr['Mercado'], 'selection': rr['Apuesta'], 'line': rr['_Line'], 'odds': rr['Cuota'],
+                                'prob_ml': rr['Prob. ML'], 'prob_mc': rr['Prob. MC'], 'prob_combined': rr['_ProbCombined'],
+                                'market_no_vig': rr['_MarketNoVig'], 'edge_pp': rr['_Edge'], 'ev_pct': str(rr['EV+']).replace('%',''),
+                                'disagreement_pp': rr['_Disagreement'], 'score': rr['_Score'],
+                                'starter_away': rr['_StarterAway'], 'starter_home': rr['_StarterHome'],
+                                'park_factor': rr['_Park'], 'temperature_f': rr['_Temp'], 'wind_mph': rr['_Wind'], 'wind_direction': rr['_WindDir'],
+                                'model_version': 'v3', 'result_status': 'pending'
+                            })
+                        try:
+                            append_snapshot(ledger_rows)
+                        except Exception as ledger_error:
+                            st.caption(f"Ledger local no persistió este snapshot: {ledger_error}")
+                        visible = [c for c in df_all.columns if not c.startswith('_')]
+                        st.dataframe(df_all[visible], use_container_width=True, hide_index=True)
                     else:
                         st.info("No se encontraron apuestas que superen los filtros de valor del scanner hoy.")
 
@@ -839,7 +789,7 @@ else:
                     spread_loc = cuotas_reales.get("Spread_Local")
                     cuota_sp_loc = cuotas_reales.get("Cuota_Spread_Local")
                     if spread_loc is not None and cuota_sp_loc is not None:
-                        prob_spread_loc = carreras_dict.get(f"Spread Local {spread_loc:+.1f}", prob_loc * 0.90)
+                        prob_spread_loc = carreras_dict.get(f"Spread Local {spread_loc:+.1f}", 50.0)
                         kelly_sp_loc = calcular_criterio_kelly(prob_spread_loc, cuota_sp_loc)
                         ev_sp_loc = (prob_spread_loc / 100.0) * cuota_sp_loc - 1.0
                         veredicto_apuestas.append({
@@ -853,7 +803,7 @@ else:
                     spread_vis = cuotas_reales.get("Spread_Visita")
                     cuota_sp_vis = cuotas_reales.get("Cuota_Spread_Visita")
                     if spread_vis is not None and cuota_sp_vis is not None:
-                        prob_spread_vis = carreras_dict.get(f"Spread Visita {spread_vis:+.1f}", prob_vis * 0.90)
+                        prob_spread_vis = carreras_dict.get(f"Spread Visita {spread_vis:+.1f}", 50.0)
                         kelly_sp_vis = calcular_criterio_kelly(prob_spread_vis, cuota_sp_vis)
                         ev_sp_vis = (prob_spread_vis / 100.0) * cuota_sp_vis - 1.0
                         veredicto_apuestas.append({
