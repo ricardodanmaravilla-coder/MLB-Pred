@@ -25,14 +25,12 @@ def _clean(value: Any):
 
 
 def _runtime_secret(name: str, default: Any = ""):
-    """Read config from env first, then Streamlit Secrets, without making Streamlit mandatory."""
     env_value = os.getenv(name)
     if env_value is not None and str(env_value).strip():
         return env_value
     try:
         import streamlit as st
-        value = st.secrets.get(name, default)
-        return value
+        return st.secrets.get(name, default)
     except Exception:
         return default
 
@@ -79,6 +77,49 @@ def configured(config: Mapping[str, Any] | None = None) -> bool:
         return False
 
 
+def _schema_action(values):
+    """Return ok/reset/fallback without mutating anything.
+
+    reset: worksheet has no real data, so replacing its header is safe.
+    fallback: preserve incompatible existing data and use a dedicated V6 worksheet.
+    """
+    if not values:
+        return "reset"
+    if values[0] == SHEET_HEADERS:
+        return "ok"
+    data_rows = values[1:]
+    has_real_data = any(any(_clean(cell) for cell in row) for row in data_rows)
+    return "fallback" if has_real_data else "reset"
+
+
+def _ensure_schema(book, ws, worksheet_name, gspread):
+    values = ws.get_all_values()
+    action = _schema_action(values)
+    if action == "ok":
+        return ws, values, worksheet_name, "schema ok"
+    if action == "reset":
+        ws.clear()
+        ws.append_row(SHEET_HEADERS, value_input_option="RAW")
+        return ws, [SHEET_HEADERS], worksheet_name, "header repaired"
+
+    # Preserve any incompatible data already present. Use a stable V6 worksheet
+    # so repeated scanner runs do not create a new tab every time.
+    fallback_name = f"{worksheet_name}_V6"
+    try:
+        target = book.worksheet(fallback_name)
+    except gspread.WorksheetNotFound:
+        target = book.add_worksheet(title=fallback_name, rows=2000, cols=len(SHEET_HEADERS))
+    fallback_values = target.get_all_values()
+    fallback_action = _schema_action(fallback_values)
+    if fallback_action == "fallback":
+        return None, fallback_values, fallback_name, "fallback worksheet also has incompatible data"
+    if fallback_action == "reset":
+        target.clear()
+        target.append_row(SHEET_HEADERS, value_input_option="RAW")
+        fallback_values = [SHEET_HEADERS]
+    return target, fallback_values, fallback_name, f"using {fallback_name}; original preserved"
+
+
 def sync_rows(rows: Iterable[Mapping[str, Any]], config: Mapping[str, Any] | None = None):
     """Idempotently append new rows and update existing settled rows. Never raises."""
     rows = [dict(r) for r in rows or []]
@@ -109,12 +150,12 @@ def sync_rows(rows: Iterable[Mapping[str, Any]], config: Mapping[str, Any] | Non
         except gspread.WorksheetNotFound:
             ws = book.add_worksheet(title=worksheet_name, rows=2000, cols=len(SHEET_HEADERS))
 
-        values = ws.get_all_values()
-        if not values:
-            ws.append_row(SHEET_HEADERS, value_input_option="RAW")
-            values = [SHEET_HEADERS]
-        elif values[0] != SHEET_HEADERS:
-            return {"ok": False, "configured": True, "inserted": 0, "updated": 0, "message": "worksheet header mismatch"}
+        ws, values, actual_name, schema_message = _ensure_schema(book, ws, worksheet_name, gspread)
+        if ws is None:
+            return {
+                "ok": False, "configured": True, "inserted": 0, "updated": 0,
+                "message": schema_message
+            }
 
         key_to_row = {}
         for idx, existing in enumerate(values[1:], start=2):
@@ -142,7 +183,8 @@ def sync_rows(rows: Iterable[Mapping[str, Any]], config: Mapping[str, Any] | Non
 
         return {
             "ok": True, "configured": True, "inserted": len(append_payload),
-            "updated": len(update_payload), "message": "ok"
+            "updated": len(update_payload), "worksheet": actual_name,
+            "message": schema_message
         }
     except Exception as exc:
         return {
