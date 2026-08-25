@@ -1,0 +1,47 @@
+name: Apply final MLB V3 data and wind once
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/apply-final-v3-data-once.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-mine:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install pandas requests
+      - name: Patch branch and mine live pitchers/bullpen
+        run: |
+          git fetch origin repair-system-v3
+          git checkout -B repair-system-v3 origin/repair-system-v3
+          python tools/patch_final_v3.py
+          python -m py_compile app_mlb.py minero_pitchers.py modules/*.py
+          python minero_pitchers.py
+          test -s data/mlb_pitching_individual.csv
+          test -s data/mlb_bullpen.csv
+          python - <<'PY'
+          import pandas as pd
+          b=pd.read_csv('data/mlb_bullpen.csv')
+          s=pd.read_csv('data/mlb_pitching_individual.csv')
+          assert len(b) >= 20, len(b)
+          assert len(s) >= 100, len(s)
+          assert {'Team','ERA','IP','Relievers','Season','Source'} <= set(b.columns)
+          assert {'Name','Team','ERA','GS','IP','Season'} <= set(s.columns)
+          print('bullpen teams',len(b),'starters',len(s))
+          PY
+      - name: Commit final V3 app/data to branch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app_mlb.py data/mlb_pitching_individual.csv data/mlb_bullpen.csv
+          git commit -m 'Finalize V3 wind handling and persist bullpen proxy' || exit 0
+          git push origin HEAD:repair-system-v3
