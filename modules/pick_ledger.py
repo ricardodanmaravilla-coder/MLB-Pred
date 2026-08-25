@@ -2,16 +2,20 @@
 
 The local CSV remains the safe fallback. When a GitHub token is configured, snapshots
 can also be persisted to the repository so Streamlit restarts do not erase the audit trail.
+Google Sheets is an optional secondary sink and can never block the primary ledger.
 """
 
 from pathlib import Path
 from datetime import datetime, timezone
 import base64
 import io
+import json
 import os
 
 import pandas as pd
 import requests
+
+from .google_sheets_ledger import sync_rows as sync_google_rows
 
 
 LEDGER_COLUMNS = [
@@ -29,18 +33,28 @@ def _secret(name, default=''):
         return value
     try:
         import streamlit as st
-        value = str(st.secrets.get(name, default)).strip()
+        value = st.secrets.get(name, default)
+        if isinstance(value, str):
+            return value.strip()
         return value
     except Exception:
-        return str(default).strip()
+        return default
 
 
 def _github_config():
-    token = _secret('GITHUB_TOKEN')
-    repo = _secret('LEDGER_GITHUB_REPO', 'ricardodanmaravilla-coder/MLB-Pred')
-    branch = _secret('LEDGER_GITHUB_BRANCH', 'main') or 'main'
-    remote_path = _secret('LEDGER_GITHUB_PATH', 'data/picks_ledger.csv') or 'data/picks_ledger.csv'
+    token = str(_secret('GITHUB_TOKEN') or '').strip()
+    repo = str(_secret('LEDGER_GITHUB_REPO', 'ricardodanmaravilla-coder/MLB-Pred') or '').strip()
+    branch = str(_secret('LEDGER_GITHUB_BRANCH', 'main') or 'main').strip()
+    remote_path = str(_secret('LEDGER_GITHUB_PATH', 'data/picks_ledger.csv') or 'data/picks_ledger.csv').strip()
     return token, repo, branch, remote_path
+
+
+def _google_config():
+    return {
+        'sheet_id': _secret('GOOGLE_SHEETS_ID', ''),
+        'worksheet': _secret('GOOGLE_SHEETS_WORKSHEET', 'MLB_Picks'),
+        'service_account_json': _secret('GOOGLE_SERVICE_ACCOUNT_JSON', ''),
+    }
 
 
 def persistent_backend_available():
@@ -103,6 +117,14 @@ def _sync_remote(new):
     return False
 
 
+def sync_google_snapshot(rows):
+    """Public fail-soft helper used by scanner and settlement."""
+    try:
+        return sync_google_rows(rows, _google_config())
+    except Exception as exc:
+        return {'ok': False, 'configured': False, 'inserted': 0, 'updated': 0, 'message': str(exc)[:240]}
+
+
 def append_snapshot(rows, path='data/picks_ledger.csv'):
     if not rows:
         return 0
@@ -124,6 +146,9 @@ def append_snapshot(rows, path='data/picks_ledger.csv'):
         _sync_remote(new)
     except Exception as exc:
         print(f'Ledger remote sync failed: {exc}')
+    google_status = sync_google_snapshot(new.to_dict('records'))
+    if google_status.get('configured') and not google_status.get('ok'):
+        print(f"Google Sheets sync failed: {google_status.get('message')}")
     return len(new)
 
 
