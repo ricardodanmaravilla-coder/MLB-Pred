@@ -1,0 +1,33 @@
+name: Apply MLB repair V3 once
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/apply-repair-v3-once.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  patch-branch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Apply guarded V3 patch to repair branch
+        run: |
+          git fetch origin repair-system-v3
+          git checkout -B repair-system-v3 origin/repair-system-v3
+          python tools/patch_app_v3.py
+          python -m py_compile app_mlb.py modules/*.py backtest_safe.py backtest_markets.py
+      - name: Commit patched app only to repair branch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app_mlb.py
+          git commit -m 'Integrate V3 scanner engine and audit ledger' || exit 0
+          git push origin HEAD:repair-system-v3
