@@ -1,8 +1,7 @@
-"""Optional Google Sheets sink for scanner recommendations.
+"""Optional Google Sheets sink for MLB scanner recommendations.
 
-This module is deliberately fail-soft and side-effect isolated: prediction logic never
-imports Google libraries directly, and a Sheets outage/configuration problem must never
-prevent the scanner or primary ledger from working.
+Prediction logic never depends on Google. Any auth/network/worksheet error is returned
+as status and must not interrupt the scanner, ledger, settlement, or Streamlit UI.
 """
 from __future__ import annotations
 
@@ -11,12 +10,11 @@ import os
 from typing import Iterable, Mapping, Any
 
 SHEET_HEADERS = [
-    "record_key", "game_date", "game_pk", "away", "home", "market", "selection",
-    "line", "odds", "prob_ml", "prob_mc", "prob_combined", "market_no_vig",
-    "edge_pp", "ev_pct", "disagreement_pp", "score", "starter_away",
-    "starter_home", "park_factor", "temperature_f", "wind_mph", "wind_direction",
-    "model_version", "result_status", "result_home", "result_away",
-    "profit_units", "roi_pct"
+    "record_key", "snapshot_utc", "game_date", "game_pk", "away", "home", "market",
+    "selection", "line", "odds", "prob_ml", "prob_mc", "prob_combined",
+    "market_no_vig", "edge_pp", "ev_pct", "disagreement_pp", "score",
+    "starter_away", "starter_home", "park_factor", "temperature_f", "wind_mph",
+    "wind_direction", "model_version", "result_status", "result_value", "profit_units"
 ]
 
 
@@ -58,11 +56,11 @@ def configured(config: Mapping[str, Any] | None = None) -> bool:
         return False
 
 
-def append_recommendations(rows: Iterable[Mapping[str, Any]], config: Mapping[str, Any] | None = None):
-    """Append only unseen recommendation rows. Returns a status dict; never raises."""
+def sync_rows(rows: Iterable[Mapping[str, Any]], config: Mapping[str, Any] | None = None):
+    """Idempotently append new rows and update existing settled rows. Never raises."""
     rows = [dict(r) for r in rows or []]
     if not rows:
-        return {"ok": True, "configured": configured(config), "appended": 0, "skipped": 0, "message": "no rows"}
+        return {"ok": True, "configured": configured(config), "inserted": 0, "updated": 0, "message": "no rows"}
 
     config = dict(config or {})
     sheet_id = str(config.get("sheet_id") or os.getenv("GOOGLE_SHEETS_ID", "")).strip()
@@ -70,16 +68,18 @@ def append_recommendations(rows: Iterable[Mapping[str, Any]], config: Mapping[st
     try:
         creds_payload = _credentials_payload(config)
         if not sheet_id or not creds_payload:
-            return {"ok": True, "configured": False, "appended": 0, "skipped": len(rows), "message": "not configured"}
+            return {"ok": True, "configured": False, "inserted": 0, "updated": 0, "message": "not configured"}
 
         import gspread
         from google.oauth2.service_account import Credentials
 
-        scopes = [
-            "https://www.googleapis.com/auth/spreadsheets",
-            "https://www.googleapis.com/auth/drive.file",
-        ]
-        credentials = Credentials.from_service_account_info(creds_payload, scopes=scopes)
+        credentials = Credentials.from_service_account_info(
+            creds_payload,
+            scopes=[
+                "https://www.googleapis.com/auth/spreadsheets",
+                "https://www.googleapis.com/auth/drive.file",
+            ],
+        )
         client = gspread.authorize(credentials)
         book = client.open_by_key(sheet_id)
         try:
@@ -87,27 +87,43 @@ def append_recommendations(rows: Iterable[Mapping[str, Any]], config: Mapping[st
         except gspread.WorksheetNotFound:
             ws = book.add_worksheet(title=worksheet_name, rows=2000, cols=len(SHEET_HEADERS))
 
-        existing = ws.row_values(1)
-        if not existing:
+        values = ws.get_all_values()
+        if not values:
             ws.append_row(SHEET_HEADERS, value_input_option="RAW")
-        elif existing != SHEET_HEADERS:
-            return {"ok": False, "configured": True, "appended": 0, "skipped": len(rows), "message": "worksheet header mismatch"}
+            values = [SHEET_HEADERS]
+        elif values[0] != SHEET_HEADERS:
+            return {"ok": False, "configured": True, "inserted": 0, "updated": 0, "message": "worksheet header mismatch"}
 
-        existing_keys = set(filter(None, ws.col_values(1)[1:]))
-        payload = []
-        skipped = 0
+        key_to_row = {}
+        for idx, existing in enumerate(values[1:], start=2):
+            if existing and existing[0]:
+                key_to_row[existing[0]] = idx
+
+        append_payload = []
+        update_payload = []
         for row in rows:
             key = record_key(row)
-            if key in existing_keys:
-                skipped += 1
-                continue
             enriched = dict(row)
             enriched["record_key"] = key
-            payload.append([_clean(enriched.get(h)) for h in SHEET_HEADERS])
-            existing_keys.add(key)
+            cells = [_clean(enriched.get(h)) for h in SHEET_HEADERS]
+            existing_row = key_to_row.get(key)
+            if existing_row:
+                update_payload.append({"range": f"A{existing_row}:AB{existing_row}", "values": [cells]})
+            else:
+                append_payload.append(cells)
+                key_to_row[key] = -1
 
-        if payload:
-            ws.append_rows(payload, value_input_option="USER_ENTERED")
-        return {"ok": True, "configured": True, "appended": len(payload), "skipped": skipped, "message": "ok"}
+        if update_payload:
+            ws.batch_update(update_payload, value_input_option="USER_ENTERED")
+        if append_payload:
+            ws.append_rows(append_payload, value_input_option="USER_ENTERED")
+
+        return {
+            "ok": True, "configured": True, "inserted": len(append_payload),
+            "updated": len(update_payload), "message": "ok"
+        }
     except Exception as exc:
-        return {"ok": False, "configured": bool(sheet_id), "appended": 0, "skipped": len(rows), "message": str(exc)[:240]}
+        return {
+            "ok": False, "configured": bool(sheet_id), "inserted": 0, "updated": 0,
+            "message": str(exc)[:240]
+        }
