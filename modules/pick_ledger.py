@@ -16,7 +16,7 @@ import requests
 
 
 LEDGER_COLUMNS = [
-    'snapshot_utc','game_date','away','home','market','selection','line','odds',
+    'snapshot_utc','game_date','game_pk','away','home','market','selection','line','odds',
     'prob_ml','prob_mc','prob_combined','market_no_vig','edge_pp','ev_pct',
     'disagreement_pp','score','starter_away','starter_home','park_factor',
     'temperature_f','wind_mph','wind_direction','model_version','result_status',
@@ -42,7 +42,7 @@ def _merge_rows(old, new):
     for c in LEDGER_COLUMNS:
         if c not in out.columns:
             out[c] = None
-    keys = ['game_date','away','home','market','selection','line','odds']
+    keys = ['game_date','game_pk','away','home','market','selection','line','odds']
     out = out.drop_duplicates(subset=keys, keep='last')
     return out[LEDGER_COLUMNS]
 
