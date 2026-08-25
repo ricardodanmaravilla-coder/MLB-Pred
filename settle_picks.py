@@ -70,16 +70,23 @@ def main():
     games['_date'] = games['Date'].dt.date.astype(str)
     games['_h'] = games['Home'].map(normalize_team)
     games['_a'] = games['Away'].map(normalize_team)
+    if 'GameID' in games.columns:
+        games['_gid'] = pd.to_numeric(games['GameID'], errors='coerce')
 
     settled = 0
     for idx, row in ledger.iterrows():
         if str(row.get('result_status') or 'pending') != 'pending':
             continue
-        h, a = normalize_team(row.get('home')), normalize_team(row.get('away'))
-        d = str(row.get('game_date'))
-        matches = games[(games['_date'] == d) & (games['_h'] == h) & (games['_a'] == a)]
+        game_pk = _f(row.get('game_pk'))
+        matches = pd.DataFrame()
+        if game_pk is not None and '_gid' in games.columns:
+            matches = games[games['_gid'] == game_pk]
+        if matches.empty:
+            h, a = normalize_team(row.get('home')), normalize_team(row.get('away'))
+            d = str(row.get('game_date'))
+            matches = games[(games['_date'] == d) & (games['_h'] == h) & (games['_a'] == a)]
         if len(matches) != 1:
-            # A doubleheader cannot be settled safely without a game id in old ledger rows.
+            # Old rows without game_pk remain pending when a same-day matchup is ambiguous.
             continue
         settled_value = settle_row(row, matches.iloc[0])
         if settled_value is None:
