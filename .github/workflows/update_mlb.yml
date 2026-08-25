@@ -1,10 +1,13 @@
-name: Actualizar Sabermetria MLB (Minero)
+name: Actualizar datos MLB completos
 
 on:
   schedule:
-    # Se ejecuta todos los días a las 11:00 AM UTC
     - cron: '0 11 * * *'
-  workflow_dispatch: # Permite ejecutarlo manualmente con un clic
+  workflow_dispatch:
+
+concurrency:
+  group: mlb-daily-data-update
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -12,32 +15,58 @@ permissions:
 jobs:
   actualizar_datos_mlb:
     runs-on: ubuntu-latest
-
     steps:
-    - name: 📥 Copiar repositorio
-      uses: actions/checkout@v3
+      - name: Copiar repositorio
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-    - name: 🐍 Configurar Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.10'
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
-    - name: 📦 Instalar dependencias
-      run: |
-        python -m pip install --upgrade pip
-        pip install pandas requests lxml MLB-StatsAPI pybaseball
+      - name: Instalar dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
-    - name: ⛏️ Ejecutar Minero MLB
-      run: |
-        python minero_mlb.py
+      - name: Actualizar equipos y juegos
+        run: python minero_mlb.py
 
-    - name: 🚀 Guardar y subir
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      run: |
-        git config --global user.name "GitHub Actions Bot"
-        git config --global user.email "actions@github.com"
-        # CORRECCIÓN: Agrega TODOS los archivos CSV generados por el minero
-        git add data/*.csv
-        git commit -m "Actualización automática diaria de Sabermetría y Juegos" || echo "Sin cambios"
-        git push origin main
+      - name: Actualizar pitchers y bullpen
+        run: |
+          python minero_pitchers.py
+          test -s data/mlb_pitching_individual.csv
+          test -s data/mlb_bullpen.csv
+
+      - name: Validar CSV críticos
+        run: |
+          python - <<'PY'
+          import pandas as pd
+          from modules.team_utils import normalize_team
+          required = ['data/mlb_games.csv','data/mlb_batting.csv','data/mlb_pitching.csv','data/mlb_pitching_individual.csv','data/mlb_bullpen.csv']
+          for p in required:
+              df=pd.read_csv(p)
+              assert not df.empty, f'{p} vacío'
+          bull=pd.read_csv('data/mlb_bullpen.csv')
+          assert bull['Team'].map(normalize_team).nunique() >= 25, 'bullpen incompleto'
+          print('Data integrity OK')
+          PY
+
+      - name: Guardar y subir de forma segura
+        run: |
+          git config user.name "GitHub Actions Bot"
+          git config user.email "actions@github.com"
+          git add data/*.csv
+          if git diff --cached --quiet; then
+            echo "Sin cambios"
+            exit 0
+          fi
+          git commit -m "Actualización automática diaria MLB completa"
+          for attempt in 1 2 3; do
+            git pull origin main --rebase && git push origin HEAD:main && exit 0
+            echo "Reintentando push ($attempt/3)..."
+            sleep $((attempt * 3))
+          done
+          exit 1
