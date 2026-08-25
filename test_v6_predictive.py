@@ -24,6 +24,22 @@ def test_metric_quality_prefers_real_sources_only_with_coverage():
     assert abs(value-3.7) < 1e-9 and used == 'xFIP'
 
 
+def test_current_historical_metric_source_is_consistent():
+    bat=pd.read_csv('data/mlb_batting.csv'); pit=pd.read_csv('data/mlb_pitching.csv')
+    # Until the enrichment job has broad real-FanGraphs coverage, training must stay
+    # entirely on the legacy metric family instead of mixing scales across seasons.
+    assert batting_metric(bat) in ('OPS_Index','wRC+')
+    assert pitching_metric(pit) in ('ERA','FIP','xFIP')
+    if 'wRC+_Source' in bat.columns:
+        real=(bat['wRC+_Source'].astype(str).str.contains('FANGRAPHS_REAL',na=False)).mean()
+        if real < .80:
+            assert batting_metric(bat) == 'OPS_Index'
+    if 'xFIP_Source' in pit.columns:
+        real=(pit['xFIP_Source'].astype(str).str.contains('FANGRAPHS_REAL',na=False)).mean()
+        if real < .80:
+            assert pitching_metric(pit) != 'xFIP'
+
+
 def test_feature_vector_and_model_selection():
     bat=pd.read_csv('data/mlb_batting.csv'); pit=pd.read_csv('data/mlb_pitching.csv'); games=pd.read_csv('data/mlb_games.csv')
     m=PredictorMLMLB()
