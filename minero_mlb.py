@@ -6,6 +6,9 @@ from datetime import date, timedelta
 import pandas as pd
 import statsapi
 
+from modules.advanced_stats import enrich_team_frames
+from modules.team_utils import normalize_team
+
 TEMPORADAS = [2021, 2022, 2023, 2024, 2025, 2026]
 
 
@@ -29,8 +32,8 @@ def extraer_estadisticas_oficiales_mlb():
             equipos = statsapi.get("teams", {"season": year, "sportId": 1})["teams"]
             for equipo in equipos:
                 team_id = equipo["id"]
-                team_abbr = equipo.get("abbreviation", "UNK")
-                if team_abbr == "UNK" or not equipo.get("active", True):
+                team_abbr = normalize_team(equipo.get("abbreviation", "UNK"))
+                if not team_abbr or team_abbr == "UNK" or not equipo.get("active", True):
                     continue
 
                 stats_bat = statsapi.get("team_stats", {"teamId": team_id, "season": year, "group": "hitting", "stats": "season"})
@@ -60,18 +63,28 @@ def extraer_estadisticas_oficiales_mlb():
                         stat["xFIP_Source"] = "LEGACY_ERA_PROXY_NOT_REAL_XFIP"
                         pitcheo_data.append(stat)
 
-                time.sleep(0.25)
+                time.sleep(0.20)
         except Exception as exc:
             print(f"❌ Error en temporada {year}: {exc}")
 
     df_bateo = pd.DataFrame(bateo_data)
     df_pitcheo = pd.DataFrame(pitcheo_data)
-    if not df_bateo.empty:
-        df_bateo.to_csv("data/mlb_batting.csv", index=False)
-        print("✅ Bateo guardado con OPS real y alias legacy documentado.")
-    if not df_pitcheo.empty:
-        df_pitcheo.to_csv("data/mlb_pitching.csv", index=False)
-        print("✅ Pitcheo guardado con ERA real y alias legacy documentado.")
+    if df_bateo.empty or df_pitcheo.empty:
+        print('❌ StatsAPI no produjo bases de equipo suficientes.')
+        return df_bateo, df_pitcheo
+
+    df_bateo, df_pitcheo, bullpen_fg = enrich_team_frames(df_bateo, df_pitcheo, TEMPORADAS)
+    df_bateo.to_csv("data/mlb_batting.csv", index=False)
+    df_pitcheo.to_csv("data/mlb_pitching.csv", index=False)
+    print("✅ Bateo guardado; wRC+ real se usa cuando FanGraphs respondió.")
+    print("✅ Pitcheo guardado; FIP/xFIP reales se usan cuando FanGraphs respondió.")
+
+    if bullpen_fg is not None and not bullpen_fg.empty:
+        current = bullpen_fg[pd.to_numeric(bullpen_fg['Season'], errors='coerce') == max(TEMPORADAS)].copy()
+        if current['Team'].nunique() >= 25:
+            current.to_csv('data/mlb_bullpen_fangraphs.csv', index=False)
+            print(f"✅ Bullpen FanGraphs real guardado: {current['Team'].nunique()} equipos.")
+    return df_bateo, df_pitcheo
 
 
 def _monthly_ranges(year):
@@ -130,7 +143,7 @@ def extraer_historico_juegos():
                         "Innings": game.get("current_inning", 9),
                         "Venue": game.get("venue_name", "Unknown"),
                     })
-                time.sleep(0.4)
+                time.sleep(0.35)
                 break
             except Exception as exc:
                 print(f"⚠️ Intento {intento + 1}: {exc}")
@@ -142,13 +155,18 @@ def extraer_historico_juegos():
 
     df_nuevos = pd.DataFrame(nuevos_juegos)
     df_final = pd.concat([df_existente, df_nuevos], ignore_index=True) if not df_existente.empty else df_nuevos
-    df_final = df_final.drop_duplicates(subset=["GameID"], keep="last")
+    if 'GameID' in df_final.columns:
+        with_id = df_final[df_final['GameID'].notna()].drop_duplicates(subset=["GameID"], keep="last")
+        without_id = df_final[df_final['GameID'].isna()].drop_duplicates(subset=['Date','Away','Home'], keep='last')
+        df_final = pd.concat([with_id, without_id], ignore_index=True)
+    else:
+        df_final = df_final.drop_duplicates(subset=['Date','Away','Home'], keep='last')
     df_final.to_csv(archivo_csv, index=False)
     print(f"✅ {archivo_csv}: {len(df_final)} partidos ({len(df_final) - filas_antes:+d}).")
 
 
 if __name__ == "__main__":
-    print("--- INICIANDO SCRIPT DE MINERÍA ---")
+    print("--- INICIANDO SCRIPT DE MINERÍA V6 ---")
     os.makedirs("data", exist_ok=True)
     extraer_estadisticas_oficiales_mlb()
     extraer_historico_juegos()
