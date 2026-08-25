@@ -15,7 +15,7 @@ from modules.scanner_engine import (
 )
 from modules.pick_ledger import append_snapshot, persistent_backend_available
 from modules.game_context import (
-    slate_date, park_for_team, match_odds_game, market_from_event, conservative_auto_weather
+    slate_date, park_for_team, match_odds_game, market_from_event, conservative_auto_weather, best_auto_weather
 )
 
 # --- CONFIGURACIÓN ---
@@ -520,7 +520,7 @@ else:
                             
                             # Clima real del estadio para el scanner; fallback solo si la consulta no responde.
                             temp_raw, viento_raw, dir_raw = obtener_clima_estadio(datos_partido["local"])
-                            temp_scan, viento_scan, dir_scan, weather_source = conservative_auto_weather(
+                            temp_scan, viento_scan, dir_scan, weather_source = best_auto_weather(
                                 datos_partido["local"], datos_partido.get("start_time_utc"), temp_raw, viento_raw, dir_raw
                             )
 
@@ -672,13 +672,17 @@ else:
             seleccion = st.selectbox("Selecciona un duelo:", list(partidos_hoy.keys()))
             datos_partido = partidos_hoy[seleccion]
             
-            temp_auto, viento_auto, dir_auto = obtener_clima_estadio(datos_partido["local"])
+            current_temp, current_wind, current_dir = obtener_clima_estadio(datos_partido["local"])
+            temp_auto, viento_auto, dir_auto, weather_auto_source = best_auto_weather(
+                datos_partido["local"], datos_partido.get("start_time_utc"), current_temp, current_wind, current_dir
+            )
             
             st.subheader("2. Datos del Mercado y Clima (En Vivo)")
             c1, c2, c3, c4 = st.columns(4)
             
             opciones_viento = ["None", "Outfield (Hacia Afuera)", "Infield (Hacia Adentro)", "Lateral (Derecha a Izquierda)", "Lateral (Izquierda a Derecha)"]
             indice_dir = opciones_viento.index(dir_auto) if dir_auto in opciones_viento else 0
+            st.caption(f"Fuente clima automática: {weather_auto_source}")
             
             with c1:
                 st.metric("Línea O/U Casino", datos_partido["linea_carreras"] if datos_partido["linea_carreras"] is not None else "No disponible")
