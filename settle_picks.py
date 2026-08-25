@@ -2,7 +2,7 @@ import math
 import pandas as pd
 
 from modules.historical_mlb import prepare_games
-from modules.pick_ledger import LEDGER_COLUMNS
+from modules.pick_ledger import LEDGER_COLUMNS, sync_google_snapshot
 from modules.team_utils import normalize_team
 
 LEDGER = 'data/picks_ledger.csv'
@@ -74,6 +74,7 @@ def main():
         games['_gid'] = pd.to_numeric(games['GameID'], errors='coerce')
 
     settled = 0
+    settled_indices = []
     for idx, row in ledger.iterrows():
         if str(row.get('result_status') or 'pending') != 'pending':
             continue
@@ -86,7 +87,6 @@ def main():
             d = str(row.get('game_date'))
             matches = games[(games['_date'] == d) & (games['_h'] == h) & (games['_a'] == a)]
         if len(matches) != 1:
-            # Old rows without game_pk remain pending when a same-day matchup is ambiguous.
             continue
         settled_value = settle_row(row, matches.iloc[0])
         if settled_value is None:
@@ -96,11 +96,19 @@ def main():
         ledger.at[idx, 'profit_units'] = profit
         ledger.at[idx, 'result_value'] = score
         settled += 1
+        settled_indices.append(idx)
 
     for c in LEDGER_COLUMNS:
         if c not in ledger.columns:
             ledger[c] = None
     ledger[LEDGER_COLUMNS].to_csv(LEDGER, index=False)
+
+    if settled_indices:
+        rows = ledger.loc[settled_indices, LEDGER_COLUMNS].to_dict('records')
+        google_status = sync_google_snapshot(rows)
+        if google_status.get('configured') and not google_status.get('ok'):
+            print(f"Google Sheets settlement sync failed: {google_status.get('message')}")
+
     print(f'Settled picks: {settled}')
 
 
