@@ -60,15 +60,38 @@ def test_warehouse_auto_refresh_detects_historical_correction():
         second = wh.ensure_fresh_from_repository(source)
         assert second['fresh'] and not second['rebuilt']
 
-        # Same row count/date range: a score correction must invalidate the store.
+        # Same row count/date range: changing valid scores must invalidate the store.
         score_col = 'Home_Score' if 'Home_Score' in games.columns else 'home_score'
-        games.loc[games.index[100], score_col] = float(games.loc[games.index[100], score_col]) + 1.0
+        scores = pd.to_numeric(games[score_col], errors='coerce')
+        valid_scores = scores.notna()
+        assert valid_scores.any()
+        games.loc[valid_scores, score_col] = scores.loc[valid_scores] + 1.0
         games.to_csv(source, index=False)
         corrected = wh.ensure_fresh_from_repository(source)
         assert corrected['fresh'] and corrected['rebuilt']
 
-        # Removing a corrected/duplicate game must also remove it from DuckDB and Parquet.
-        games = games.drop(games.index[250]).reset_index(drop=True)
+        # Removing a source row that survives normalization must also remove it from DuckDB/Parquet.
+        normalized_before_remove = wh._normalize_games(games)
+        assert not normalized_before_remove.empty
+        target_key = normalized_before_remove.iloc[len(normalized_before_remove) // 2]['game_key']
+        # Find a raw row whose normalized key is the selected target and remove that exact source game.
+        raw_with_keys = wh._normalize_games(games)
+        target = raw_with_keys[raw_with_keys['game_key'] == target_key].iloc[0]
+        game_pk_col = 'gamePk' if 'gamePk' in games.columns else None
+        if game_pk_col and str(target_key).startswith('pk:'):
+            target_pk = int(str(target_key).split(':', 1)[1])
+            raw_pk = pd.to_numeric(games[game_pk_col], errors='coerce')
+            drop_idx = games.index[raw_pk == target_pk]
+        else:
+            date_col = 'Date' if 'Date' in games.columns else 'date'
+            home_col = 'Home' if 'Home' in games.columns else 'home'
+            away_col = 'Away' if 'Away' in games.columns else 'away'
+            raw_date = pd.to_datetime(games[date_col], errors='coerce').dt.strftime('%Y-%m-%d')
+            drop_idx = games.index[(raw_date == pd.Timestamp(target['Date']).strftime('%Y-%m-%d')) &
+                                   (games[home_col].map(lambda x: str(x)) == str(target['Home'])) &
+                                   (games[away_col].map(lambda x: str(x)) == str(target['Away']))]
+        assert len(drop_idx) >= 1
+        games = games.drop(drop_idx[0]).reset_index(drop=True)
         games.to_csv(source, index=False)
         removed = wh.ensure_fresh_from_repository(source)
         assert removed['fresh'] and removed['rebuilt']
