@@ -20,26 +20,35 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
       - name: Configurar Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
       - name: Instalar dependencias
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-
       - name: Actualizar equipos y juegos
         run: python minero_mlb.py
-
       - name: Actualizar pitchers y bullpen
         run: |
           python minero_pitchers.py
           test -s data/mlb_pitching_individual.csv
           test -s data/mlb_bullpen.csv
-
+      - name: Auditar cobertura de señales avanzadas
+        run: |
+          python signal_audit.py | tee signal_coverage.txt
+          python - <<'PY'
+          import pandas as pd
+          from modules.signal_features import coverage_report
+          bat=pd.read_csv('data/mlb_batting.csv'); pit=pd.read_csv('data/mlb_pitching.csv')
+          report=coverage_report(bat,pit)
+          eligible=sum(v >= 0.65 for k,v in report.items() if not k.startswith('context:'))
+          if eligible < 6:
+              print(f'::warning::Solo {eligible} métricas históricas avanzadas tienen >=65% de cobertura; ML conservará baseline si corresponde.')
+          else:
+              print(f'Métricas históricas avanzadas elegibles por cobertura: {eligible}')
+          PY
       - name: Liquidar picks pendientes y sincronizar Google Sheets
         env:
           GOOGLE_SHEETS_ID: ${{ secrets.GOOGLE_SHEETS_ID }}
@@ -51,22 +60,22 @@ jobs:
             echo "::warning::Google Sheets Actions secrets no configurados; el ledger se liquidará pero Sheets no podrá actualizarse automáticamente."
           fi
           python settle_picks.py
-
       - name: Validar CSV críticos
         run: |
           python - <<'PY'
           import pandas as pd
           from modules.team_utils import normalize_team
-          required = ['data/mlb_games.csv','data/mlb_batting.csv','data/mlb_pitching.csv','data/mlb_pitching_individual.csv','data/mlb_bullpen.csv','data/picks_ledger.csv']
+          required=['data/mlb_games.csv','data/mlb_batting.csv','data/mlb_pitching.csv','data/mlb_pitching_individual.csv','data/mlb_bullpen.csv','data/picks_ledger.csv']
           for p in required:
               df=pd.read_csv(p)
-              if p != 'data/picks_ledger.csv':
-                  assert not df.empty, f'{p} vacío'
-          bull=pd.read_csv('data/mlb_bullpen.csv')
-          assert bull['Team'].map(normalize_team).nunique() >= 25, 'bullpen incompleto'
+              if p!='data/picks_ledger.csv': assert not df.empty,f'{p} vacío'
+          bull=pd.read_csv('data/mlb_bullpen.csv'); assert bull['Team'].map(normalize_team).nunique()>=25,'bullpen incompleto'
+          starters=pd.read_csv('data/mlb_pitching_individual.csv')
+          if 'PitchHand' in starters.columns:
+              hand_cov=float(starters['PitchHand'].notna().mean())
+              if hand_cov < .80: print(f'::warning::Cobertura PitchHand baja: {hand_cov:.1%}')
           print('Data integrity OK')
           PY
-
       - name: Guardar y subir de forma segura
         run: |
           git config user.name "GitHub Actions Bot"
