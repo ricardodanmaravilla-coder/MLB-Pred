@@ -6,6 +6,7 @@ from modules.historical_mlb import prepare_games
 from modules.ml_mlb import PredictorMLMLB, _date_safe_cut
 from modules.montecarlo_mlb import _estimate_dispersion
 from modules.odds_mlb import _conditional_no_push, _ev, analizar_apuestas_mlb
+from modules.scanner_engine import moneyline_candidate
 
 
 def test_gameid_survives_as_gamepk_and_doubleheaders_do_not_collapse():
@@ -80,7 +81,6 @@ def test_montecarlo_dispersion_is_estimated_from_real_score_variance():
     rng = np.random.default_rng(7)
     rows = []
     for i in range(600):
-        # Deliberately overdispersed team scores; historical moments should replace fallback 14.5.
         h = int(rng.negative_binomial(5.0, 5.0 / 9.5))
         a = int(rng.negative_binomial(5.0, 5.0 / 9.5))
         rows.append({
@@ -94,10 +94,18 @@ def test_montecarlo_dispersion_is_estimated_from_real_score_variance():
     assert abs(k - 14.5) > 1.0
 
 
+def test_scanner_never_accepts_without_complete_two_way_market_reference():
+    candidate = moneyline_candidate('NYY', 64.0, 63.0, 2.10, market_no_vig=None)
+    assert candidate is not None
+    assert not candidate.accepted
+    assert 'Mercado no-vig incompleto' in candidate.reason
+
+
 if __name__ == '__main__':
     test_gameid_survives_as_gamepk_and_doubleheaders_do_not_collapse()
     test_total_edge_is_no_push_conditional_while_ev_is_unconditional()
     test_csv_fallback_doubleheader_features_do_not_see_game_one_result()
     test_internal_validation_cut_never_splits_calendar_date()
     test_montecarlo_dispersion_is_estimated_from_real_score_variance()
+    test_scanner_never_accepts_without_complete_two_way_market_reference()
     print('Audit regressions: OK')
