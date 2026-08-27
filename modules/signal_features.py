@@ -1,8 +1,8 @@
 """Leak-safe advanced signals for MLB-Pred.
 
-Only information alignable to a prior completed season is admitted to ML. Live-only
-signals (weather, confirmed starter, current bullpen) remain in Monte Carlo unless an
-equivalent historical pregame dataset exists.
+Only information alignable to a prior completed season or known before first pitch is
+admitted to ML. Live-only weather/starter/bullpen context remains in Monte Carlo unless
+an equivalent historical pregame dataset exists.
 """
 from __future__ import annotations
 import numpy as np
@@ -12,6 +12,7 @@ from .team_utils import normalize_team
 BATTING_SIGNAL_COLUMNS=('wOBA','ISO','BB%','K%','EV','HardHit%','Barrel%')
 PITCHING_SIGNAL_COLUMNS=('FIP','xFIP','SIERA','WHIP','K-BB%','GB%','HR/9')
 MODEL_ADVANCED_COLUMNS=[
+ 'home_rest_norm','away_rest_norm',
  'home_woba_rel','away_woba_rel','home_iso_rel','away_iso_rel','home_bb_rel','away_bb_rel','home_k_rel','away_k_rel',
  'home_ev_rel','away_ev_rel','home_hardhit_rel','away_hardhit_rel','home_barrel_rel','away_barrel_rel',
  'home_fip_rel','away_fip_rel','home_xfip_rel','away_xfip_rel','home_siera_rel','away_siera_rel',
@@ -34,8 +35,12 @@ def _relative(value,center,inverse=False):
         return float(np.clip((c/v) if inverse else (v/c),0.65,1.35))
     except Exception:return 1.0
 
-def _row(home,away,season,bm,bmed,pm,pmed):
-    sy=int(season)-1;h=normalize_team(home);a=normalize_team(away);d={}
+def _rest_norm(value):
+    try:return float(np.clip(float(value),0.0,7.0)/3.0)
+    except Exception:return 1.0
+
+def _row(home,away,season,bm,bmed,pm,pmed,home_rest=3.0,away_rest=3.0):
+    sy=int(season)-1;h=normalize_team(home);a=normalize_team(away);d={'home_rest_norm':_rest_norm(home_rest),'away_rest_norm':_rest_norm(away_rest)}
     for col,key in {'wOBA':'woba','ISO':'iso','BB%':'bb','K%':'k','EV':'ev','HardHit%':'hardhit','Barrel%':'barrel'}.items():
         center=bmed.get(col,{}).get(sy);hm=bm.get(col,{}).get((h,sy),center);am=bm.get(col,{}).get((a,sy),center);inv=(col=='K%')
         d[f'home_{key}_rel']=_relative(hm,center,inv);d[f'away_{key}_rel']=_relative(am,center,inv)
@@ -47,18 +52,22 @@ def _row(home,away,season,bm,bmed,pm,pmed):
 def build_advanced_signal_frame(feature_frame,batting,pitching):
     if feature_frame is None or feature_frame.empty:return pd.DataFrame(columns=MODEL_ADVANCED_COLUMNS)
     bm,bmed=_season_team_maps(batting,BATTING_SIGNAL_COLUMNS);pm,pmed=_season_team_maps(pitching,PITCHING_SIGNAL_COLUMNS)
-    out=pd.DataFrame([_row(r.Home,r.Away,r.Season,bm,bmed,pm,pmed) for r in feature_frame.itertuples(index=False)],index=feature_frame.index)
+    rows=[]
+    for r in feature_frame.itertuples(index=False):
+        rows.append(_row(r.Home,r.Away,r.Season,bm,bmed,pm,pmed,getattr(r,'home_rest_days',3.0),getattr(r,'away_rest_days',3.0)))
+    out=pd.DataFrame(rows,index=feature_frame.index)
     for c in MODEL_ADVANCED_COLUMNS:
         if c not in out.columns:out[c]=1.0
     return out[MODEL_ADVANCED_COLUMNS].replace([np.inf,-np.inf],np.nan).fillna(1.0)
 
-def build_live_signal_row(home,away,season,batting,pitching):
+def build_live_signal_row(home,away,season,batting,pitching,home_rest=3.0,away_rest=3.0):
     bm,bmed=_season_team_maps(batting,BATTING_SIGNAL_COLUMNS);pm,pmed=_season_team_maps(pitching,PITCHING_SIGNAL_COLUMNS)
-    d=_row(home,away,season,bm,bmed,pm,pmed)
+    d=_row(home,away,season,bm,bmed,pm,pmed,home_rest,away_rest)
     return np.asarray([float(d.get(c,1.0)) for c in MODEL_ADVANCED_COLUMNS],dtype=float)
 
 def coverage_report(batting,pitching):
     report={}
     for name,df,cols in [('batting',batting,BATTING_SIGNAL_COLUMNS),('pitching',pitching,PITCHING_SIGNAL_COLUMNS)]:
         for c in cols:report[f'{name}:{c}']=0.0 if df is None or df.empty or c not in df.columns else round(float(_num_series(df[c]).notna().mean()),4)
+    report['context:rest_days']=1.0
     return report
