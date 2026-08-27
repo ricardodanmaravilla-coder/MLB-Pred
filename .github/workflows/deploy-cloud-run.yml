@@ -1,0 +1,42 @@
+name: Deploy MLB to Cloud Run
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - id: auth
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_WIF_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v3
+      - name: Deploy source to Cloud Run
+        run: |
+          gcloud run deploy mlb-pred-v7 \
+            --source . \
+            --project "${{ secrets.GCP_PROJECT_ID }}" \
+            --region "${{ vars.GCP_REGION || 'us-central1' }}" \
+            --platform managed \
+            --allow-unauthenticated \
+            --port 8080 \
+            --cpu 2 \
+            --memory 2Gi \
+            --concurrency 4 \
+            --timeout 900 \
+            --min 0 \
+            --max 3 \
+            --set-env-vars="MLB_DATA_DIR=data"
+      - name: Show service URL
+        run: |
+          gcloud run services describe mlb-pred-v7 \
+            --project "${{ secrets.GCP_PROJECT_ID }}" \
+            --region "${{ vars.GCP_REGION || 'us-central1' }}" \
+            --format='value(status.url)'
