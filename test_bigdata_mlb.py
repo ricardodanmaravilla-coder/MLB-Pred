@@ -32,5 +32,12 @@ def test_future_result_does_not_change_past_features():
 def test_previous_game_updates_next_game():
     f = MLBDataWarehouse.build_leak_safe_features(_games())
     second = f.iloc[1]
-    assert second.home_win5 == 0.0  # BOS lost game 1
-    assert second.away_win5 == 1.0  # NYY won game 1
+    assert second.home_win5 == 0.0
+    assert second.away_win5 == 1.0
+
+
+if __name__ == '__main__':
+    test_first_game_uses_priors_only()
+    test_future_result_does_not_change_past_features()
+    test_previous_game_updates_next_game()
+    print('Big Data leak-safety: OK')
