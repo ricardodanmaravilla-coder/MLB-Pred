@@ -45,6 +45,35 @@ def test_default_repository_bootstrap_and_predictor_uses_store():
     assert 0 <= r['Probabilidad_Local'] <= 100
 
 
+def test_warehouse_auto_refresh_detects_historical_correction():
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td) / 'warehouse'
+        source = Path(td) / 'games.csv'
+        games = pd.read_csv('data/mlb_games.csv').head(1200).copy()
+        games.to_csv(source, index=False)
+        wh = MLBDataWarehouse(root)
+        first = wh.ensure_fresh_from_repository(source)
+        assert first['fresh'] and first['rebuilt'] and first['features'] > 1000
+        second = wh.ensure_fresh_from_repository(source)
+        assert second['fresh'] and not second['rebuilt']
+
+        # Same number of rows and same date range: a score correction must still invalidate the store.
+        score_col = 'Home_Score' if 'Home_Score' in games.columns else 'home_score'
+        games.loc[games.index[100], score_col] = float(games.loc[games.index[100], score_col]) + 1.0
+        games.to_csv(source, index=False)
+        corrected = wh.ensure_fresh_from_repository(source)
+        assert corrected['fresh'] and corrected['rebuilt']
+
+        con = wh.connect()
+        try:
+            rebuilt_games = con.execute('SELECT COUNT(*) FROM games').fetchone()[0]
+            rebuilt_features = con.execute('SELECT COUNT(*) FROM pregame_features').fetchone()[0]
+        finally:
+            con.close()
+        assert rebuilt_games == len(wh._normalize_games(games))
+        assert rebuilt_features == rebuilt_games
+
+
 def test_scanner_bridge_is_idempotent_and_settles():
     row = {
         'snapshot_utc': '2026-08-27T12:00:00+00:00', 'game_date': '2099-01-01',
@@ -76,5 +105,6 @@ def test_scanner_bridge_is_idempotent_and_settles():
 if __name__ == '__main__':
     test_warehouse_training_contract_and_tracking()
     test_default_repository_bootstrap_and_predictor_uses_store()
+    test_warehouse_auto_refresh_detects_historical_correction()
     test_scanner_bridge_is_idempotent_and_settles()
     print('Big Data integration: OK')
