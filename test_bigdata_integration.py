@@ -57,21 +57,28 @@ def test_warehouse_auto_refresh_detects_historical_correction():
         second = wh.ensure_fresh_from_repository(source)
         assert second['fresh'] and not second['rebuilt']
 
-        # Same number of rows and same date range: a score correction must still invalidate the store.
+        # Same row count/date range: a score correction must invalidate the store.
         score_col = 'Home_Score' if 'Home_Score' in games.columns else 'home_score'
         games.loc[games.index[100], score_col] = float(games.loc[games.index[100], score_col]) + 1.0
         games.to_csv(source, index=False)
         corrected = wh.ensure_fresh_from_repository(source)
         assert corrected['fresh'] and corrected['rebuilt']
 
+        # Removing a corrected/duplicate game must also remove it from DuckDB and Parquet.
+        games = games.drop(games.index[250]).reset_index(drop=True)
+        games.to_csv(source, index=False)
+        removed = wh.ensure_fresh_from_repository(source)
+        assert removed['fresh'] and removed['rebuilt']
+
+        expected = len(wh._normalize_games(games))
         con = wh.connect()
         try:
             rebuilt_games = con.execute('SELECT COUNT(*) FROM games').fetchone()[0]
             rebuilt_features = con.execute('SELECT COUNT(*) FROM pregame_features').fetchone()[0]
         finally:
             con.close()
-        assert rebuilt_games == len(wh._normalize_games(games))
-        assert rebuilt_features == rebuilt_games
+        assert rebuilt_games == expected
+        assert rebuilt_features == expected
 
 
 def test_scanner_bridge_is_idempotent_and_settles():
