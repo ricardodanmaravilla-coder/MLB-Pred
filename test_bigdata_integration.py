@@ -7,6 +7,7 @@ from modules.bigdata_mlb import MLBDataWarehouse, LEGACY_ML_COLUMNS, bootstrap_f
 from modules.bigdata_tracking import sync_snapshot_rows, settle_snapshot_rows
 from modules.historical_mlb import prepare_games
 from modules.ml_mlb import PredictorMLMLB
+from modules.odds_mlb import _conditional_no_push, _ev, _no_vig_two_way, analizar_apuestas_mlb
 
 
 def test_warehouse_training_contract_and_tracking():
@@ -65,6 +66,30 @@ def test_predictor_respects_training_subset_and_never_reads_future_rows():
     assert m.training_source == 'duckdb_parquet_feature_store_subset_safe'
     assert m.training_rows == expected
     assert m.training_rows < full_count
+
+
+def test_totals_edge_compares_conditional_probabilities_but_ev_keeps_push():
+    # A two-way quoted total is a no-vig probability conditional on no push.
+    p_win, p_push = 0.48, 0.08
+    assert abs(_conditional_no_push(p_win, p_push) - (0.48 / 0.92)) < 1e-12
+    assert abs(_ev(p_win, 2.0, p_push) - 0.04) < 1e-12
+    mkt_over, _ = _no_vig_two_way(1.91, 1.91)
+    assert abs(mkt_over - 0.5) < 1e-12
+
+    res_mc = {
+        'Moneyline': {'Gana Local': 50.0, 'Gana Visita': 50.0},
+        'Carreras': {'Over 8.0': 48.0, 'Under 8.0': 44.0, 'Push 8.0': 8.0},
+    }
+    df = analizar_apuestas_mlb(
+        res_mc, {'Probabilidad_Local': 50.0, 'Probabilidad_Visita': 50.0},
+        {'Moneyline_Local': 1.91, 'Moneyline_Visita': 1.91, 'Cuota_Over': 2.0, 'Cuota_Under': 2.0}, 8.0,
+    )
+    over = df[df['Seleccion'].str.startswith('Over')].iloc[0]
+    assert over['Prob Model'] == '48.0%'
+    assert over['Prob Model Sin Push'] == '52.2%'
+    assert over['Prob Push'] == '8.0%'
+    assert over['Edge'] == '2.17 pp'
+    assert over['EV+'] == '4.0%'
 
 
 def test_warehouse_auto_refresh_detects_historical_correction():
@@ -141,6 +166,7 @@ if __name__ == '__main__':
     test_warehouse_training_contract_and_tracking()
     test_default_repository_bootstrap_and_predictor_uses_store()
     test_predictor_respects_training_subset_and_never_reads_future_rows()
+    test_totals_edge_compares_conditional_probabilities_but_ev_keeps_push()
     test_warehouse_auto_refresh_detects_historical_correction()
     test_scanner_bridge_is_idempotent_and_settles()
     print('Big Data integration: OK')
