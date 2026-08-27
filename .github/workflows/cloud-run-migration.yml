@@ -1,0 +1,26 @@
+name: Google Cloud web migration
+on:
+  pull_request:
+    paths:
+      - 'cloud_app.py'
+      - 'modules/cloud_service.py'
+      - 'web/**'
+      - 'Dockerfile'
+      - 'cloudbuild.yaml'
+      - 'requirements.txt'
+      - 'test_cloud_app.py'
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt pytest httpx
+      - run: python -m py_compile cloud_app.py modules/cloud_service.py
+      - run: pytest -q test_cloud_app.py
+      - name: FastAPI import smoke
+        run: python -c "from cloud_app import app; assert app.title == 'MLB Quant Analytics'"
+      - name: Docker contract
+        run: grep -q '\${PORT}' Dockerfile

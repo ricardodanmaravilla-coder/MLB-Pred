@@ -1,0 +1,15 @@
+steps:
+- name: gcr.io/cloud-builders/docker
+  args: ['build','-t','${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/mlb-pred:$COMMIT_SHA','.']
+- name: gcr.io/cloud-builders/docker
+  args: ['push','${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/mlb-pred:$COMMIT_SHA']
+- name: gcr.io/google.com/cloudsdktool/cloud-sdk
+  entrypoint: gcloud
+  args: ['run','deploy','mlb-pred','--image','${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/mlb-pred:$COMMIT_SHA','--region','${_REGION}','--platform','managed','--allow-unauthenticated','--memory','2Gi','--cpu','2','--timeout','300','--set-env-vars','PYTHONUNBUFFERED=1']
+images:
+- '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/mlb-pred:$COMMIT_SHA'
+substitutions:
+  _REGION: us-central1
+  _REPOSITORY: mlb-apps
+options:
+  logging: CLOUD_LOGGING_ONLY
