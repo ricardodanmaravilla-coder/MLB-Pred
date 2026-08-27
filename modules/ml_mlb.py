@@ -120,18 +120,20 @@ class PredictorMLMLB:
         self.training_source=cached.get('training_source','csv_chronological'); self.entrenado=True; self.loaded_from_cache=True
 
     def _training_arrays(self, df_batting, df_pitching, games, bd, pdict):
-        """Prefer warehouse features; fall back to the proven chronological builder."""
+        """Prefer warehouse features; build it once if absent, then fail-soft to CSV."""
         try:
-            from .bigdata_mlb import MLBDataWarehouse, LEGACY_ML_COLUMNS
+            from .bigdata_mlb import MLBDataWarehouse, LEGACY_ML_COLUMNS, bootstrap_from_repository
             wh = MLBDataWarehouse()
-            if wh.paths.db.exists():
-                frame = wh.legacy_ml_training_frame(df_batting, df_pitching, self.bat_scale, self.pit_scale)
-                if len(frame) >= 1000 and all(c in frame.columns for c in LEGACY_ML_COLUMNS):
-                    X = frame[LEGACY_ML_COLUMNS].apply(pd.to_numeric, errors='coerce')
-                    valid = X.notna().all(axis=1)
-                    frame = frame.loc[valid].reset_index(drop=True); X = X.loc[valid].to_numpy(float)
-                    self.training_source = 'duckdb_parquet_feature_store'
-                    return X, frame['target_home_win'].to_numpy(int), frame['target_total_runs'].to_numpy(float), frame['target_run_diff'].to_numpy(float)
+            if not wh.paths.db.exists():
+                bootstrap_from_repository()
+                wh = MLBDataWarehouse()
+            frame = wh.legacy_ml_training_frame(df_batting, df_pitching, self.bat_scale, self.pit_scale)
+            if len(frame) >= 1000 and all(c in frame.columns for c in LEGACY_ML_COLUMNS):
+                X = frame[LEGACY_ML_COLUMNS].apply(pd.to_numeric, errors='coerce')
+                valid = X.notna().all(axis=1)
+                frame = frame.loc[valid].reset_index(drop=True); X = X.loc[valid].to_numpy(float)
+                self.training_source = 'duckdb_parquet_feature_store'
+                return X, frame['target_home_win'].to_numpy(int), frame['target_total_runs'].to_numpy(float), frame['target_run_diff'].to_numpy(float)
         except Exception as e:
             print(f'Big Data fallback a CSV: {e}')
         X,yw,yr,yd=[],[],[],[]; hist,hh={},{}
