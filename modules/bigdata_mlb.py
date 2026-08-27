@@ -20,7 +20,10 @@ try:
 except Exception:  # pragma: no cover
     duckdb = None
 
-FEATURE_VERSION = "bd_v2"
+# bd_v3 changes temporal semantics: all games on one calendar day are featurized
+# before any result from that day is appended to history. This prevents Game 1 of
+# a doubleheader (or any earlier same-day final) from leaking into a morning slate.
+FEATURE_VERSION = "bd_v3"
 FEATURE_COLUMNS = [
     "home_win5","away_win5","home_win20","away_win20","home_rf5","away_rf5",
     "home_ra5","away_ra5","home_rd5","away_rd5","home_rd20","away_rd20",
@@ -53,7 +56,7 @@ class MLBDataWarehouse:
         g = prepare_games(df_games)
         if g.empty: return g
         keep = [c for c in ["Date","Season","GameType","Home","Away","Home_Score","Away_Score",
-                            "gamePk","Venue","DayNight","TempF","WindMph","AltitudeFt","ParkFactor"] if c in g.columns]
+                            "gamePk","GameID","Venue","DayNight","TempF","WindMph","AltitudeFt","ParkFactor"] if c in g.columns]
         g = g[keep].copy(); g["Home"] = g["Home"].map(normalize_team); g["Away"] = g["Away"].map(normalize_team)
         g["Date"] = pd.to_datetime(g["Date"], errors="coerce")
         g = g.dropna(subset=["Date","Home","Away","Home_Score","Away_Score"])
@@ -132,24 +135,33 @@ class MLBDataWarehouse:
         games = MLBDataWarehouse._normalize_games(df_games)
         if games.empty: return pd.DataFrame()
         hist: Dict[str,list] = {}; hh: Dict[Tuple[str,str],list] = {}; last_game: Dict[str,pd.Timestamp] = {}; rows=[]
-        for r in games.itertuples(index=False):
-            loc, vis, date = str(r.Home), str(r.Away), pd.Timestamp(r.Date)
-            w5l,rf5l,ra5l,rd5l = team_state(hist,loc,5); w5v,rf5v,ra5v,rd5v = team_state(hist,vis,5)
-            w20l,_,_,rd20l = team_state(hist,loc,20); w20v,_,_,rd20v = team_state(hist,vis,20)
-            hwin,hrd,hn = h2h_state(hh,loc,vis,12)
-            def rest(team):
-                if team not in last_game: return 3.0
-                return float(np.clip((date.normalize()-last_game[team].normalize()).days-1,0,7))
-            rows.append({"game_key":r.game_key,"Date":date,"Season":int(r.Season),"Home":loc,"Away":vis,
-                "home_win5":w5l,"away_win5":w5v,"home_win20":w20l,"away_win20":w20v,
-                "home_rf5":rf5l,"away_rf5":rf5v,"home_ra5":ra5l,"away_ra5":ra5v,
-                "home_rd5":rd5l,"away_rd5":rd5v,"home_rd20":rd20l,"away_rd20":rd20v,
-                "h2h_home_win":hwin,"h2h_home_rd":hrd,"h2h_sample":min(hn,12)/12.0,
-                "home_rest_days":rest(loc),"away_rest_days":rest(vis),
-                "target_home_win":int(float(r.Home_Score)>float(r.Away_Score)),
-                "target_total_runs":float(r.Home_Score)+float(r.Away_Score),
-                "target_run_diff":float(r.Home_Score)-float(r.Away_Score),"feature_version":FEATURE_VERSION})
-            append_game(hist,hh,loc,vis,float(r.Home_Score),float(r.Away_Score)); last_game[loc]=date; last_game[vis]=date
+
+        # Date has day-level resolution in the repository miner. Therefore no result
+        # from a calendar day may be used to construct another game's pregame features
+        # on that same day. Generate the full day's rows first, append results second.
+        day_key = games["Date"].dt.normalize()
+        for _, day in games.groupby(day_key, sort=True):
+            pending = []
+            for r in day.sort_values("game_key").itertuples(index=False):
+                loc, vis, date = str(r.Home), str(r.Away), pd.Timestamp(r.Date)
+                w5l,rf5l,ra5l,rd5l = team_state(hist,loc,5); w5v,rf5v,ra5v,rd5v = team_state(hist,vis,5)
+                w20l,_,_,rd20l = team_state(hist,loc,20); w20v,_,_,rd20v = team_state(hist,vis,20)
+                hwin,hrd,hn = h2h_state(hh,loc,vis,12)
+                def rest(team):
+                    if team not in last_game: return 3.0
+                    return float(np.clip((date.normalize()-last_game[team].normalize()).days-1,0,7))
+                rows.append({"game_key":r.game_key,"Date":date,"Season":int(r.Season),"Home":loc,"Away":vis,
+                    "home_win5":w5l,"away_win5":w5v,"home_win20":w20l,"away_win20":w20v,
+                    "home_rf5":rf5l,"away_rf5":rf5v,"home_ra5":ra5l,"away_ra5":ra5v,
+                    "home_rd5":rd5l,"away_rd5":rd5v,"home_rd20":rd20l,"away_rd20":rd20v,
+                    "h2h_home_win":hwin,"h2h_home_rd":hrd,"h2h_sample":min(hn,12)/12.0,
+                    "home_rest_days":rest(loc),"away_rest_days":rest(vis),
+                    "target_home_win":int(float(r.Home_Score)>float(r.Away_Score)),
+                    "target_total_runs":float(r.Home_Score)+float(r.Away_Score),
+                    "target_run_diff":float(r.Home_Score)-float(r.Away_Score),"feature_version":FEATURE_VERSION})
+                pending.append((loc,vis,date,float(r.Home_Score),float(r.Away_Score)))
+            for loc,vis,date,hs,aw in pending:
+                append_game(hist,hh,loc,vis,hs,aw); last_game[loc]=date; last_game[vis]=date
         return pd.DataFrame(rows)
 
     def rebuild_feature_store(self) -> int:
