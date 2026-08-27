@@ -2,7 +2,7 @@
 
 The local CSV remains the safe fallback. When a GitHub token is configured, snapshots
 can also be persisted to the repository so Streamlit restarts do not erase the audit trail.
-Google Sheets is an optional secondary sink and can never block the primary ledger.
+Google Sheets and DuckDB are secondary sinks and can never block the primary ledger.
 """
 
 from pathlib import Path
@@ -15,6 +15,7 @@ import pandas as pd
 import requests
 
 from .google_sheets_ledger import sync_rows as sync_google_rows
+from .bigdata_tracking import sync_snapshot_rows as sync_bigdata_rows
 
 
 DEFAULT_BANKROLL_MXN = 5000.0
@@ -233,6 +234,9 @@ def append_snapshot(rows, path='data/picks_ledger.csv'):
         _sync_remote(new)
     except Exception as exc:
         print(f'Ledger remote sync failed: {exc}')
+    bigdata_status = sync_bigdata_rows(new.to_dict('records'))
+    if not bigdata_status.get('ok'):
+        print(f"Big Data ledger sync failed: {bigdata_status.get('message')}")
     google_status = sync_google_snapshot(new.to_dict('records'))
     _show_google_status(google_status)
     if google_status.get('configured') and not google_status.get('ok'):

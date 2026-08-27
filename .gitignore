@@ -1,0 +1,12 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local/runtime artifacts
+.streamlit/secrets.toml
+
+# Big Data warehouse is rebuilt from canonical CSV sources at runtime/CI
+data/bigdata/*.duckdb
+data/bigdata/*.duckdb.wal
+data/bigdata/*.parquet
