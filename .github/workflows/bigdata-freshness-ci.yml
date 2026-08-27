@@ -1,0 +1,21 @@
+name: MLB Big Data freshness
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [fix/bigdata-freshness]
+
+jobs:
+  freshness:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt
+      - name: Compile Big Data modules
+        run: python -m py_compile modules/bigdata_mlb.py modules/ml_mlb.py modules/bigdata_tracking.py test_bigdata_integration.py
+      - name: Big Data integration and freshness
+        run: python test_bigdata_integration.py
