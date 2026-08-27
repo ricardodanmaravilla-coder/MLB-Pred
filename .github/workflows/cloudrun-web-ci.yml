@@ -1,0 +1,36 @@
+name: MLB Cloud Run web
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt
+      - name: Compile web layer
+        run: python -m py_compile web_app.py modules/web_service.py test_cloudrun_web.py
+      - name: Cloud Run regression guards
+        run: python test_cloudrun_web.py
+      - name: Import FastAPI application
+        run: python -c "from web_app import app; print(app.title, app.version)"
+      - name: Build production container
+        run: docker build -t mlb-pred-cloudrun:test .
+      - name: Start container and probe health
+        run: |
+          docker run -d --name mlb-web -p 8080:8080 -e PORT=8080 mlb-pred-cloudrun:test
+          trap 'docker logs mlb-web; docker rm -f mlb-web' EXIT
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8080/api/health > /tmp/health.json; then
+              cat /tmp/health.json
+              exit 0
+            fi
+            sleep 2
+          done
+          exit 1
