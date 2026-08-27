@@ -33,6 +33,37 @@ def _games(df):
     return g
 
 
+def _estimate_dispersion(df_games, fallback=14.5):
+    """Estimate negative-binomial size from completed MLB team scores.
+
+    Var(X)=mu+mu^2/k.  A fixed k can make market probabilities systematically
+    over/under-confident as the run environment changes, so estimate k from the
+    most recent completed games while keeping conservative bounds and a stable
+    fallback for sparse/invalid inputs.
+    """
+    try:
+        g = prepare_games(df_games)
+        if g.empty or len(g) < 300:
+            return float(fallback), 'fallback_sparse'
+        g = g.sort_values('Date').tail(2500)
+        scores = pd.concat([
+            pd.to_numeric(g['Home_Score'], errors='coerce'),
+            pd.to_numeric(g['Away_Score'], errors='coerce'),
+        ], ignore_index=True).dropna().astype(float)
+        scores = scores[(scores >= 0) & (scores <= 30)]
+        if len(scores) < 600:
+            return float(fallback), 'fallback_sparse'
+        mu = float(scores.mean())
+        var = float(scores.var(ddof=1))
+        excess = var - mu
+        if not np.isfinite(mu) or not np.isfinite(var) or mu <= 0 or excess <= 0.05:
+            return float(fallback), 'fallback_invalid'
+        k = (mu * mu) / excess
+        return float(np.clip(k, 3.0, 30.0)), 'historical_moments'
+    except Exception:
+        return float(fallback), 'fallback_error'
+
+
 def obtener_h2h_detalle(df_games, loc_abbr, vis_abbr, n=12):
     g = _games(df_games)
     if g.empty:
@@ -161,6 +192,7 @@ def simular_partido_mlb(
     exp_v = float(np.clip(exp_v, 1.5, 8.5))
 
     sims = int(np.clip(num_simulaciones, 5000, 100000))
+    dispersion, dispersion_source = _estimate_dispersion(df_games, 14.5)
     if simulation_seed is None:
         simulation_seed = _stable_seed([
             loc, vis, round(float(pitcher_loc_xfip), 3), round(float(pitcher_vis_xfip), 3),
@@ -168,10 +200,9 @@ def simular_partido_mlb(
             round(float(bullpen_loc_era), 3), round(float(bullpen_vis_era), 3),
             round(float(park_factor), 3), round(float(altitud_ft or 0), 1),
             round(float(viento_mph or 0), 1), str(direccion_viento), round(float(temp_f or 72), 1),
-            round(float(linea_carreras_casino), 2), sims,
+            round(float(linea_carreras_casino), 2), round(float(dispersion), 4), sims,
         ])
     rng = np.random.default_rng(int(simulation_seed))
-    dispersion = 14.5
 
     home = rng.negative_binomial(dispersion, dispersion / (dispersion + exp_l), sims)
     away = rng.negative_binomial(dispersion, dispersion / (dispersion + exp_v), sims)
@@ -212,6 +243,7 @@ def simular_partido_mlb(
             'H2H_Usado_En_Probabilidad': False, 'Forma_Reciente_Usada_En_MC': False,
             'Factor_Clima': round(climate, 4), 'Factor_Altitud_Residual': round(altitude, 4),
             'Carreras_Exp_Local': round(exp_l, 2), 'Carreras_Exp_Visita': round(exp_v, 2),
+            'Dispersion_NB': round(float(dispersion), 4), 'Dispersion_Source': dispersion_source,
             'Empates_Regulacion': int(regulation_ties.sum()),
             'Max_Extra_Innings_Simulados': int(max_extra_innings),
             'Pitching_Agregado_Es_Proxy_Bullpen': True,

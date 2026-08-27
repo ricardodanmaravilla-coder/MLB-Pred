@@ -64,6 +64,27 @@ def _calibrate_sigma(pred, actual, market='spread'):
     return float(max(1.0, best_sigma))
 
 
+def _date_safe_cut(dates, ratio=0.80, min_train=100, min_validation=50):
+    """Return a chronological train/validation cut that never splits a calendar date."""
+    d = pd.to_datetime(pd.Series(dates), errors='coerce').dt.normalize()
+    n = len(d)
+    if n < (min_train + min_validation):
+        return max(1, min(n - 1, int(n * ratio)))
+    target = max(int(min_train), min(n - int(min_validation), int(n * ratio)))
+    if target <= 0 or target >= n:
+        return target
+    boundary_day = d.iloc[target - 1]
+    cut = target
+    while cut < n and d.iloc[cut] == boundary_day:
+        cut += 1
+    if n - cut < min_validation:
+        cut = target
+        next_day = d.iloc[target]
+        while cut > min_train and d.iloc[cut - 1] == next_day:
+            cut -= 1
+    return int(max(min_train, min(n - min_validation, cut)))
+
+
 class PredictorMLMLB:
     """Leak-safe pregame model with optional DuckDB/Parquet feature-store training."""
 
@@ -77,7 +98,8 @@ class PredictorMLMLB:
         self.sigma_runs, self.sigma_diff = 3.5, 4.2; self.prob_shrink = 1.0
         self.loaded_from_cache = False; self.validation_brier = None
         self.validation_runs_mae = None; self.validation_diff_mae = None
-        self.training_source = 'csv_chronological'
+        self.validation_cut_date = None
+        self.training_source = 'csv_chronological_daily_safe'
         self.training_rows = 0
 
     @staticmethod
@@ -117,8 +139,9 @@ class PredictorMLMLB:
         self.classifier_family=cached.get('classifier_family','logistic'); self.runs_family=cached.get('runs_family','gbr'); self.diff_family=cached.get('diff_family','gbr')
         self.bat_scale=cached['bat_scale']; self.pit_scale=cached['pit_scale']; self.sigma_runs=cached['sigma_runs']; self.sigma_diff=cached['sigma_diff']
         self.prob_shrink=cached['prob_shrink']; self.validation_brier=cached.get('validation_brier'); self.validation_runs_mae=cached.get('validation_runs_mae')
-        self.validation_diff_mae=cached.get('validation_diff_mae'); self.current_history=deepcopy(cached['current_history']); self.current_h2h=deepcopy(cached['current_h2h'])
-        self.training_source=cached.get('training_source','csv_chronological'); self.training_rows=int(cached.get('training_rows',0)); self.entrenado=True; self.loaded_from_cache=True
+        self.validation_diff_mae=cached.get('validation_diff_mae'); self.validation_cut_date=cached.get('validation_cut_date')
+        self.current_history=deepcopy(cached['current_history']); self.current_h2h=deepcopy(cached['current_h2h'])
+        self.training_source=cached.get('training_source','csv_chronological_daily_safe'); self.training_rows=int(cached.get('training_rows',0)); self.entrenado=True; self.loaded_from_cache=True
 
     def _training_arrays(self, df_batting, df_pitching, games, bd, pdict):
         """Prefer warehouse features but never exceed the caller's training subset."""
@@ -134,7 +157,6 @@ class PredictorMLMLB:
                 requested_keys = set(requested['game_key'].astype(str))
                 frame = frame[frame['game_key'].astype(str).isin(requested_keys)].copy()
                 frame = frame.sort_values(['Date','game_key']).reset_index(drop=True)
-            # A partial match is unsafe: fall back to the caller's chronological CSV subset.
             if (len(frame) == len(requested) and len(frame) >= 1000 and
                     all(c in frame.columns for c in LEGACY_ML_COLUMNS)):
                 X = frame[LEGACY_ML_COLUMNS].apply(pd.to_numeric, errors='coerce')
@@ -142,17 +164,25 @@ class PredictorMLMLB:
                 frame = frame.loc[valid].reset_index(drop=True); X = X.loc[valid].to_numpy(float)
                 if len(frame) == len(requested):
                     self.training_source = 'duckdb_parquet_feature_store_subset_safe'
-                    return X, frame['target_home_win'].to_numpy(int), frame['target_total_runs'].to_numpy(float), frame['target_run_diff'].to_numpy(float)
+                    return (X, frame['target_home_win'].to_numpy(int), frame['target_total_runs'].to_numpy(float),
+                            frame['target_run_diff'].to_numpy(float), pd.to_datetime(frame['Date']).to_numpy())
         except Exception as e:
             print(f'Big Data fallback a CSV: {e}')
-        X,yw,yr,yd=[],[],[],[]; hist,hh={},{}
-        for _,r in games.iterrows():
-            loc,vis=r.Home,r.Away; year=int(r.Season); hs,as_=float(r.Home_Score),float(r.Away_Score); sy=year-1
-            ol=float(bd.get((loc,sy),self.bat_scale)); ov=float(bd.get((vis,sy),self.bat_scale)); pl=float(pdict.get((loc,sy),self.pit_scale)); pv_=float(pdict.get((vis,sy),self.pit_scale))
-            X.append(self._feature_row(hist,hh,loc,vis,ol,ov,pl,pv_)); yw.append(int(hs>as_)); yr.append(hs+as_); yd.append(hs-as_)
-            append_game(hist,hh,loc,vis,hs,as_)
-        self.training_source='csv_chronological'
-        return np.asarray(X,float),np.asarray(yw),np.asarray(yr),np.asarray(yd)
+
+        X,yw,yr,yd,dates=[],[],[],[],[]; hist,hh={},{}
+        safe_games = games.copy()
+        safe_games['_day'] = pd.to_datetime(safe_games['Date'], errors='coerce').dt.normalize()
+        for day, daily in safe_games.groupby('_day', sort=True):
+            pending=[]
+            for _,r in daily.iterrows():
+                loc,vis=r.Home,r.Away; year=int(r.Season); hs,as_=float(r.Home_Score),float(r.Away_Score); sy=year-1
+                ol=float(bd.get((loc,sy),self.bat_scale)); ov=float(bd.get((vis,sy),self.bat_scale)); pl=float(pdict.get((loc,sy),self.pit_scale)); pv_=float(pdict.get((vis,sy),self.pit_scale))
+                X.append(self._feature_row(hist,hh,loc,vis,ol,ov,pl,pv_)); yw.append(int(hs>as_)); yr.append(hs+as_); yd.append(hs-as_); dates.append(day)
+                pending.append((loc,vis,hs,as_))
+            for loc,vis,hs,as_ in pending:
+                append_game(hist,hh,loc,vis,hs,as_)
+        self.training_source='csv_chronological_daily_safe'
+        return np.asarray(X,float),np.asarray(yw),np.asarray(yr),np.asarray(yd),np.asarray(dates,dtype='datetime64[ns]')
 
     def entrenar(self, df_batting, df_pitching, df_games):
         try:
@@ -166,10 +196,16 @@ class PredictorMLMLB:
             games=prepare_games(df_games); bd=self._stats_dict(df_batting,bat_col); pdict=self._stats_dict(df_pitching,pit_col)
             bv=pd.to_numeric(df_batting[bat_col],errors='coerce').dropna(); pv=pd.to_numeric(df_pitching[pit_col],errors='coerce').dropna()
             self.bat_scale=float(bv.median()) if len(bv) else 100.0; self.pit_scale=float(pv.median()) if len(pv) else 4.10
-            X,yw,yr,yd=self._training_arrays(df_batting,df_pitching,games,bd,pdict)
+            X,yw,yr,yd,dates=self._training_arrays(df_batting,df_pitching,games,bd,pdict)
             self.training_rows=int(len(X))
             if len(X)<1000: return False
-            cut=max(100,int(len(X)*0.80)); cut=max(100,len(X)-50) if cut>=len(X)-50 else cut
+            cut=_date_safe_cut(dates, ratio=0.80, min_train=100, min_validation=50)
+            if cut <= 0 or cut >= len(X): return False
+            train_dates=pd.to_datetime(pd.Series(dates[:cut])).dt.normalize(); val_dates=pd.to_datetime(pd.Series(dates[cut:])).dt.normalize()
+            if set(train_dates.dropna().unique()).intersection(set(val_dates.dropna().unique())):
+                raise RuntimeError('Corte temporal inválido: una fecha aparece en train y validation')
+            self.validation_cut_date = None if val_dates.empty else str(val_dates.iloc[0].date())
+
             run_candidates={}; diff_candidates={}
             for family in ('gbr','histgb'):
                 rm=self._new_regressor(family); rm.fit(X[:cut],yr[:cut]); rp=rm.predict(X[cut:]); run_candidates[family]=(float(np.mean(np.abs(rp-yr[cut:]))),rp)
@@ -192,8 +228,8 @@ class PredictorMLMLB:
             cache_value={'modelo_ganador':self.modelo_ganador,'modelo_carreras':self.modelo_carreras,'modelo_handicap':self.modelo_handicap,
                 'classifier_family':self.classifier_family,'runs_family':self.runs_family,'diff_family':self.diff_family,'bat_scale':self.bat_scale,'pit_scale':self.pit_scale,
                 'sigma_runs':self.sigma_runs,'sigma_diff':self.sigma_diff,'prob_shrink':self.prob_shrink,'validation_brier':self.validation_brier,
-                'validation_runs_mae':self.validation_runs_mae,'validation_diff_mae':self.validation_diff_mae,'current_history':deepcopy(hist),'current_h2h':deepcopy(hh),
-                'training_source':self.training_source,'training_rows':self.training_rows}
+                'validation_runs_mae':self.validation_runs_mae,'validation_diff_mae':self.validation_diff_mae,'validation_cut_date':self.validation_cut_date,
+                'current_history':deepcopy(hist),'current_h2h':deepcopy(hh),'training_source':self.training_source,'training_rows':self.training_rows}
             with _MODEL_CACHE_LOCK:
                 _MODEL_CACHE[key]=cache_value; _MODEL_CACHE.move_to_end(key)
                 while len(_MODEL_CACHE)>_MODEL_CACHE_MAX: _MODEL_CACHE.popitem(last=False)
@@ -218,7 +254,7 @@ class PredictorMLMLB:
                 'Prob_Shrink':round(self.prob_shrink,3),'Proyeccion_Carreras':round(runs,2),'Proyeccion_Handicap_Local':round(diff,2),
                 'Sigma_Carreras':round(self.sigma_runs,3),'Sigma_Handicap':round(self.sigma_diff,3),'Modelo_Desde_Cache':bool(self.loaded_from_cache),
                 'Classifier_Family':self.classifier_family,'Runs_Family':self.runs_family,'Diff_Family':self.diff_family,
-                'Training_Source':self.training_source,'Training_Rows':self.training_rows,
+                'Training_Source':self.training_source,'Training_Rows':self.training_rows,'Validation_Cut_Date':self.validation_cut_date,
                 'Validation_Brier':None if self.validation_brier is None else round(self.validation_brier,5),
                 'Validation_Runs_MAE':None if self.validation_runs_mae is None else round(self.validation_runs_mae,4),
                 'Validation_Diff_MAE':None if self.validation_diff_mae is None else round(self.validation_diff_mae,4)}
