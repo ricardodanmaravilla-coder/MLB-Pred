@@ -5,9 +5,8 @@ from modules.signal_features import coverage_report
 
 
 def main():
-    bat=pd.read_csv('data/mlb_batting.csv'); pit=pd.read_csv('data/mlb_pitching.csv')
-    report=coverage_report(bat,pit)
-    eligible={k:v for k,v in report.items() if v>=0.65}
-    print(json.dumps({'coverage':report,'eligible_ge_65pct':eligible,'eligible_count':len(eligible)},indent=2,sort_keys=True))
+    bat=pd.read_csv('data/mlb_batting.csv');pit=pd.read_csv('data/mlb_pitching.csv');report=coverage_report(bat,pit)
+    eligible={k:v for k,v in report.items() if not k.startswith('context:') and v>=0.65};context={k:v for k,v in report.items() if k.startswith('context:')}
+    print(json.dumps({'coverage':report,'historical_eligible_ge_65pct':eligible,'historical_eligible_count':len(eligible),'context_signals':context},indent=2,sort_keys=True))
 
-if __name__=='__main__': main()
+if __name__=='__main__':main()
