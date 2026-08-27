@@ -52,8 +52,11 @@ def test_warehouse_auto_refresh_detects_historical_correction():
         games = pd.read_csv('data/mlb_games.csv').head(1200).copy()
         games.to_csv(source, index=False)
         wh = MLBDataWarehouse(root)
+        expected_initial = len(wh._normalize_games(games))
+        assert expected_initial > 100
         first = wh.ensure_fresh_from_repository(source)
-        assert first['fresh'] and first['rebuilt'] and first['features'] > 1000
+        assert first['fresh'] and first['rebuilt']
+        assert first['features'] == expected_initial
         second = wh.ensure_fresh_from_repository(source)
         assert second['fresh'] and not second['rebuilt']
 
