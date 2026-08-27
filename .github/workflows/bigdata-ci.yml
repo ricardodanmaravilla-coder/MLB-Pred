@@ -32,6 +32,6 @@ jobs:
           s=MLBDataWarehouse().status()
           assert s['games'] > 1000
           assert s['features'] > 1000
-          assert s['feature_version'] == 'bd_v2'
+          assert s['feature_version'] == 'bd_v3'
           print(s)
           PY
