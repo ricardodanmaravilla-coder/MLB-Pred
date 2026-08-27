@@ -24,10 +24,20 @@ def _ev(prob_win, odds, prob_push=0.0):
     o = _decimal(odds)
     if o is None:
         return None
-    p = float(prob_win)
-    push = max(0.0, float(prob_push))
+    p = max(0.0, min(1.0, float(prob_win)))
+    push = max(0.0, min(1.0 - p, float(prob_push)))
     lose = max(0.0, 1.0 - p - push)
     return p * (o - 1.0) - lose
+
+
+def _conditional_no_push(prob_win, prob_push=0.0):
+    """Probability of winning conditional on the bet being decided (not a push)."""
+    p = max(0.0, min(1.0, float(prob_win)))
+    push = max(0.0, min(1.0 - p, float(prob_push)))
+    decided = 1.0 - push
+    if decided <= 1e-12:
+        return None
+    return p / decided
 
 
 def _blend(a, b, wa=0.55):
@@ -39,10 +49,11 @@ def _blend(a, b, wa=0.55):
 
 
 def analizar_apuestas_mlb(res_mc, preds_ml, cuotas_reales, linea_carreras):
-    """Analiza moneyline y total sin inventar cuotas ni probabilidades de mercado.
+    """Analyze moneyline and totals using consistent probability definitions.
 
-    Mantiene la misma firma y columnas históricas de la UI, añadiendo no-vig/edge
-    cuando están disponibles ambos lados del mercado.
+    EV uses the unconditional win/lose/push distribution. Two-way no-vig market
+    probabilities are conditional on the wager being decided, so edge comparisons
+    for integer totals also use the model probability conditional on no push.
     """
     apuestas = []
 
@@ -56,7 +67,6 @@ def analizar_apuestas_mlb(res_mc, preds_ml, cuotas_reales, linea_carreras):
         if preds_ml.get("Probabilidad_Visita") is not None:
             ml_vis = float(preds_ml["Probabilidad_Visita"]) / 100.0
 
-    # Moneyline: usar acuerdo MC+ML cuando ML existe; si no, Monte Carlo.
     prob_loc = _blend(ml_loc, mc_loc)
     prob_vis = _blend(ml_vis, mc_vis)
     s = prob_loc + prob_vis
@@ -82,13 +92,15 @@ def analizar_apuestas_mlb(res_mc, preds_ml, cuotas_reales, linea_carreras):
         if odds is None:
             return
         ev = _ev(p, odds, push)
-        edge = None if market_p is None else p - market_p
-        # Para recomendar se exige EV y, cuando existe no-vig, también edge positivo.
+        model_edge_p = _conditional_no_push(p, push) if push > 0 else p
+        edge = None if market_p is None or model_edge_p is None else model_edge_p - market_p
         strong = ev is not None and ev >= 0.03 and (edge is None or edge >= 0.025)
         fair = ev is not None and ev > 0 and (edge is None or edge > 0)
         apuestas.append({
             "Seleccion": name,
             "Prob Model": f"{round(p * 100, 1)}%",
+            "Prob Model Sin Push": None if push <= 0 or model_edge_p is None else f"{round(model_edge_p * 100, 1)}%",
+            "Prob Push": None if push <= 0 else f"{round(push * 100, 1)}%",
             "Cuota": odds,
             "Prob Mercado No-Vig": None if market_p is None else f"{round(market_p * 100, 1)}%",
             "Edge": None if edge is None else f"{round(edge * 100, 2)} pp",
