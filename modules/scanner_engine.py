@@ -44,7 +44,7 @@ def no_vig_two_way(odds_a, odds_b):
 
 def _candidate(market, selection, prob_ml, prob_mc, odds, market_no_vig,
                min_ml, min_mc, min_combined, max_disagreement,
-               min_edge_pp, min_ev_pct, push_pct=0.0):
+               min_edge_pp, min_ev_pct, push_pct=0.0, require_market_reference=True):
     try:
         pml = float(prob_ml)
         pmc = float(prob_mc)
@@ -57,8 +57,6 @@ def _candidate(market, selection, prob_ml, prob_mc, odds, market_no_vig,
 
     combined = (pml + pmc) / 2.0
     disagreement = abs(pml - pmc)
-    # ML uses a continuous distribution (zero push mass), while MC is discrete.
-    # When push_pct comes from MC, half of it belongs to the 50/50 blended model.
     model_push = push / 2.0
     p_win = combined / 100.0
     p_push = model_push / 100.0
@@ -68,7 +66,6 @@ def _candidate(market, selection, prob_ml, prob_mc, odds, market_no_vig,
     p_loss = max(0.0, 1.0 - p_win - p_push)
     ev_pct = (p_win * (o - 1.0) - p_loss) * 100.0
 
-    # Sportsbook two-way no-vig probabilities are conditional on a graded decision.
     decision_mass = max(1e-9, 1.0 - p_push)
     model_decision_prob = p_win / decision_mass
     edge_pp = None if market_no_vig is None else (model_decision_prob - float(market_no_vig)) * 100.0
@@ -80,6 +77,8 @@ def _candidate(market, selection, prob_ml, prob_mc, odds, market_no_vig,
         (disagreement <= max_disagreement, f"Desacuerdo {disagreement:.1f} pp > {max_disagreement:.1f}"),
         (ev_pct >= min_ev_pct, f"EV {ev_pct:.1f}% < {min_ev_pct:.1f}%"),
     ]
+    if require_market_reference:
+        checks.append((market_no_vig is not None, "Mercado no-vig incompleto"))
     if market_no_vig is not None:
         checks.append((edge_pp >= min_edge_pp, f"Edge {edge_pp:.1f} pp < {min_edge_pp:.1f} pp"))
 
@@ -99,8 +98,6 @@ def _candidate(market, selection, prob_ml, prob_mc, odds, market_no_vig,
 
 
 def moneyline_candidate(selection, prob_ml, prob_mc, odds, market_no_vig=None):
-    # Walk-forward: chosen-side precision rises materially once ML confidence is
-    # ~58%+. Require MC confirmation too; volume is intentionally sacrificed.
     return _candidate('Moneyline', selection, prob_ml, prob_mc, odds, market_no_vig,
                       min_ml=58.0, min_mc=58.0, min_combined=58.0,
                       max_disagreement=10.0, min_edge_pp=4.0, min_ev_pct=4.0)
@@ -108,9 +105,6 @@ def moneyline_candidate(selection, prob_ml, prob_mc, odds, market_no_vig=None):
 
 def total_candidate(selection, prob_ml, prob_mc, odds, market_no_vig=None, prob_push_mc=0.0):
     is_over = str(selection).strip().lower().startswith('over')
-    # O8.5 signals below 54% were historically noise; >=56% was the cleanest
-    # observed bucket. Under samples above 54% are sparse, so keep a strict 54%
-    # floor plus stronger MC/combined/market confirmation instead of overfitting.
     min_ml = 56.0 if is_over else 54.0
     return _candidate('Totales', selection, prob_ml, prob_mc, odds, market_no_vig,
                       min_ml=min_ml, min_mc=54.0, min_combined=56.0,
@@ -119,8 +113,6 @@ def total_candidate(selection, prob_ml, prob_mc, odds, market_no_vig=None, prob_
 
 
 def runline_candidate(selection, prob_ml, prob_mc, odds, market_no_vig=None, prob_push_mc=0.0):
-    # Historical +1.5 hit rate barely beats (and often trails) its high base rate.
-    # Therefore only exceptional consensus/edge is allowed through.
     return _candidate('Hándicap', selection, prob_ml, prob_mc, odds, market_no_vig,
                       min_ml=60.0, min_mc=60.0, min_combined=62.0,
                       max_disagreement=8.0, min_edge_pp=7.0, min_ev_pct=7.0,
