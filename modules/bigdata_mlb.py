@@ -1,18 +1,10 @@
-"""Big Data layer for MLB-Pred.
-
-DuckDB-backed warehouse + Parquet feature store. The layer is additive and
-backward compatible: production can fall back to the legacy CSV pipeline.
-
-Temporal invariant: every pregame feature for date D is computed only from
-completed games strictly before D. Targets live beside features for offline
-training, but are never used to construct earlier observations.
-"""
-
+"""DuckDB/Parquet Big Data layer for MLB-Pred with leak-safe chronological features."""
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Optional, Tuple
+import hashlib
 import json
 import uuid
 
@@ -30,36 +22,29 @@ except Exception:  # pragma: no cover
 
 FEATURE_VERSION = "bd_v2"
 FEATURE_COLUMNS = [
-    "home_win5", "away_win5", "home_win20", "away_win20",
-    "home_rf5", "away_rf5", "home_ra5", "away_ra5",
-    "home_rd5", "away_rd5", "home_rd20", "away_rd20",
-    "h2h_home_win", "h2h_home_rd", "h2h_sample",
-    "home_rest_days", "away_rest_days",
+    "home_win5","away_win5","home_win20","away_win20","home_rf5","away_rf5",
+    "home_ra5","away_ra5","home_rd5","away_rd5","home_rd20","away_rd20",
+    "h2h_home_win","h2h_home_rd","h2h_sample","home_rest_days","away_rest_days",
 ]
 LEGACY_ML_COLUMNS = [
-    "home_win5", "away_win5", "home_win20", "away_win20",
-    "home_rf5", "away_rf5", "home_ra5", "away_ra5",
-    "home_rd5", "away_rd5", "home_rd20", "away_rd20",
-    "h2h_home_win", "h2h_home_rd", "h2h_sample",
-    "home_offense", "away_offense", "home_pitching", "away_pitching", "home_field",
+    "home_win5","away_win5","home_win20","away_win20","home_rf5","away_rf5",
+    "home_ra5","away_ra5","home_rd5","away_rd5","home_rd20","away_rd20",
+    "h2h_home_win","h2h_home_rd","h2h_sample","home_offense","away_offense",
+    "home_pitching","away_pitching","home_field",
 ]
 
 @dataclass(frozen=True)
 class BigDataPaths:
     root: Path = Path("data/bigdata")
     @property
-    def db(self) -> Path: return self.root / "mlb.duckdb"
+    def db(self): return self.root / "mlb.duckdb"
     @property
-    def features(self) -> Path: return self.root / f"pregame_features_{FEATURE_VERSION}.parquet"
+    def features(self): return self.root / f"pregame_features_{FEATURE_VERSION}.parquet"
 
 class MLBDataWarehouse:
-    """Persistent analytical store for games, features, predictions and outcomes."""
-
     def __init__(self, root: str | Path = "data/bigdata"):
-        self.paths = BigDataPaths(Path(root))
-        self.paths.root.mkdir(parents=True, exist_ok=True)
-        if duckdb is None:
-            raise RuntimeError("duckdb no esta instalado; ejecuta pip install -r requirements.txt")
+        self.paths = BigDataPaths(Path(root)); self.paths.root.mkdir(parents=True, exist_ok=True)
+        if duckdb is None: raise RuntimeError("duckdb no esta instalado; ejecuta pip install -r requirements.txt")
 
     def connect(self): return duckdb.connect(str(self.paths.db))
 
@@ -69,8 +54,7 @@ class MLBDataWarehouse:
         if g.empty: return g
         keep = [c for c in ["Date","Season","GameType","Home","Away","Home_Score","Away_Score",
                             "gamePk","Venue","DayNight","TempF","WindMph","AltitudeFt","ParkFactor"] if c in g.columns]
-        g = g[keep].copy()
-        g["Home"] = g["Home"].map(normalize_team); g["Away"] = g["Away"].map(normalize_team)
+        g = g[keep].copy(); g["Home"] = g["Home"].map(normalize_team); g["Away"] = g["Away"].map(normalize_team)
         g["Date"] = pd.to_datetime(g["Date"], errors="coerce")
         g = g.dropna(subset=["Date","Home","Away","Home_Score","Away_Score"])
         g["game_key"] = g["Date"].dt.strftime("%Y-%m-%d") + "|" + g["Away"].astype(str) + "@" + g["Home"].astype(str)
@@ -79,17 +63,21 @@ class MLBDataWarehouse:
             g.loc[pk.notna(), "game_key"] = "pk:" + pk[pk.notna()].astype("int64").astype(str)
         return g.sort_values(["Date","game_key"]).drop_duplicates("game_key", keep="last").reset_index(drop=True)
 
+    @staticmethod
+    def _games_fingerprint(games: pd.DataFrame) -> str:
+        if games is None or games.empty: return "empty"
+        cols = [c for c in ("game_key","Date","Season","Home","Away","Home_Score","Away_Score") if c in games.columns]
+        x = games[cols].copy().sort_values([c for c in ("Date","game_key") if c in cols]).reset_index(drop=True)
+        if "Date" in x.columns: x["Date"] = pd.to_datetime(x["Date"], errors="coerce").dt.strftime("%Y-%m-%dT%H:%M:%S")
+        return hashlib.sha256(x.to_csv(index=False, lineterminator="\n").encode("utf-8")).hexdigest()
+
     def _ensure_tracking_tables(self, con):
-        con.execute("""
-            CREATE TABLE IF NOT EXISTS predictions (
-                prediction_id VARCHAR PRIMARY KEY, created_at TIMESTAMP, game_key VARCHAR,
-                game_date TIMESTAMP, home VARCHAR, away VARCHAR, market VARCHAR, selection VARCHAR,
-                prob_ml DOUBLE, prob_mc DOUBLE, probability DOUBLE, odds DOUBLE, edge_pp DOUBLE,
-                ev_pct DOUBLE, kelly_pct DOUBLE, accepted BOOLEAN, model_version VARCHAR,
-                feature_version VARCHAR, payload_json VARCHAR, settled BOOLEAN DEFAULT FALSE,
-                result VARCHAR, profit_units DOUBLE, settled_at TIMESTAMP
-            )
-        """)
+        con.execute("""CREATE TABLE IF NOT EXISTS predictions (
+            prediction_id VARCHAR PRIMARY KEY, created_at TIMESTAMP, game_key VARCHAR, game_date TIMESTAMP,
+            home VARCHAR, away VARCHAR, market VARCHAR, selection VARCHAR, prob_ml DOUBLE, prob_mc DOUBLE,
+            probability DOUBLE, odds DOUBLE, edge_pp DOUBLE, ev_pct DOUBLE, kelly_pct DOUBLE, accepted BOOLEAN,
+            model_version VARCHAR, feature_version VARCHAR, payload_json VARCHAR, settled BOOLEAN DEFAULT FALSE,
+            result VARCHAR, profit_units DOUBLE, settled_at TIMESTAMP)""")
         con.execute("CREATE INDEX IF NOT EXISTS idx_predictions_game ON predictions(game_key)")
         con.execute("CREATE INDEX IF NOT EXISTS idx_predictions_date ON predictions(game_date)")
 
@@ -105,13 +93,39 @@ class MLBDataWarehouse:
                 if c not in existing: con.execute(f'ALTER TABLE games ADD COLUMN "{c}" VARCHAR')
             con.execute("DELETE FROM games USING incoming_games WHERE games.game_key = incoming_games.game_key")
             current = {r[1] for r in con.execute("PRAGMA table_info('games')").fetchall()}
-            common = [c for c in g.columns if c in current]
-            cols = ",".join(f'"{c}"' for c in common)
+            common = [c for c in g.columns if c in current]; cols = ",".join(f'"{c}"' for c in common)
             con.execute(f"INSERT INTO games ({cols}) SELECT {cols} FROM incoming_games")
             con.execute("CREATE INDEX IF NOT EXISTS idx_games_date ON games(Date)")
             con.execute("CREATE INDEX IF NOT EXISTS idx_games_key ON games(game_key)")
             return len(g)
         finally: con.close()
+
+    def replace_games(self, df_games: pd.DataFrame) -> int:
+        """Exact mirror of the canonical source, including deletions/corrections."""
+        g = self._normalize_games(df_games)
+        if g.empty: return 0
+        con = self.connect()
+        try:
+            try: con.execute("DELETE FROM games")
+            except Exception: pass
+        finally: con.close()
+        return self.ingest_games(g)
+
+    def ensure_fresh_from_repository(self, games_path: str | Path = "data/mlb_games.csv") -> dict:
+        path = Path(games_path)
+        if not path.exists(): return {"fresh": False, "rebuilt": False, "reason": "source_missing"}
+        source = self._normalize_games(pd.read_csv(path)); source_fp = self._games_fingerprint(source)
+        con = self.connect()
+        try:
+            try: stored = con.execute("SELECT * FROM games ORDER BY Date, game_key").df()
+            except Exception: stored = pd.DataFrame()
+        finally: con.close()
+        stored_fp = self._games_fingerprint(self._normalize_games(stored)) if not stored.empty else "empty"
+        if source_fp == stored_fp and self.paths.features.exists():
+            return {"fresh": True, "rebuilt": False, "games": len(source), "fingerprint": source_fp}
+        ingested = self.replace_games(source); rebuilt = self.rebuild_feature_store()
+        return {"fresh": True, "rebuilt": True, "games": len(source), "ingested": ingested,
+                "features": rebuilt, "fingerprint": source_fp}
 
     @staticmethod
     def build_leak_safe_features(df_games: pd.DataFrame) -> pd.DataFrame:
@@ -126,8 +140,7 @@ class MLBDataWarehouse:
             def rest(team):
                 if team not in last_game: return 3.0
                 return float(np.clip((date.normalize()-last_game[team].normalize()).days-1,0,7))
-            rows.append({
-                "game_key":r.game_key,"Date":date,"Season":int(r.Season),"Home":loc,"Away":vis,
+            rows.append({"game_key":r.game_key,"Date":date,"Season":int(r.Season),"Home":loc,"Away":vis,
                 "home_win5":w5l,"away_win5":w5v,"home_win20":w20l,"away_win20":w20v,
                 "home_rf5":rf5l,"away_rf5":rf5v,"home_ra5":ra5l,"away_ra5":ra5v,
                 "home_rd5":rd5l,"away_rd5":rd5v,"home_rd20":rd20l,"away_rd20":rd20v,
@@ -135,8 +148,7 @@ class MLBDataWarehouse:
                 "home_rest_days":rest(loc),"away_rest_days":rest(vis),
                 "target_home_win":int(float(r.Home_Score)>float(r.Away_Score)),
                 "target_total_runs":float(r.Home_Score)+float(r.Away_Score),
-                "target_run_diff":float(r.Home_Score)-float(r.Away_Score),"feature_version":FEATURE_VERSION,
-            })
+                "target_run_diff":float(r.Home_Score)-float(r.Away_Score),"feature_version":FEATURE_VERSION})
             append_game(hist,hh,loc,vis,float(r.Home_Score),float(r.Away_Score)); last_game[loc]=date; last_game[vis]=date
         return pd.DataFrame(rows)
 
@@ -163,12 +175,7 @@ class MLBDataWarehouse:
         finally: con.close()
 
     def legacy_ml_training_frame(self, df_batting: pd.DataFrame, df_pitching: pd.DataFrame, bat_scale=100.0, pit_scale=4.10) -> pd.DataFrame:
-        """Materialize the exact 20-column feature contract used by PredictorMLMLB.
-
-        Seasonal stats are joined from season-1 only. This preserves the existing
-        model semantics while moving rolling history generation into the warehouse.
-        """
-        f=self.training_frame().copy()
+        self.ensure_fresh_from_repository(); f=self.training_frame().copy()
         if f.empty: return f
         bcol=batting_metric(df_batting); pcol=pitching_metric(df_pitching)
         if not bcol or not pcol: return pd.DataFrame()
@@ -239,7 +246,7 @@ class MLBDataWarehouse:
         finally: con.close()
 
 def bootstrap_from_repository(data_dir: str|Path="data", root: str|Path="data/bigdata") -> dict:
-    data_dir=Path(data_dir); games_path=data_dir/"mlb_games.csv"
+    games_path=Path(data_dir)/"mlb_games.csv"
     if not games_path.exists(): raise FileNotFoundError(games_path)
-    wh=MLBDataWarehouse(root); games=pd.read_csv(games_path); ingested=wh.ingest_games(games); features=wh.rebuild_feature_store()
+    wh=MLBDataWarehouse(root); games=pd.read_csv(games_path); ingested=wh.replace_games(games); features=wh.rebuild_feature_store()
     out=wh.status(); out.update({"ingested":ingested,"rebuilt_features":features}); return out

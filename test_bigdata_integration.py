@@ -45,6 +45,50 @@ def test_default_repository_bootstrap_and_predictor_uses_store():
     assert 0 <= r['Probabilidad_Local'] <= 100
 
 
+def test_warehouse_auto_refresh_detects_historical_correction():
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td) / 'warehouse'
+        source = Path(td) / 'games.csv'
+        games = pd.read_csv('data/mlb_games.csv').head(1200).copy()
+        games.to_csv(source, index=False)
+        wh = MLBDataWarehouse(root)
+        expected_initial = len(wh._normalize_games(games))
+        assert expected_initial > 100
+        first = wh.ensure_fresh_from_repository(source)
+        assert first['fresh'] and first['rebuilt']
+        assert first['features'] == expected_initial
+        second = wh.ensure_fresh_from_repository(source)
+        assert second['fresh'] and not second['rebuilt']
+
+        # Same row count/date range: changing valid scores must invalidate the store.
+        score_col = 'Home_Score' if 'Home_Score' in games.columns else 'home_score'
+        scores = pd.to_numeric(games[score_col], errors='coerce')
+        valid_scores = scores.notna()
+        assert valid_scores.any()
+        games.loc[valid_scores, score_col] = scores.loc[valid_scores] + 1.0
+        games.to_csv(source, index=False)
+        corrected = wh.ensure_fresh_from_repository(source)
+        assert corrected['fresh'] and corrected['rebuilt']
+
+        # Use the normalized canonical frame itself to test an actual source deletion.
+        canonical = wh._normalize_games(games).copy()
+        assert len(canonical) > 100
+        canonical = canonical.drop(canonical.index[len(canonical) // 2]).reset_index(drop=True)
+        canonical.drop(columns=['game_key'], errors='ignore').to_csv(source, index=False)
+        removed = wh.ensure_fresh_from_repository(source)
+        assert removed['fresh'] and removed['rebuilt']
+
+        expected = len(wh._normalize_games(canonical))
+        con = wh.connect()
+        try:
+            rebuilt_games = con.execute('SELECT COUNT(*) FROM games').fetchone()[0]
+            rebuilt_features = con.execute('SELECT COUNT(*) FROM pregame_features').fetchone()[0]
+        finally:
+            con.close()
+        assert rebuilt_games == expected
+        assert rebuilt_features == expected
+
+
 def test_scanner_bridge_is_idempotent_and_settles():
     row = {
         'snapshot_utc': '2026-08-27T12:00:00+00:00', 'game_date': '2099-01-01',
@@ -76,5 +120,6 @@ def test_scanner_bridge_is_idempotent_and_settles():
 if __name__ == '__main__':
     test_warehouse_training_contract_and_tracking()
     test_default_repository_bootstrap_and_predictor_uses_store()
+    test_warehouse_auto_refresh_detects_historical_correction()
     test_scanner_bridge_is_idempotent_and_settles()
     print('Big Data integration: OK')
