@@ -4,6 +4,7 @@ from pathlib import Path
 import pandas as pd
 
 from modules.bigdata_mlb import MLBDataWarehouse, LEGACY_ML_COLUMNS, bootstrap_from_repository
+from modules.bigdata_tracking import sync_snapshot_rows, settle_snapshot_rows
 from modules.ml_mlb import PredictorMLMLB
 
 
@@ -44,7 +45,36 @@ def test_default_repository_bootstrap_and_predictor_uses_store():
     assert 0 <= r['Probabilidad_Local'] <= 100
 
 
+def test_scanner_bridge_is_idempotent_and_settles():
+    row = {
+        'snapshot_utc': '2026-08-27T12:00:00+00:00', 'game_date': '2099-01-01',
+        'game_pk': 999999999, 'away': 'BOS', 'home': 'NYY', 'market': 'Moneyline',
+        'selection': 'Gana Local (New York Yankees)', 'line': None, 'odds': 1.91,
+        'prob_ml': 61.0, 'prob_mc': 60.0, 'prob_combined': 60.5,
+        'edge_pp': 6.0, 'ev_pct': 15.55, 'kelly_pct': 4.0, 'model_version': 'v6-test',
+        'result_status': 'pending', 'profit_units': None,
+    }
+    a = sync_snapshot_rows([row]); b = sync_snapshot_rows([row])
+    assert a['ok'] and b['ok']
+    wh = MLBDataWarehouse(); con = wh.connect()
+    try:
+        count = con.execute("SELECT COUNT(*) FROM predictions WHERE game_key='pk:999999999'").fetchone()[0]
+        assert count == 1
+    finally:
+        con.close()
+    row['result_status'] = 'win'; row['profit_units'] = 0.91
+    s = settle_snapshot_rows([row])
+    assert s['ok'] and s['settled'] == 1
+    con = wh.connect()
+    try:
+        result = con.execute("SELECT result, profit_units FROM predictions WHERE game_key='pk:999999999'").fetchone()
+        assert result[0] == 'WIN' and abs(float(result[1]) - 0.91) < 1e-9
+    finally:
+        con.close()
+
+
 if __name__ == '__main__':
     test_warehouse_training_contract_and_tracking()
     test_default_repository_bootstrap_and_predictor_uses_store()
+    test_scanner_bridge_is_idempotent_and_settles()
     print('Big Data integration: OK')
