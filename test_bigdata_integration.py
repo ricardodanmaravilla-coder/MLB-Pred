@@ -5,7 +5,9 @@ import pandas as pd
 
 from modules.bigdata_mlb import MLBDataWarehouse, LEGACY_ML_COLUMNS, bootstrap_from_repository
 from modules.bigdata_tracking import sync_snapshot_rows, settle_snapshot_rows
+from modules.historical_mlb import prepare_games
 from modules.ml_mlb import PredictorMLMLB
+from modules.odds_mlb import _conditional_no_push, _ev, _no_vig_two_way, analizar_apuestas_mlb
 
 
 def test_warehouse_training_contract_and_tracking():
@@ -39,10 +41,55 @@ def test_default_repository_bootstrap_and_predictor_uses_store():
     games = pd.read_csv('data/mlb_games.csv')
     m = PredictorMLMLB()
     assert m.entrenar(bat, pit, games)
-    assert m.training_source == 'duckdb_parquet_feature_store'
+    assert m.training_source == 'duckdb_parquet_feature_store_subset_safe'
     r = m.predecir_partido('NYY', 'BOS', 100, 100, 4.1, 4.2)
-    assert r['Training_Source'] == 'duckdb_parquet_feature_store'
+    assert r['Training_Source'] == 'duckdb_parquet_feature_store_subset_safe'
     assert 0 <= r['Probabilidad_Local'] <= 100
+
+
+def test_predictor_respects_training_subset_and_never_reads_future_rows():
+    """Regression guard: a walk-forward train slice must not expand to the full warehouse."""
+    bootstrap_from_repository()
+    bat = pd.read_csv('data/mlb_batting.csv')
+    pit = pd.read_csv('data/mlb_pitching.csv')
+    prepared = prepare_games(pd.read_csv('data/mlb_games.csv'))
+    assert len(prepared) > 1300
+
+    train = prepared.iloc[:1200].copy()
+    wh = MLBDataWarehouse()
+    expected = len(wh._normalize_games(train))
+    full_count = len(wh._normalize_games(prepared))
+    assert 1000 <= expected < full_count
+
+    m = PredictorMLMLB()
+    assert m.entrenar(bat, pit, train)
+    assert m.training_source == 'duckdb_parquet_feature_store_subset_safe'
+    assert m.training_rows == expected
+    assert m.training_rows < full_count
+
+
+def test_totals_edge_compares_conditional_probabilities_but_ev_keeps_push():
+    # A two-way quoted total is a no-vig probability conditional on no push.
+    p_win, p_push = 0.48, 0.08
+    assert abs(_conditional_no_push(p_win, p_push) - (0.48 / 0.92)) < 1e-12
+    assert abs(_ev(p_win, 2.0, p_push) - 0.04) < 1e-12
+    mkt_over, _ = _no_vig_two_way(1.91, 1.91)
+    assert abs(mkt_over - 0.5) < 1e-12
+
+    res_mc = {
+        'Moneyline': {'Gana Local': 50.0, 'Gana Visita': 50.0},
+        'Carreras': {'Over 8.0': 48.0, 'Under 8.0': 44.0, 'Push 8.0': 8.0},
+    }
+    df = analizar_apuestas_mlb(
+        res_mc, {'Probabilidad_Local': 50.0, 'Probabilidad_Visita': 50.0},
+        {'Moneyline_Local': 1.91, 'Moneyline_Visita': 1.91, 'Cuota_Over': 2.0, 'Cuota_Under': 2.0}, 8.0,
+    )
+    over = df[df['Seleccion'].str.startswith('Over')].iloc[0]
+    assert over['Prob Model'] == '48.0%'
+    assert over['Prob Model Sin Push'] == '52.2%'
+    assert over['Prob Push'] == '8.0%'
+    assert over['Edge'] == '2.17 pp'
+    assert over['EV+'] == '4.0%'
 
 
 def test_warehouse_auto_refresh_detects_historical_correction():
@@ -60,7 +107,6 @@ def test_warehouse_auto_refresh_detects_historical_correction():
         second = wh.ensure_fresh_from_repository(source)
         assert second['fresh'] and not second['rebuilt']
 
-        # Same row count/date range: changing valid scores must invalidate the store.
         score_col = 'Home_Score' if 'Home_Score' in games.columns else 'home_score'
         scores = pd.to_numeric(games[score_col], errors='coerce')
         valid_scores = scores.notna()
@@ -70,7 +116,6 @@ def test_warehouse_auto_refresh_detects_historical_correction():
         corrected = wh.ensure_fresh_from_repository(source)
         assert corrected['fresh'] and corrected['rebuilt']
 
-        # Use the normalized canonical frame itself to test an actual source deletion.
         canonical = wh._normalize_games(games).copy()
         assert len(canonical) > 100
         canonical = canonical.drop(canonical.index[len(canonical) // 2]).reset_index(drop=True)
@@ -120,6 +165,8 @@ def test_scanner_bridge_is_idempotent_and_settles():
 if __name__ == '__main__':
     test_warehouse_training_contract_and_tracking()
     test_default_repository_bootstrap_and_predictor_uses_store()
+    test_predictor_respects_training_subset_and_never_reads_future_rows()
+    test_totals_edge_compares_conditional_probabilities_but_ev_keeps_push()
     test_warehouse_auto_refresh_detects_historical_correction()
     test_scanner_bridge_is_idempotent_and_settles()
     print('Big Data integration: OK')

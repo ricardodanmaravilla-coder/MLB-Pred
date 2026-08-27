@@ -32,7 +32,7 @@ def _cache_key(df_batting, df_pitching, df_games):
     return (
         _frame_signature(df_batting, ('Team','Season','OPS_Index','wRC+','wRC+_Source','wOBA','ISO','BB%','K%')),
         _frame_signature(df_pitching, ('Team','Season','ERA','FIP','xFIP','xFIP_Source','K-BB%','WHIP','GB%','HR/9')),
-        _frame_signature(df_games, ('Date','Season','Home','Away','Home_Score','Away_Score')),
+        _frame_signature(df_games, ('Date','Season','Home','Away','Home_Score','Away_Score','gamePk')),
     )
 
 
@@ -78,6 +78,7 @@ class PredictorMLMLB:
         self.loaded_from_cache = False; self.validation_brier = None
         self.validation_runs_mae = None; self.validation_diff_mae = None
         self.training_source = 'csv_chronological'
+        self.training_rows = 0
 
     @staticmethod
     def _new_classifier(family='logistic'):
@@ -117,10 +118,10 @@ class PredictorMLMLB:
         self.bat_scale=cached['bat_scale']; self.pit_scale=cached['pit_scale']; self.sigma_runs=cached['sigma_runs']; self.sigma_diff=cached['sigma_diff']
         self.prob_shrink=cached['prob_shrink']; self.validation_brier=cached.get('validation_brier'); self.validation_runs_mae=cached.get('validation_runs_mae')
         self.validation_diff_mae=cached.get('validation_diff_mae'); self.current_history=deepcopy(cached['current_history']); self.current_h2h=deepcopy(cached['current_h2h'])
-        self.training_source=cached.get('training_source','csv_chronological'); self.entrenado=True; self.loaded_from_cache=True
+        self.training_source=cached.get('training_source','csv_chronological'); self.training_rows=int(cached.get('training_rows',0)); self.entrenado=True; self.loaded_from_cache=True
 
     def _training_arrays(self, df_batting, df_pitching, games, bd, pdict):
-        """Prefer warehouse features; build it once if absent, then fail-soft to CSV."""
+        """Prefer warehouse features but never exceed the caller's training subset."""
         try:
             from .bigdata_mlb import MLBDataWarehouse, LEGACY_ML_COLUMNS, bootstrap_from_repository
             wh = MLBDataWarehouse()
@@ -128,12 +129,20 @@ class PredictorMLMLB:
                 bootstrap_from_repository()
                 wh = MLBDataWarehouse()
             frame = wh.legacy_ml_training_frame(df_batting, df_pitching, self.bat_scale, self.pit_scale)
-            if len(frame) >= 1000 and all(c in frame.columns for c in LEGACY_ML_COLUMNS):
+            requested = wh._normalize_games(games)
+            if not frame.empty and not requested.empty and 'game_key' in frame.columns and 'game_key' in requested.columns:
+                requested_keys = set(requested['game_key'].astype(str))
+                frame = frame[frame['game_key'].astype(str).isin(requested_keys)].copy()
+                frame = frame.sort_values(['Date','game_key']).reset_index(drop=True)
+            # A partial match is unsafe: fall back to the caller's chronological CSV subset.
+            if (len(frame) == len(requested) and len(frame) >= 1000 and
+                    all(c in frame.columns for c in LEGACY_ML_COLUMNS)):
                 X = frame[LEGACY_ML_COLUMNS].apply(pd.to_numeric, errors='coerce')
                 valid = X.notna().all(axis=1)
                 frame = frame.loc[valid].reset_index(drop=True); X = X.loc[valid].to_numpy(float)
-                self.training_source = 'duckdb_parquet_feature_store'
-                return X, frame['target_home_win'].to_numpy(int), frame['target_total_runs'].to_numpy(float), frame['target_run_diff'].to_numpy(float)
+                if len(frame) == len(requested):
+                    self.training_source = 'duckdb_parquet_feature_store_subset_safe'
+                    return X, frame['target_home_win'].to_numpy(int), frame['target_total_runs'].to_numpy(float), frame['target_run_diff'].to_numpy(float)
         except Exception as e:
             print(f'Big Data fallback a CSV: {e}')
         X,yw,yr,yd=[],[],[],[]; hist,hh={},{}
@@ -158,6 +167,7 @@ class PredictorMLMLB:
             bv=pd.to_numeric(df_batting[bat_col],errors='coerce').dropna(); pv=pd.to_numeric(df_pitching[pit_col],errors='coerce').dropna()
             self.bat_scale=float(bv.median()) if len(bv) else 100.0; self.pit_scale=float(pv.median()) if len(pv) else 4.10
             X,yw,yr,yd=self._training_arrays(df_batting,df_pitching,games,bd,pdict)
+            self.training_rows=int(len(X))
             if len(X)<1000: return False
             cut=max(100,int(len(X)*0.80)); cut=max(100,len(X)-50) if cut>=len(X)-50 else cut
             run_candidates={}; diff_candidates={}
@@ -183,7 +193,7 @@ class PredictorMLMLB:
                 'classifier_family':self.classifier_family,'runs_family':self.runs_family,'diff_family':self.diff_family,'bat_scale':self.bat_scale,'pit_scale':self.pit_scale,
                 'sigma_runs':self.sigma_runs,'sigma_diff':self.sigma_diff,'prob_shrink':self.prob_shrink,'validation_brier':self.validation_brier,
                 'validation_runs_mae':self.validation_runs_mae,'validation_diff_mae':self.validation_diff_mae,'current_history':deepcopy(hist),'current_h2h':deepcopy(hh),
-                'training_source':self.training_source}
+                'training_source':self.training_source,'training_rows':self.training_rows}
             with _MODEL_CACHE_LOCK:
                 _MODEL_CACHE[key]=cache_value; _MODEL_CACHE.move_to_end(key)
                 while len(_MODEL_CACHE)>_MODEL_CACHE_MAX: _MODEL_CACHE.popitem(last=False)
@@ -208,11 +218,12 @@ class PredictorMLMLB:
                 'Prob_Shrink':round(self.prob_shrink,3),'Proyeccion_Carreras':round(runs,2),'Proyeccion_Handicap_Local':round(diff,2),
                 'Sigma_Carreras':round(self.sigma_runs,3),'Sigma_Handicap':round(self.sigma_diff,3),'Modelo_Desde_Cache':bool(self.loaded_from_cache),
                 'Classifier_Family':self.classifier_family,'Runs_Family':self.runs_family,'Diff_Family':self.diff_family,
-                'Training_Source':self.training_source,'Validation_Brier':None if self.validation_brier is None else round(self.validation_brier,5),
+                'Training_Source':self.training_source,'Training_Rows':self.training_rows,
+                'Validation_Brier':None if self.validation_brier is None else round(self.validation_brier,5),
                 'Validation_Runs_MAE':None if self.validation_runs_mae is None else round(self.validation_runs_mae,4),
                 'Validation_Diff_MAE':None if self.validation_diff_mae is None else round(self.validation_diff_mae,4)}
         except Exception as e:
             print(f'Error en predicción ML: {e}')
             return {'Probabilidad_Local':50.0,'Probabilidad_Visita':50.0,'Probabilidad_Local_Raw':50.0,'Prob_Shrink':1.0,
                     'Proyeccion_Carreras':8.5,'Proyeccion_Handicap_Local':0.0,'Sigma_Carreras':3.5,'Sigma_Handicap':4.2,
-                    'Modelo_Desde_Cache':False,'Classifier_Family':'fallback','Runs_Family':'fallback','Diff_Family':'fallback','Training_Source':'fallback'}
+                    'Modelo_Desde_Cache':False,'Classifier_Family':'fallback','Runs_Family':'fallback','Diff_Family':'fallback','Training_Source':'fallback','Training_Rows':0}

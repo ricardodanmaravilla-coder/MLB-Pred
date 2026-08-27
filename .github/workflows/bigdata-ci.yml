@@ -16,9 +16,11 @@ jobs:
           python-version: '3.11'
       - run: pip install -r requirements.txt
       - name: Compile Big Data modules
-        run: python -m py_compile modules/bigdata_mlb.py modules/bigdata_tracking.py modules/ml_mlb.py modules/pick_ledger.py settle_picks.py build_bigdata.py test_bigdata_mlb.py test_bigdata_integration.py
+        run: python -m py_compile modules/bigdata_mlb.py modules/bigdata_tracking.py modules/ml_mlb.py modules/historical_mlb.py modules/odds_mlb.py modules/pick_ledger.py settle_picks.py build_bigdata.py test_bigdata_mlb.py test_bigdata_integration.py test_audit_regressions.py
       - name: Leak-safety unit tests
         run: python test_bigdata_mlb.py
+      - name: Audit regression guards
+        run: python test_audit_regressions.py
       - name: End-to-end warehouse + ML + scanner tracking
         run: python test_bigdata_integration.py
       - name: Build repository warehouse
@@ -30,6 +32,6 @@ jobs:
           s=MLBDataWarehouse().status()
           assert s['games'] > 1000
           assert s['features'] > 1000
-          assert s['feature_version'] == 'bd_v2'
+          assert s['feature_version'] == 'bd_v3'
           print(s)
           PY

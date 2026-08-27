@@ -10,6 +10,12 @@ def prepare_games(df_games):
     Legacy rows have no GameType. When newer rows begin carrying GameType, preserve
     those legacy rows using the old month heuristic instead of dropping the entire
     historical corpus merely because the column now exists.
+
+    The historical miner stores MLB's unique identifier as ``GameID``. Big Data
+    historically expected ``gamePk`` instead, so expose the same identifier under
+    both names when needed. This prevents same-day doubleheaders from collapsing
+    into a single date/team key and gives chronological consumers a deterministic
+    secondary ordering key.
     """
     if df_games is None or df_games.empty:
         return pd.DataFrame()
@@ -22,6 +28,19 @@ def prepare_games(df_games):
     if 'Season' not in g.columns:
         g['Season'] = g['Date'].dt.year
     g['Season'] = pd.to_numeric(g['Season'], errors='coerce')
+
+    # MLB-StatsAPI's statsapi.schedule() is persisted by minero_mlb.py as GameID.
+    # The warehouse uses gamePk as its stable identifier. Preserve both contracts.
+    if 'GameID' in g.columns:
+        g['GameID'] = pd.to_numeric(g['GameID'], errors='coerce')
+        if 'gamePk' not in g.columns:
+            g['gamePk'] = g['GameID']
+        else:
+            existing_pk = pd.to_numeric(g['gamePk'], errors='coerce')
+            g['gamePk'] = existing_pk.where(existing_pk.notna(), g['GameID'])
+    elif 'gamePk' in g.columns:
+        g['gamePk'] = pd.to_numeric(g['gamePk'], errors='coerce')
+
     g = g.dropna(subset=['Date','Home','Away','Home_Score','Away_Score','Season'])
 
     if 'GameType' in g.columns:
@@ -32,7 +51,11 @@ def prepare_games(df_games):
         g = g[competitive_known | legacy_unknown]
     else:
         g = g[g['Date'].dt.month >= 4]
-    return g.sort_values('Date').reset_index(drop=True)
+
+    sort_cols = ['Date']
+    if 'gamePk' in g.columns:
+        sort_cols.append('gamePk')
+    return g.sort_values(sort_cols, kind='mergesort').reset_index(drop=True)
 
 
 def team_state(history, team, n=20):

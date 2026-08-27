@@ -18,9 +18,16 @@ def selective(y,probs,threshold):
     return {'n':n,'hit_rate':round(hit,4),'avg_prob':round(avg,4),'calibration_error_pp':round((avg-hit)*100,2)}
 
 
+def _date_safe_split(games, train_fraction=.85):
+    if games.empty: return games.copy(),games.copy()
+    target=min(len(games)-1,max(1,int(len(games)*float(train_fraction))))
+    boundary=pd.Timestamp(games.iloc[target]['Date']).normalize(); day=games['Date'].dt.normalize()
+    return games[day<boundary].copy(),games[day>=boundary].copy()
+
+
 def main():
     bat=pd.read_csv('data/mlb_batting.csv'); pit=pd.read_csv('data/mlb_pitching.csv'); games=prepare_games(pd.read_csv('data/mlb_games.csv'))
-    cut=int(len(games)*.85); train=games.iloc[:cut]; test=games.iloc[cut:]
+    train,test=_date_safe_split(games,.85)
     m=PredictorMLMLB(); assert m.entrenar(bat,pit,train)
     bc=batting_metric(bat); pc=pitching_metric(pit)
     if not bc or not pc: raise RuntimeError('No valid production metrics')
@@ -31,17 +38,21 @@ def main():
     bm=float(b[bc].median()); pm=float(p[pc].median())
 
     y=[]; prob=[]; rl15=[]; rl15y=[]; over=[]; overy=[]; under=[]; undery=[]
-    for _,r in test.iterrows():
-        h,a=normalize_team(r.Home),normalize_team(r.Away); sy=int(r.Season)-1
-        pr=m.predecir_partido(h,a,bd.get((h,sy),bm),bd.get((a,sy),bm),pdic.get((h,sy),pm),pdic.get((a,sy),pm))
-        hs,as_=float(r.Home_Score),float(r.Away_Score); y.append(int(hs>as_)); prob.append(pr['Probabilidad_Local']/100)
-        d=pr['Proyeccion_Handicap_Local']; sr=pr['Sigma_Handicap']; rl15.append(cdf((d+1.5)/sr)); rl15y.append(int((hs-as_)+1.5>0))
-        tr=pr['Proyeccion_Carreras']; st=pr['Sigma_Carreras']; over.append(cdf((tr-8.5)/st)); under.append(cdf((8.5-tr)/st)); overy.append(int(hs+as_>8.5)); undery.append(int(hs+as_<8.5))
-        m.actualizar_resultado(h,a,hs,as_)
+    for _,day_games in test.groupby(test['Date'].dt.normalize(),sort=True):
+        pending=[]
+        for _,r in day_games.iterrows():
+            h,a=normalize_team(r.Home),normalize_team(r.Away); sy=int(r.Season)-1
+            pr=m.predecir_partido(h,a,bd.get((h,sy),bm),bd.get((a,sy),bm),pdic.get((h,sy),pm),pdic.get((a,sy),pm))
+            hs,as_=float(r.Home_Score),float(r.Away_Score); y.append(int(hs>as_)); prob.append(pr['Probabilidad_Local']/100)
+            d=pr['Proyeccion_Handicap_Local']; sr=pr['Sigma_Handicap']; rl15.append(cdf((d+1.5)/sr)); rl15y.append(int((hs-as_)+1.5>0))
+            tr=pr['Proyeccion_Carreras']; st=pr['Sigma_Carreras']; over.append(cdf((tr-8.5)/st)); under.append(cdf((8.5-tr)/st)); overy.append(int(hs+as_>8.5)); undery.append(int(hs+as_<8.5))
+            pending.append((h,a,hs,as_))
+        for h,a,hs,as_ in pending: m.actualizar_resultado(h,a,hs,as_)
 
     rl_base=float(np.mean(rl15y)); over_base=float(np.mean(overy)); under_base=float(np.mean(undery)); ml_base=float(np.mean(y))
     out={
-      'n_train':len(train),'n_test':len(test),'walk_forward_state_updates':True,'batting_metric':bc,'pitching_metric':pc,
+      'n_train':len(train),'n_test':len(test),'walk_forward_state_updates':True,'split_by_complete_date':True,'same_day_results_deferred':True,
+      'training_source':m.training_source,'training_rows':m.training_rows,'batting_metric':bc,'pitching_metric':pc,
       'classifier_family':m.classifier_family,'runs_family':m.runs_family,'diff_family':m.diff_family,
       'moneyline_accuracy':round(accuracy_score(y,np.array(prob)>=.5),4),'moneyline_brier':round(brier_score_loss(y,prob),4),'moneyline_home_base_rate':round(ml_base,4),
       'runline_home_plus_1_5_accuracy':round(accuracy_score(rl15y,np.array(rl15)>=.5),4),'runline_home_plus_1_5_brier':round(brier_score_loss(rl15y,rl15),4),'runline_home_plus_1_5_base_rate':round(rl_base,4),'runline_base_brier':round(brier_score_loss(rl15y,[rl_base]*len(rl15y)),4),
