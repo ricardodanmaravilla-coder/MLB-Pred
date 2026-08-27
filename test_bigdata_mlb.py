@@ -29,15 +29,29 @@ def test_future_result_does_not_change_past_features():
     pd.testing.assert_series_equal(a.loc[1, cols], b.loc[1, cols])
 
 
-def test_previous_game_updates_next_game():
+def test_previous_day_updates_next_game():
     f = MLBDataWarehouse.build_leak_safe_features(_games())
     second = f.iloc[1]
     assert second.home_win5 == 0.0
     assert second.away_win5 == 1.0
 
 
+def test_same_day_result_never_updates_another_same_day_pregame_row():
+    doubleheader = pd.DataFrame([
+        {"GameID":1001,"Date":"2025-06-10","Season":2025,"GameType":"R","Home":"NYY","Away":"BOS","Home_Score":10,"Away_Score":0},
+        {"GameID":1002,"Date":"2025-06-10","Season":2025,"GameType":"R","Home":"BOS","Away":"NYY","Home_Score":1,"Away_Score":2},
+    ])
+    f = MLBDataWarehouse.build_leak_safe_features(doubleheader)
+    assert len(f) == 2
+    # Both games are evaluated from the same prior-day state, regardless of GameID order.
+    assert f.iloc[0].home_win5 == 0.5 and f.iloc[0].away_win5 == 0.5
+    assert f.iloc[1].home_win5 == 0.5 and f.iloc[1].away_win5 == 0.5
+    assert f.iloc[0].h2h_home_win == 0.5 and f.iloc[1].h2h_home_win == 0.5
+
+
 if __name__ == '__main__':
     test_first_game_uses_priors_only()
     test_future_result_does_not_change_past_features()
-    test_previous_game_updates_next_game()
+    test_previous_day_updates_next_game()
+    test_same_day_result_never_updates_another_same_day_pregame_row()
     print('Big Data leak-safety: OK')
