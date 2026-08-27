@@ -9,12 +9,13 @@ import numpy as np
 import pandas as pd
 from .team_utils import normalize_team
 
-BATTING_SIGNAL_COLUMNS=('wOBA','ISO','BB%','K%','EV','HardHit%','Barrel%')
+BATTING_SIGNAL_COLUMNS=('wOBA','ISO','BB%','K%','EV','HardHit%','Barrel%','OPS_vs_L','OPS_vs_R','OBP_vs_L','OBP_vs_R','SLG_vs_L','SLG_vs_R')
 PITCHING_SIGNAL_COLUMNS=('FIP','xFIP','SIERA','WHIP','K-BB%','GB%','HR/9')
 MODEL_ADVANCED_COLUMNS=[
  'home_rest_norm','away_rest_norm',
  'home_woba_rel','away_woba_rel','home_iso_rel','away_iso_rel','home_bb_rel','away_bb_rel','home_k_rel','away_k_rel',
  'home_ev_rel','away_ev_rel','home_hardhit_rel','away_hardhit_rel','home_barrel_rel','away_barrel_rel',
+ 'home_ops_l_rel','away_ops_l_rel','home_ops_r_rel','away_ops_r_rel','home_obp_l_rel','away_obp_l_rel','home_obp_r_rel','away_obp_r_rel','home_slg_l_rel','away_slg_l_rel','home_slg_r_rel','away_slg_r_rel',
  'home_fip_rel','away_fip_rel','home_xfip_rel','away_xfip_rel','home_siera_rel','away_siera_rel',
  'home_whip_rel','away_whip_rel','home_kbb_rel','away_kbb_rel','home_gb_rel','away_gb_rel','home_hr9_rel','away_hr9_rel']
 
@@ -39,11 +40,14 @@ def _rest_norm(value):
     try:return float(np.clip(float(value),0.0,7.0)/3.0)
     except Exception:return 1.0
 
+def _put_pair(d,bm,bmed,col,key,h,a,sy,inverse=False):
+    center=bmed.get(col,{}).get(sy);hm=bm.get(col,{}).get((h,sy),center);am=bm.get(col,{}).get((a,sy),center)
+    d[f'home_{key}_rel']=_relative(hm,center,inverse);d[f'away_{key}_rel']=_relative(am,center,inverse)
+
 def _row(home,away,season,bm,bmed,pm,pmed,home_rest=3.0,away_rest=3.0):
     sy=int(season)-1;h=normalize_team(home);a=normalize_team(away);d={'home_rest_norm':_rest_norm(home_rest),'away_rest_norm':_rest_norm(away_rest)}
-    for col,key in {'wOBA':'woba','ISO':'iso','BB%':'bb','K%':'k','EV':'ev','HardHit%':'hardhit','Barrel%':'barrel'}.items():
-        center=bmed.get(col,{}).get(sy);hm=bm.get(col,{}).get((h,sy),center);am=bm.get(col,{}).get((a,sy),center);inv=(col=='K%')
-        d[f'home_{key}_rel']=_relative(hm,center,inv);d[f'away_{key}_rel']=_relative(am,center,inv)
+    for col,key in {'wOBA':'woba','ISO':'iso','BB%':'bb','K%':'k','EV':'ev','HardHit%':'hardhit','Barrel%':'barrel','OPS_vs_L':'ops_l','OPS_vs_R':'ops_r','OBP_vs_L':'obp_l','OBP_vs_R':'obp_r','SLG_vs_L':'slg_l','SLG_vs_R':'slg_r'}.items():
+        _put_pair(d,bm,bmed,col,key,h,a,sy,inverse=(col=='K%'))
     for col,key in {'FIP':'fip','xFIP':'xfip','SIERA':'siera','WHIP':'whip','K-BB%':'kbb','GB%':'gb','HR/9':'hr9'}.items():
         center=pmed.get(col,{}).get(sy);hm=pm.get(col,{}).get((h,sy),center);am=pm.get(col,{}).get((a,sy),center);inv=col in ('FIP','xFIP','SIERA','WHIP','HR/9')
         d[f'home_{key}_rel']=_relative(hm,center,inv);d[f'away_{key}_rel']=_relative(am,center,inv)
@@ -52,9 +56,7 @@ def _row(home,away,season,bm,bmed,pm,pmed,home_rest=3.0,away_rest=3.0):
 def build_advanced_signal_frame(feature_frame,batting,pitching):
     if feature_frame is None or feature_frame.empty:return pd.DataFrame(columns=MODEL_ADVANCED_COLUMNS)
     bm,bmed=_season_team_maps(batting,BATTING_SIGNAL_COLUMNS);pm,pmed=_season_team_maps(pitching,PITCHING_SIGNAL_COLUMNS)
-    rows=[]
-    for r in feature_frame.itertuples(index=False):
-        rows.append(_row(r.Home,r.Away,r.Season,bm,bmed,pm,pmed,getattr(r,'home_rest_days',3.0),getattr(r,'away_rest_days',3.0)))
+    rows=[_row(r.Home,r.Away,r.Season,bm,bmed,pm,pmed,getattr(r,'home_rest_days',3.0),getattr(r,'away_rest_days',3.0)) for r in feature_frame.itertuples(index=False)]
     out=pd.DataFrame(rows,index=feature_frame.index)
     for c in MODEL_ADVANCED_COLUMNS:
         if c not in out.columns:out[c]=1.0
