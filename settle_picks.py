@@ -3,6 +3,7 @@ import pandas as pd
 
 from modules.historical_mlb import prepare_games
 from modules.pick_ledger import LEDGER_COLUMNS, sync_google_snapshot, enrich_tracking_row
+from modules.bigdata_tracking import settle_snapshot_rows
 from modules.team_utils import normalize_team
 
 LEDGER = 'data/picks_ledger.csv'
@@ -64,7 +65,6 @@ def main():
         print('Ledger empty')
         return
 
-    # Migrate legacy rows in-memory so every settled pick can report Kelly/stake/profit MXN.
     enriched_rows = [enrich_tracking_row(row.to_dict()) for _, row in ledger.iterrows()]
     ledger = pd.DataFrame(enriched_rows)
     for c in LEDGER_COLUMNS:
@@ -112,6 +112,11 @@ def main():
 
     if settled_indices:
         rows = ledger.loc[settled_indices, LEDGER_COLUMNS].to_dict('records')
+        bigdata_status = settle_snapshot_rows(rows)
+        if not bigdata_status.get('ok'):
+            print(f"Big Data settlement sync failed: {bigdata_status.get('message')}")
+        else:
+            print(f"Big Data settlement sync OK: {bigdata_status.get('settled', 0)} settled")
         google_status = sync_google_snapshot(rows)
         if google_status.get('configured') and not google_status.get('ok'):
             print(f"Google Sheets settlement sync failed: {google_status.get('message')}")
