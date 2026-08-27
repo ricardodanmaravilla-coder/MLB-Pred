@@ -23,7 +23,7 @@ def _frame_signature(df,important_columns):
     cols=[c for c in important_columns if c in df.columns] or list(df.columns);hashed=pd.util.hash_pandas_object(df[cols],index=True).values.tobytes();return (int(len(df)),int(len(df.columns)),hashlib.sha256(hashed).hexdigest())
 
 def _cache_key(df_batting,df_pitching,df_games):
-    return (_frame_signature(df_batting,('Team','Season','OPS_Index','wRC+','wRC+_Source','wOBA','ISO','BB%','K%','EV','HardHit%','Barrel%')),_frame_signature(df_pitching,('Team','Season','ERA','FIP','xFIP','SIERA','xFIP_Source','K-BB%','WHIP','GB%','HR/9')),_frame_signature(df_games,('Date','Season','Home','Away','Home_Score','Away_Score','gamePk')))
+    return (_frame_signature(df_batting,('Team','Season','OPS_Index','wRC+','wRC+_Source','wOBA','ISO','BB%','K%','EV','HardHit%','Barrel%','OPS_vs_L','OPS_vs_R','OBP_vs_L','OBP_vs_R','SLG_vs_L','SLG_vs_R')),_frame_signature(df_pitching,('Team','Season','ERA','FIP','xFIP','SIERA','xFIP_Source','K-BB%','WHIP','GB%','HR/9')),_frame_signature(df_games,('Date','Season','Home','Away','Home_Score','Away_Score','gamePk')))
 
 def _normal_cdf(z):return 0.5*(1.0+math.erf(float(z)/math.sqrt(2.0)))
 
@@ -54,6 +54,14 @@ def _date_safe_cut(dates,ratio=0.80,min_train=100,min_validation=50):
         cut=target;next_day=d.iloc[target]
         while cut>min_train and d.iloc[cut-1]==next_day:cut-=1
     return int(max(min_train,min(n-min_validation,cut)))
+
+def _as_of_date(value=None):
+    if value is None:return pd.Timestamp.now(tz='America/New_York').tz_localize(None).normalize()
+    try:
+        d=pd.Timestamp(value)
+        if d.tzinfo is not None:d=d.tz_convert('America/New_York').tz_localize(None)
+        return d.normalize()
+    except Exception:return pd.Timestamp.now(tz='America/New_York').tz_localize(None).normalize()
 
 class PredictorMLMLB:
     def __init__(self):
@@ -127,10 +135,10 @@ class PredictorMLMLB:
             for t in (normalize_team(r.Home),normalize_team(r.Away)):
                 if t and (t not in out or d>out[t]):out[t]=d
         return out
-    def _live_rest(self,team):
+    def _live_rest(self,team,game_date=None):
         d=self.last_game_dates.get(normalize_team(team))
         if d is None:return 3.0
-        today=pd.Timestamp.now(tz='America/New_York').tz_localize(None).normalize();latest=max(self.last_game_dates.values()) if self.last_game_dates else d;as_of=today if abs((today-latest).days)<=3 else latest+pd.Timedelta(days=1);return float(np.clip((as_of-pd.Timestamp(d).normalize()).days-1,0,7))
+        as_of=_as_of_date(game_date);return float(np.clip((as_of-pd.Timestamp(d).normalize()).days-1,0,7))
     def entrenar(self,df_batting,df_pitching,df_games):
         try:
             if df_batting.empty or df_pitching.empty or df_games.empty:return False
@@ -155,14 +163,17 @@ class PredictorMLMLB:
                 while len(_MODEL_CACHE)>_MODEL_CACHE_MAX:_MODEL_CACHE.popitem(last=False)
             return True
         except Exception as e:print(f'Error entrenando ML MLB: {e}');self.entrenado=False;return False
-    def actualizar_resultado(self,loc_abbr,vis_abbr,home_score,away_score):append_game(self.current_history,self.current_h2h,normalize_team(loc_abbr),normalize_team(vis_abbr),float(home_score),float(away_score))
+    def actualizar_resultado(self,loc_abbr,vis_abbr,home_score,away_score,game_date=None):
+        loc,vis=normalize_team(loc_abbr),normalize_team(vis_abbr);append_game(self.current_history,self.current_h2h,loc,vis,float(home_score),float(away_score))
+        if game_date is not None:
+            d=_as_of_date(game_date);self.last_game_dates[loc]=d;self.last_game_dates[vis]=d;self.history_as_of=max(self.last_game_dates.values()).strftime('%Y-%m-%d') if self.last_game_dates else None
     @staticmethod
     def _cdf(z):return _normal_cdf(z)
-    def predecir_partido(self,loc_abbr,vis_abbr,wrc_loc,wrc_vis,xfip_loc,xfip_vis,pf=None):
+    def predecir_partido(self,loc_abbr,vis_abbr,wrc_loc,wrc_vis,xfip_loc,xfip_vis,pf=None,game_date=None):
         try:
             if not self.entrenado:raise RuntimeError('Modelo no entrenado')
-            loc,vis=normalize_team(loc_abbr),normalize_team(vis_abbr);base=np.asarray(self._feature_row(self.current_history,self.current_h2h,loc,vis,float(wrc_loc),float(wrc_vis),float(xfip_loc),float(xfip_vis)),float);f=base;rest_l=self._live_rest(loc);rest_v=self._live_rest(vis)
-            if self.signal_set=='advanced_prior_season' and self.signal_season is not None:f=np.concatenate([base,build_live_signal_row(loc,vis,self.signal_season,self.signal_batting,self.signal_pitching,rest_l,rest_v)])
-            f=f.reshape(1,-1);raw=float(self.modelo_ganador.predict_proba(f)[0,1]);p=self._shrink_probability(raw,self.prob_shrink);runs=float(self.modelo_carreras.predict(f)[0]);diff=float(self.modelo_handicap.predict(f)[0]);return {'Probabilidad_Local':round(p*100,2),'Probabilidad_Visita':round((1-p)*100,2),'Probabilidad_Local_Raw':round(raw*100,2),'Prob_Shrink':round(self.prob_shrink,3),'Proyeccion_Carreras':round(runs,2),'Proyeccion_Handicap_Local':round(diff,2),'Sigma_Carreras':round(self.sigma_runs,3),'Sigma_Handicap':round(self.sigma_diff,3),'Modelo_Desde_Cache':bool(self.loaded_from_cache),'Classifier_Family':self.classifier_family,'Runs_Family':self.runs_family,'Diff_Family':self.diff_family,'Training_Source':self.training_source,'Training_Rows':self.training_rows,'Validation_Cut_Date':self.validation_cut_date,'Signal_Set':self.signal_set,'Signal_Gain_Pct':self.signal_gain,'Signal_Coverage':self.signal_coverage,'Rest_Days_Local':rest_l,'Rest_Days_Visita':rest_v,'History_As_Of':self.history_as_of,'Validation_Brier':None if self.validation_brier is None else round(self.validation_brier,5),'Validation_Runs_MAE':None if self.validation_runs_mae is None else round(self.validation_runs_mae,4),'Validation_Diff_MAE':None if self.validation_diff_mae is None else round(self.validation_diff_mae,4)}
+            as_of=_as_of_date(game_date);pred_season=int(as_of.year);loc,vis=normalize_team(loc_abbr),normalize_team(vis_abbr);base=np.asarray(self._feature_row(self.current_history,self.current_h2h,loc,vis,float(wrc_loc),float(wrc_vis),float(xfip_loc),float(xfip_vis)),float);f=base;rest_l=self._live_rest(loc,as_of);rest_v=self._live_rest(vis,as_of)
+            if self.signal_set=='advanced_prior_season':f=np.concatenate([base,build_live_signal_row(loc,vis,pred_season,self.signal_batting,self.signal_pitching,rest_l,rest_v)])
+            f=f.reshape(1,-1);raw=float(self.modelo_ganador.predict_proba(f)[0,1]);p=self._shrink_probability(raw,self.prob_shrink);runs=float(self.modelo_carreras.predict(f)[0]);diff=float(self.modelo_handicap.predict(f)[0]);return {'Probabilidad_Local':round(p*100,2),'Probabilidad_Visita':round((1-p)*100,2),'Probabilidad_Local_Raw':round(raw*100,2),'Prob_Shrink':round(self.prob_shrink,3),'Proyeccion_Carreras':round(runs,2),'Proyeccion_Handicap_Local':round(diff,2),'Sigma_Carreras':round(self.sigma_runs,3),'Sigma_Handicap':round(self.sigma_diff,3),'Modelo_Desde_Cache':bool(self.loaded_from_cache),'Classifier_Family':self.classifier_family,'Runs_Family':self.runs_family,'Diff_Family':self.diff_family,'Training_Source':self.training_source,'Training_Rows':self.training_rows,'Validation_Cut_Date':self.validation_cut_date,'Signal_Set':self.signal_set,'Signal_Gain_Pct':self.signal_gain,'Signal_Coverage':self.signal_coverage,'Signal_Season_Used':pred_season-1,'Rest_Days_Local':rest_l,'Rest_Days_Visita':rest_v,'Prediction_Date':str(as_of.date()),'History_As_Of':self.history_as_of,'Validation_Brier':None if self.validation_brier is None else round(self.validation_brier,5),'Validation_Runs_MAE':None if self.validation_runs_mae is None else round(self.validation_runs_mae,4),'Validation_Diff_MAE':None if self.validation_diff_mae is None else round(self.validation_diff_mae,4)}
         except Exception as e:
             print(f'Error en predicción ML: {e}');return {'Probabilidad_Local':50.0,'Probabilidad_Visita':50.0,'Probabilidad_Local_Raw':50.0,'Prob_Shrink':1.0,'Proyeccion_Carreras':8.5,'Proyeccion_Handicap_Local':0.0,'Sigma_Carreras':3.5,'Sigma_Handicap':4.2,'Modelo_Desde_Cache':False,'Classifier_Family':'fallback','Runs_Family':'fallback','Diff_Family':'fallback','Training_Source':'fallback','Training_Rows':0,'Signal_Set':'fallback'}
