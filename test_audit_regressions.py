@@ -4,6 +4,7 @@ import pandas as pd
 from modules.bigdata_mlb import MLBDataWarehouse
 from modules.historical_mlb import prepare_games
 from modules.ml_mlb import PredictorMLMLB, _date_safe_cut
+from modules.montecarlo_mlb import _estimate_dispersion
 from modules.odds_mlb import _conditional_no_push, _ev, analizar_apuestas_mlb
 
 
@@ -75,9 +76,28 @@ def test_internal_validation_cut_never_splits_calendar_date():
     assert train_days.isdisjoint(validation_days)
 
 
+def test_montecarlo_dispersion_is_estimated_from_real_score_variance():
+    rng = np.random.default_rng(7)
+    rows = []
+    for i in range(600):
+        # Deliberately overdispersed team scores; historical moments should replace fallback 14.5.
+        h = int(rng.negative_binomial(5.0, 5.0 / 9.5))
+        a = int(rng.negative_binomial(5.0, 5.0 / 9.5))
+        rows.append({
+            'GameID': 500000 + i, 'Date': pd.Timestamp('2025-04-01') + pd.Timedelta(days=i // 8),
+            'Season': 2025, 'GameType': 'R', 'Away': 'BOS', 'Home': 'NYY',
+            'Away_Score': a, 'Home_Score': h,
+        })
+    k, source = _estimate_dispersion(pd.DataFrame(rows))
+    assert source == 'historical_moments'
+    assert 3.0 <= k <= 10.0
+    assert abs(k - 14.5) > 1.0
+
+
 if __name__ == '__main__':
     test_gameid_survives_as_gamepk_and_doubleheaders_do_not_collapse()
     test_total_edge_is_no_push_conditional_while_ev_is_unconditional()
     test_csv_fallback_doubleheader_features_do_not_see_game_one_result()
     test_internal_validation_cut_never_splits_calendar_date()
+    test_montecarlo_dispersion_is_estimated_from_real_score_variance()
     print('Audit regressions: OK')
