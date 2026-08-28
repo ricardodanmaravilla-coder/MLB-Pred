@@ -1,7 +1,12 @@
 """Optional Google Sheets sink for MLB scanner recommendations.
 
 Prediction logic never depends on Google. Any auth/network/worksheet error is returned
-as status and must not interrupt the scanner, ledger, settlement, or Streamlit UI.
+as status and must not interrupt the scanner, ledger, settlement, Streamlit, or Cloud Run.
+
+Authentication order:
+1. GOOGLE_SERVICE_ACCOUNT_JSON / Streamlit secret when explicitly configured.
+2. Google Application Default Credentials (ADC), which lets Cloud Run use its attached
+   service account without storing a JSON key in environment variables.
 """
 from __future__ import annotations
 
@@ -17,6 +22,10 @@ LEGACY_HEADERS = [
     "wind_direction", "model_version", "result_status", "result_value", "profit_units"
 ]
 SHEET_HEADERS = LEGACY_HEADERS + ["kelly_pct", "bankroll_mxn", "stake_mxn", "profit_mxn"]
+GOOGLE_SCOPES = [
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive.file",
+]
 
 
 def _clean(value: Any):
@@ -69,11 +78,26 @@ def _worksheet_name(config: Mapping[str, Any] | None = None) -> str:
     return str(config.get("worksheet") or _runtime_secret("GOOGLE_SHEETS_WORKSHEET", "MLB_Picks")).strip() or "MLB_Picks"
 
 
+def _google_credentials(config: Mapping[str, Any] | None = None):
+    """Return (credentials, auth_source) using explicit JSON first, then ADC."""
+    payload = _credentials_payload(config)
+    if payload:
+        from google.oauth2.service_account import Credentials
+        return Credentials.from_service_account_info(payload, scopes=GOOGLE_SCOPES), "service_account_json"
+
+    # On Cloud Run google.auth.default() resolves the attached runtime service account.
+    # Locally/CI this may fail; callers keep the sink fail-soft.
+    import google.auth
+    credentials, _ = google.auth.default(scopes=GOOGLE_SCOPES)
+    return credentials, "application_default_credentials"
+
+
 def configured(config: Mapping[str, Any] | None = None) -> bool:
     if not _sheet_id(config):
         return False
     try:
-        return bool(_credentials_payload(config))
+        _google_credentials(config)
+        return True
     except Exception:
         return False
 
@@ -143,21 +167,13 @@ def sync_rows(rows: Iterable[Mapping[str, Any]], config: Mapping[str, Any] | Non
 
     sheet_id = _sheet_id(config)
     worksheet_name = _worksheet_name(config)
+    if not sheet_id:
+        return {"ok": True, "configured": False, "inserted": 0, "updated": 0, "message": "GOOGLE_SHEETS_ID not configured"}
+
     try:
-        creds_payload = _credentials_payload(config)
-        if not sheet_id or not creds_payload:
-            return {"ok": True, "configured": False, "inserted": 0, "updated": 0, "message": "not configured"}
-
+        credentials, auth_source = _google_credentials(config)
         import gspread
-        from google.oauth2.service_account import Credentials
 
-        credentials = Credentials.from_service_account_info(
-            creds_payload,
-            scopes=[
-                "https://www.googleapis.com/auth/spreadsheets",
-                "https://www.googleapis.com/auth/drive.file",
-            ],
-        )
         client = gspread.authorize(credentials)
         book = client.open_by_key(sheet_id)
         try:
@@ -169,7 +185,7 @@ def sync_rows(rows: Iterable[Mapping[str, Any]], config: Mapping[str, Any] | Non
         if ws is None:
             return {
                 "ok": False, "configured": True, "inserted": 0, "updated": 0,
-                "message": schema_message
+                "message": schema_message, "auth_source": auth_source,
             }
 
         key_to_row = {}
@@ -200,10 +216,10 @@ def sync_rows(rows: Iterable[Mapping[str, Any]], config: Mapping[str, Any] | Non
         return {
             "ok": True, "configured": True, "inserted": len(append_payload),
             "updated": len(update_payload), "worksheet": actual_name,
-            "message": schema_message
+            "message": schema_message, "auth_source": auth_source,
         }
     except Exception as exc:
         return {
-            "ok": False, "configured": bool(sheet_id), "inserted": 0, "updated": 0,
+            "ok": False, "configured": True, "inserted": 0, "updated": 0,
             "message": str(exc)[:240]
         }
