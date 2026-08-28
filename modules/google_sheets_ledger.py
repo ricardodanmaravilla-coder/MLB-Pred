@@ -85,8 +85,6 @@ def _google_credentials(config: Mapping[str, Any] | None = None):
         from google.oauth2.service_account import Credentials
         return Credentials.from_service_account_info(payload, scopes=GOOGLE_SCOPES), "service_account_json"
 
-    # On Cloud Run google.auth.default() resolves the attached runtime service account.
-    # Locally/CI this may fail; callers keep the sink fail-soft.
     import google.auth
     credentials, _ = google.auth.default(scopes=GOOGLE_SCOPES)
     return credentials, "application_default_credentials"
@@ -219,7 +217,13 @@ def sync_rows(rows: Iterable[Mapping[str, Any]], config: Mapping[str, Any] | Non
             "message": schema_message, "auth_source": auth_source,
         }
     except Exception as exc:
+        exc_type = type(exc).__name__
+        exc_repr = repr(exc)
+        exc_text = str(exc).strip()
+        detail = exc_text or exc_repr or exc_type
         return {
             "ok": False, "configured": True, "inserted": 0, "updated": 0,
-            "message": str(exc)[:240]
+            "message": f"{exc_type}: {detail}"[:500],
+            "exception_type": exc_type,
+            "auth_source": "unknown",
         }
