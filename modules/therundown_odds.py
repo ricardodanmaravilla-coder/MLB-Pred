@@ -3,25 +3,33 @@ from __future__ import annotations
 """TheRundown V2 MLB odds provider for the existing multi-odds bridge.
 
 The provider is intentionally isolated from the scanner so the current
-The-Odds-API-shaped pipeline does not need to change.  It fetches only the
-full-game main-line moneyline, spread and total markets for MLB and normalizes
-them to the schema already consumed by modules.multi_odds.
+The-Odds-API-shaped pipeline does not need to change. It fetches the full-game
+moneyline, spread and total markets for MLB and normalizes them to the schema
+already consumed by modules.multi_odds.
 
 Environment / Streamlit secret:
   THERUNDOWN_KEY            required API key
   THERUNDOWN_AFFILIATE_IDS  optional CSV, default DraftKings, BetMGM, FanDuel
 """
 
+import logging
 import os
+import time
 from collections import defaultdict
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 from . import multi_odds
 
+log = logging.getLogger(__name__)
+
 _INSTALLED = False
+# The /api/v2/sports catalog for this account reports MLB as sport_id=3.
 _MLB_SPORT_ID = 3
 _CENTRAL = ZoneInfo("America/Chicago")
+_CACHE_TTL_SECONDS = 300
+_CACHE: dict[str, object] = {"date": None, "at": 0.0, "events": []}
+
 _AFFILIATE_NAMES = {
     "2": "Bovada",
     "3": "Pinnacle",
@@ -76,28 +84,120 @@ def _float(value):
         return None
 
 
-def _fetch_therundown(get_fn) -> list[dict]:
-    key = _secret("THERUNDOWN_KEY")
-    if not key:
-        return []
+def _norm_name(value) -> str:
+    return " ".join(str(value or "").lower().replace(".", "").split())
 
-    slate_date = datetime.now(timezone.utc).astimezone(_CENTRAL).date().isoformat()
-    affiliate_ids = _secret("THERUNDOWN_AFFILIATE_IDS", "19,22,23")
-    url = f"https://therundown.io/api/v2/sports/{_MLB_SPORT_ID}/events/{slate_date}"
-    params = {
+
+def _same_team(a: str, b: str) -> bool:
+    """Tolerate provider differences such as 'Orioles' vs 'Baltimore Orioles'."""
+    na, nb = _norm_name(a), _norm_name(b)
+    if not na or not nb:
+        return False
+    if na == nb:
+        return True
+    # Require a meaningful token match; this safely handles nickname-only names.
+    ta, tb = na.split(), nb.split()
+    return len(ta[-1]) >= 4 and ta[-1] == tb[-1]
+
+
+def _event_teams(event: dict):
+    teams = [t for t in (event.get("teams") or []) if isinstance(t, dict)]
+    if len(teams) < 2:
+        return None
+
+    away_obj = next((t for t in teams if t.get("is_away") is True), None)
+    home_obj = next((t for t in teams if t.get("is_home") is True), None)
+
+    # V2 commonly exposes only is_away. Away is index 0 and home index 1.
+    if away_obj is None:
+        away_obj = teams[0]
+    if home_obj is None:
+        home_obj = next((t for t in teams if t is not away_obj and t.get("is_away") is False), None)
+    if home_obj is None:
+        home_obj = teams[1] if teams[1] is not away_obj else teams[0]
+
+    away = _team_name(away_obj)
+    home = _team_name(home_obj)
+    if not away or not home:
+        return None
+    return home_obj, away_obj, home, away
+
+
+def _team_selection(participant: dict, home_obj: dict, away_obj: dict, home: str, away: str):
+    pid = str(participant.get("id") or participant.get("team_id") or "")
+    # TheRundown V2 team objects use `id`; older payloads may use team_id.
+    home_id = str(home_obj.get("id") or home_obj.get("team_id") or "")
+    away_id = str(away_obj.get("id") or away_obj.get("team_id") or "")
+    pname = str(participant.get("name") or "").strip()
+
+    if pid and home_id and pid == home_id:
+        return home
+    if pid and away_id and pid == away_id:
+        return away
+    if _same_team(pname, home):
+        return home
+    if _same_team(pname, away):
+        return away
+    return pname
+
+
+def _selected_affiliates() -> set[str]:
+    raw = _secret("THERUNDOWN_AFFILIATE_IDS", "19,22,23")
+    return {x.strip() for x in raw.split(",") if x.strip()}
+
+
+def _request_payload(get_fn, url: str, headers: dict, affiliate_ids: str):
+    """Use the narrow production request first; retry once with only core markets.
+
+    The fallback exists because some account/sport catalog combinations have
+    returned an empty event list when affiliate/main-line filters were combined,
+    while the same MLB endpoint returned events without those filters.
+    """
+    narrow = {
         "market_ids": "1,2,3",
         "affiliate_ids": affiliate_ids,
         "main_line": "true",
         "hide_closed": "true",
         "offset": "300",
     }
+    response = get_fn(url, params=narrow, headers=headers, timeout=12)
+    if getattr(response, "status_code", 0) != 200:
+        log.warning("TheRundown narrow request failed: HTTP %s", getattr(response, "status_code", None))
+        return None
+
+    payload = response.json()
+    events = payload.get("events", []) if isinstance(payload, dict) else []
+    if isinstance(events, list) and events:
+        return payload
+
+    # One bounded fallback: still request only the three core markets. We filter
+    # affiliates and main lines locally. This is intentionally not an unfiltered
+    # all-markets request, which could consume many data points.
+    fallback = {"market_ids": "1,2,3", "offset": "300"}
+    response = get_fn(url, params=fallback, headers=headers, timeout=12)
+    if getattr(response, "status_code", 0) != 200:
+        log.warning("TheRundown fallback request failed: HTTP %s", getattr(response, "status_code", None))
+        return payload
+    return response.json()
+
+
+def _fetch_therundown(get_fn) -> list[dict]:
+    key = _secret("THERUNDOWN_KEY")
+    if not key:
+        return []
+
+    slate_date = datetime.now(timezone.utc).astimezone(_CENTRAL).date().isoformat()
+    now = time.monotonic()
+    if _CACHE.get("date") == slate_date and now - float(_CACHE.get("at") or 0.0) < _CACHE_TTL_SECONDS:
+        return list(_CACHE.get("events") or [])
+
+    affiliate_ids = _secret("THERUNDOWN_AFFILIATE_IDS", "19,22,23")
+    allowed_affiliates = _selected_affiliates()
+    url = f"https://therundown.io/api/v2/sports/{_MLB_SPORT_ID}/events/{slate_date}"
     headers = {"X-TheRundown-Key": key, "Accept": "application/json"}
 
     try:
-        response = get_fn(url, params=params, headers=headers, timeout=10)
-        if getattr(response, "status_code", 0) != 200:
-            return []
-        payload = response.json()
+        payload = _request_payload(get_fn, url, headers, affiliate_ids)
         events = payload.get("events", []) if isinstance(payload, dict) else []
         if not isinstance(events, list):
             return []
@@ -107,43 +207,36 @@ def _fetch_therundown(get_fn) -> list[dict]:
             if not isinstance(event, dict):
                 continue
 
-            teams = event.get("teams") or []
-            if len(teams) < 2:
+            team_info = _event_teams(event)
+            if not team_info:
                 continue
-            away_obj = next((t for t in teams if t.get("is_away")), teams[0])
-            home_obj = next((t for t in teams if t.get("is_home")), teams[1])
-            away = _team_name(away_obj)
-            home = _team_name(home_obj)
-            if not home or not away:
-                continue
+            home_obj, away_obj, home, away = team_info
 
-            home_id = str(home_obj.get("team_id") or "")
-            away_id = str(away_obj.get("team_id") or "")
+            # Store all valid main-line candidates by book. A dict keyed by point
+            # prevents alternate lines from overwriting the actual main line.
             by_book = defaultdict(lambda: {
                 "ml": {},
                 "totals": defaultdict(dict),
-                "spreads": {},
+                "spreads": defaultdict(dict),
             })
 
             for market in event.get("markets") or []:
                 if not isinstance(market, dict):
                     continue
-                market_id = int(market.get("market_id") or 0)
-                period_id = int(market.get("period_id") or 0)
+                try:
+                    market_id = int(market.get("market_id") or 0)
+                    period_id = int(market.get("period_id") or 0)
+                except (TypeError, ValueError):
+                    continue
                 if market_id not in (1, 2, 3) or period_id != 0:
                     continue
 
                 for participant in market.get("participants") or []:
                     if not isinstance(participant, dict):
                         continue
-                    pid = str(participant.get("id") or "")
                     pname = str(participant.get("name") or "").strip()
-                    if pid == home_id:
-                        selection = home
-                    elif pid == away_id:
-                        selection = away
-                    else:
-                        selection = pname
+                    ptype = str(participant.get("type") or "").upper()
+                    selection = _team_selection(participant, home_obj, away_obj, home, away)
 
                     for line in participant.get("lines") or []:
                         if not isinstance(line, dict):
@@ -154,20 +247,31 @@ def _fetch_therundown(get_fn) -> list[dict]:
                             continue
 
                         for affiliate_id, price_obj in prices.items():
+                            aid = str(affiliate_id)
+                            if allowed_affiliates and aid not in allowed_affiliates:
+                                continue
                             if not isinstance(price_obj, dict):
+                                continue
+
+                            # In V2 is_main_line belongs to the price object. If the
+                            # field is present and false, it is an alternate line.
+                            if "is_main_line" in price_obj and price_obj.get("is_main_line") is not True:
                                 continue
                             price = _price(price_obj.get("price"))
                             if price is None:
                                 continue
-                            aid = str(affiliate_id)
-                            slot = by_book[aid]
 
+                            slot = by_book[aid]
                             if market_id == 1 and selection in (home, away):
                                 slot["ml"][selection] = price
                             elif market_id == 2 and selection in (home, away) and point is not None:
-                                slot["spreads"][selection] = {"point": point, "price": price}
+                                slot["spreads"][point][selection] = price
                             elif market_id == 3 and point is not None:
-                                side = "Over" if pname.lower().startswith("over") else "Under" if pname.lower().startswith("under") else None
+                                side = None
+                                if ptype in {"TYPE_OVER", "OVER"} or pname.lower().startswith("over"):
+                                    side = "Over"
+                                elif ptype in {"TYPE_UNDER", "UNDER"} or pname.lower().startswith("under"):
+                                    side = "Under"
                                 if side:
                                     slot["totals"][point][side] = price
 
@@ -186,20 +290,27 @@ def _fetch_therundown(get_fn) -> list[dict]:
                     if "Over" in sides and "Under" in sides
                 ]
                 if valid_totals:
+                    # With is_main_line filtering there should normally be one.
                     point, sides = valid_totals[0]
                     markets.append(multi_odds._market("totals", [
                         multi_odds._outcome("Over", sides["Over"], point),
                         multi_odds._outcome("Under", sides["Under"], point),
                     ]))
 
-                spreads = data["spreads"]
-                if home in spreads and away in spreads:
-                    hp, ap = spreads[home], spreads[away]
-                    if abs(float(hp["point"]) + float(ap["point"])) < 1e-6:
-                        markets.append(multi_odds._market("spreads", [
-                            multi_odds._outcome(home, hp["price"], hp["point"]),
-                            multi_odds._outcome(away, ap["price"], ap["point"]),
-                        ]))
+                spread_market = None
+                for point, selections in data["spreads"].items():
+                    if home not in selections:
+                        continue
+                    opposite = -float(point)
+                    away_rows = data["spreads"].get(opposite, {})
+                    if away in away_rows:
+                        spread_market = multi_odds._market("spreads", [
+                            multi_odds._outcome(home, selections[home], point),
+                            multi_odds._outcome(away, away_rows[away], opposite),
+                        ])
+                        break
+                if spread_market:
+                    markets.append(spread_market)
 
                 if markets:
                     title = _AFFILIATE_NAMES.get(aid, f"TheRundown {aid}")
@@ -214,12 +325,15 @@ def _fetch_therundown(get_fn) -> list[dict]:
                     home,
                     away,
                     event.get("event_date"),
-                    event.get("event_id") or event.get("event_uuid"),
+                    event.get("event_id") or event.get("event_uuid") or event.get("id"),
                     books,
                 ))
 
+        _CACHE.update({"date": slate_date, "at": now, "events": normalized})
+        log.info("TheRundown normalized %d MLB events for %s", len(normalized), slate_date)
         return normalized
     except Exception:
+        log.exception("TheRundown MLB odds normalization failed")
         return []
 
 
@@ -239,7 +353,7 @@ def install_therundown_provider() -> None:
     multi_odds._fetch_sharpapi = fetch_alternates
 
     # The legacy application only enters its odds code path when ODDS_API_KEY is
-    # non-empty.  If TheRundown is the only configured provider, use the same
+    # non-empty. If TheRundown is the only configured provider, use the same
     # harmless sentinel understood by the existing requests bridge.
     if _secret("THERUNDOWN_KEY") and not os.getenv("ODDS_API_KEY", "").strip():
         os.environ["ODDS_API_KEY"] = multi_odds._SENTINEL
