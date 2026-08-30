@@ -8,6 +8,7 @@ import pandas as pd
 
 from .team_utils import normalize_team
 from .multi_odds import install_requests_bridge
+from .therundown_odds import install_therundown_provider
 
 SLATE_TZ = ZoneInfo("America/New_York")
 ROOF_OR_DOME_TEAMS = {"AZ", "HOU", "MIA", "MIL", "SEA", "TB", "TEX", "TOR"}
@@ -30,6 +31,7 @@ def _prime_primary_odds_key_from_streamlit():
 # key first, then install the compatibility layer. This keeps the existing
 # scanner/EV/Kelly pipeline untouched while allowing alternate providers.
 _prime_primary_odds_key_from_streamlit()
+install_therundown_provider()
 install_requests_bridge()
 
 
