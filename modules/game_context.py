@@ -6,9 +6,15 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 
 from .team_utils import normalize_team
+from .multi_odds import install_requests_bridge
 
 SLATE_TZ = ZoneInfo("America/New_York")
 ROOF_OR_DOME_TEAMS = {"AZ", "HOU", "MIA", "MIL", "SEA", "TB", "TEX", "TOR"}
+
+# app_mlb imports this module before it resolves ODDS_API_KEY. Installing here
+# keeps the existing scanner/EV/Kelly pipeline unchanged while enriching the
+# single MLB odds request with all configured providers.
+install_requests_bridge()
 
 
 def slate_date(now=None):
