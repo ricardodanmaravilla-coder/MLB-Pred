@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
@@ -11,9 +12,24 @@ from .multi_odds import install_requests_bridge
 SLATE_TZ = ZoneInfo("America/New_York")
 ROOF_OR_DOME_TEAMS = {"AZ", "HOU", "MIA", "MIL", "SEA", "TB", "TEX", "TOR"}
 
-# app_mlb imports this module before it resolves ODDS_API_KEY. Installing here
-# keeps the existing scanner/EV/Kelly pipeline unchanged while enriching the
-# single MLB odds request with all configured providers.
+
+def _prime_primary_odds_key_from_streamlit():
+    """Preserve an existing The Odds API key stored only in Streamlit Secrets."""
+    if os.getenv("ODDS_API_KEY", "").strip():
+        return
+    try:
+        import streamlit as st
+        value = str(st.secrets.get("ODDS_API_KEY", "")).strip()
+        if value:
+            os.environ["ODDS_API_KEY"] = value
+    except Exception:
+        pass
+
+
+# app_mlb imports this module before it resolves ODDS_API_KEY. Prime the legacy
+# key first, then install the compatibility layer. This keeps the existing
+# scanner/EV/Kelly pipeline untouched while allowing alternate providers.
+_prime_primary_odds_key_from_streamlit()
 install_requests_bridge()
 
 
@@ -90,7 +106,15 @@ def match_odds_game(odds_games, mlb_game, max_hours=2.0):
         return None
     target = parse_utc(mlb_game.get('start_time_utc'))
     if target is None:
-        return candidates[0] if len(candidates) == 1 else None
+        if len(candidates) == 1:
+            return candidates[0]
+        # Multiple providers can legitimately describe the same game. Merge
+        # their bookmakers rather than treating them as an ambiguous doubleheader.
+        merged = dict(candidates[0])
+        merged['bookmakers'] = []
+        for c in candidates:
+            merged['bookmakers'].extend(c.get('bookmakers', []) or [])
+        return merged
     scored = []
     for g in candidates:
         dt = parse_utc(g.get('commence_time'))
@@ -103,7 +127,20 @@ def match_odds_game(odds_games, mlb_game, max_hours=2.0):
     scored.sort(key=lambda x: x[0])
     if scored[0][0] > float(max_hours):
         return None
-    if len(scored) > 1 and abs(scored[1][0] - scored[0][0]) < 0.25:
+
+    # Provider duplicates usually have effectively the same start time. Merge
+    # those snapshots; only reject truly distinct games (e.g. a doubleheader).
+    close = [(delta, game) for delta, game in scored if delta <= float(max_hours)]
+    near_best = [(delta, game) for delta, game in close if abs(delta - scored[0][0]) < 0.25]
+    if len(near_best) > 1:
+        starts = [parse_utc(g.get('commence_time')) for _, g in near_best]
+        starts = [s for s in starts if s is not None]
+        if starts and (max(starts) - min(starts)).total_seconds() <= 30 * 60:
+            merged = dict(near_best[0][1])
+            merged['bookmakers'] = []
+            for _, g in near_best:
+                merged['bookmakers'].extend(g.get('bookmakers', []) or [])
+            return merged
         return None
     return scored[0][1]
 
