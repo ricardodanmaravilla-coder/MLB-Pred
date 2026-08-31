@@ -16,11 +16,12 @@ concurrency:
 
 permissions:
   contents: write
+  id-token: write
 
 jobs:
   collect:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -33,6 +34,23 @@ jobs:
           cache: pip
       - name: Install dependencies
         run: pip install -r requirements.txt
+      - name: Authenticate to Google Cloud for service discovery
+        id: auth
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_WIF_SERVICE_ACCOUNT }}
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v3
+      - name: Discover production Cloud Run URL
+        run: |
+          URL=$(gcloud run services describe mlb-pred-v7 \
+            --project "${{ secrets.GCP_PROJECT_ID }}" \
+            --region "${{ vars.GCP_REGION || 'us-central1' }}" \
+            --format='value(status.url)')
+          test -n "$URL"
+          echo "MLB_PROD_URL=$URL" >> "$GITHUB_ENV"
+          echo "Cloud Run service discovered"
       - name: Snapshot real pregame odds
         env:
           THERUNDOWN_KEY: ${{ secrets.THERUNDOWN_KEY }}
