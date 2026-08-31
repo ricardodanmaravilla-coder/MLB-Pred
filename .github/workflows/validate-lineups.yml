@@ -6,8 +6,10 @@ on:
     branches: [main]
     paths:
       - 'build_lineup_history.py'
+      - 'build_starter_quality_history.py'
       - 'backtest_lineup_walkforward.py'
       - 'backtest_lineup_platoon_walkforward.py'
+      - 'backtest_lineup_order_starter_walkforward.py'
       - 'validate_enrichment.py'
       - 'validate_lineup_dateblock.py'
       - '.github/workflows/validate-lineups.yml'
@@ -15,7 +17,7 @@ on:
 jobs:
   validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 75
+    timeout-minutes: 90
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -34,16 +36,22 @@ jobs:
           print('MLB feed endpoint reachable:', r.status_code)
           assert r.status_code in (200,404)
           PY
-      - name: Build official lineups, hitter logs, platoon history and starter hands
+      - name: Build official lineups hitter logs platoon history and starter hands
         run: python build_lineup_history.py
+      - name: Build official starter quality history
+        run: python build_starter_quality_history.py
       - name: Generate original confirmed-lineup walk-forward predictions
         run: python backtest_lineup_walkforward.py
       - name: Evaluate original lineup gate
         run: python validate_enrichment.py artifacts/lineup_walkforward_predictions.csv --json-out artifacts/lineup_validation.json
       - name: Generate strict lineup x starter-hand walk-forward predictions
         run: python backtest_lineup_platoon_walkforward.py
-      - name: Evaluate strict date-block promotion gate
+      - name: Evaluate strict platoon date-block gate
         run: python validate_lineup_dateblock.py artifacts/lineup_platoon_walkforward_predictions.csv --json-out artifacts/lineup_platoon_dateblock_validation.json
+      - name: Generate batting-order plus starter-quality predictions
+        run: python backtest_lineup_order_starter_walkforward.py
+      - name: Evaluate batting-order plus starter-quality date-block gate
+        run: python validate_lineup_dateblock.py artifacts/lineup_order_starter_predictions.csv --json-out artifacts/lineup_order_starter_validation.json
       - name: Upload lineup validation artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -54,11 +62,15 @@ jobs:
             data/mlb_hitter_game_history.csv
             data/mlb_hitter_platoon_game_history.csv
             data/mlb_starter_hand_history.csv
+            data/mlb_starter_quality_history.csv
             artifacts/lineup_walkforward_predictions.csv
             artifacts/lineup_walkforward_report.json
             artifacts/lineup_validation.json
             artifacts/lineup_platoon_walkforward_predictions.csv
             artifacts/lineup_platoon_walkforward_report.json
             artifacts/lineup_platoon_dateblock_validation.json
+            artifacts/lineup_order_starter_predictions.csv
+            artifacts/lineup_order_starter_report.json
+            artifacts/lineup_order_starter_validation.json
           if-no-files-found: warn
           retention-days: 14
