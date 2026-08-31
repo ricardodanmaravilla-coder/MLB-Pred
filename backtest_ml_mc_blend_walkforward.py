@@ -1,8 +1,8 @@
 """Validation-only walk-forward for the production ML + Monte Carlo blend.
 
 Goal: test whether the current 50/50 moneyline blend is optimal without touching
-production.  Every game is predicted using only information available strictly
-before that game date.  Historical weather is intentionally neutral because it
+production. Every game is predicted using only information available strictly
+before that game date. Historical weather is intentionally neutral because it
 is not available in the repository; the experiment is therefore about relative
 ML-vs-MC weighting, not a claim that it exactly reproduces every live input.
 """
@@ -25,7 +25,7 @@ DATA = Path("data")
 ART = Path("artifacts")
 ART.mkdir(exist_ok=True)
 
-WEIGHTS = np.round(np.arange(0.0, 1.01, 0.10), 2)  # weight on ML; remainder on MC
+WEIGHTS = np.round(np.arange(0.0, 1.01, 0.10), 2)
 MIN_STARTER_IP = 30.0
 STARTER_LOOKBACK_DAYS = 365
 MC_SIMS = 10000
@@ -40,7 +40,6 @@ def _safe_num(v, default=np.nan):
 
 
 def _ip(v):
-    """Convert baseball IP notation (e.g. 5.2) to 5 + 2/3."""
     try:
         s = str(v).strip()
         if not s:
@@ -64,8 +63,7 @@ def _season_lookup(df: pd.DataFrame, metric: str):
     x = x.dropna(subset=["TeamKey", "Season", metric])
     values = x.set_index(["TeamKey", "Season"])[metric].to_dict()
     medians = x.groupby("Season")[metric].median().to_dict()
-    global_median = float(x[metric].median())
-    return values, medians, global_median
+    return values, medians, float(x[metric].median())
 
 
 def _offense_index(team, season, lookup, medians, fallback):
@@ -85,17 +83,13 @@ def _pitch_value(team, season, lookup, fallback):
 def _park_lookup():
     p = pd.read_csv(DATA / "mlb_park_factors.csv")
     p.columns = p.columns.str.strip()
-    team_col = "Team"
     pf_col = "Park_Factor" if "Park_Factor" in p.columns else "ParkFactor"
     alt_col = "Altitud" if "Altitud" in p.columns else ("AltitudeFt" if "AltitudeFt" in p.columns else None)
     out = {}
     for _, r in p.iterrows():
-        key = normalize_team(r.get(team_col))
-        if not key:
-            continue
-        pf = _safe_num(r.get(pf_col), 100.0)
-        alt = _safe_num(r.get(alt_col), 0.0) if alt_col else 0.0
-        out[key] = (pf, alt)
+        key = normalize_team(r.get("Team"))
+        if key:
+            out[key] = (_safe_num(r.get(pf_col), 100.0), _safe_num(r.get(alt_col), 0.0) if alt_col else 0.0)
     return out
 
 
@@ -113,47 +107,43 @@ def _starter_history():
     return x.dropna(subset=["Date", "GameID", "StarterID"]).sort_values("Date")
 
 
-def _starter_ids_by_game(starters: pd.DataFrame):
-    if starters.empty:
-        return {}
+def _starter_ids_by_game(starters):
     d = {}
+    if starters.empty:
+        return d
     for _, r in starters.iterrows():
         side = str(r.get("Side", "")).strip().lower()
-        if side not in ("home", "away"):
-            continue
-        d[(int(r.GameID), side)] = int(r.StarterID)
+        if side in ("home", "away"):
+            d[(int(r.GameID), side)] = int(r.StarterID)
     return d
 
 
-def _starter_prior_era(starters: pd.DataFrame, starter_id, game_date):
+def _starter_prior_era(starters, starter_id, game_date):
     if starters.empty or starter_id is None:
         return None
-    start = pd.Timestamp(game_date).normalize() - pd.Timedelta(days=STARTER_LOOKBACK_DAYS)
     end = pd.Timestamp(game_date).normalize()
+    start = end - pd.Timedelta(days=STARTER_LOOKBACK_DAYS)
     q = starters[(starters["StarterID"] == int(starter_id)) & (starters["Date"] >= start) & (starters["Date"] < end)]
     if q.empty:
         return None
     ip = float(q["IP_num"].sum())
     if ip < MIN_STARTER_IP:
         return None
-    er = float(q["ER"].sum())
-    return float(np.clip(9.0 * er / max(ip, 1e-9), 1.5, 7.5))
+    return float(np.clip(9.0 * float(q["ER"].sum()) / max(ip, 1e-9), 1.5, 7.5))
 
 
-def _outer_folds(games: pd.DataFrame):
+def _outer_folds(games):
     dates = np.array(sorted(games["Date"].dt.normalize().unique()))
     if len(dates) < 120:
         raise RuntimeError("Historial temporal insuficiente")
-    # Expanding-window: reserve roughly the last 45% of dates for three tests.
     i0 = int(len(dates) * 0.55)
     cuts = np.linspace(i0, len(dates), 4, dtype=int)
-    folds = []
+    out = []
     for k in range(3):
-        test_dates = dates[cuts[k]:cuts[k + 1]]
-        if len(test_dates) == 0:
-            continue
-        folds.append((k + 1, pd.Timestamp(test_dates[0]), pd.Timestamp(test_dates[-1])))
-    return folds
+        td = dates[cuts[k]:cuts[k + 1]]
+        if len(td):
+            out.append((k + 1, pd.Timestamp(td[0]), pd.Timestamp(td[-1])))
+    return out
 
 
 def _metric(y, p):
@@ -161,7 +151,7 @@ def _metric(y, p):
     return float(brier_score_loss(y, p)), float(log_loss(y, p, labels=[0, 1]))
 
 
-def _choose_weight(train_predictions: pd.DataFrame):
+def _choose_weight(train_predictions):
     if len(train_predictions) < 400:
         return 0.50, []
     dates = np.array(sorted(train_predictions["Date"].unique()))
@@ -174,15 +164,14 @@ def _choose_weight(train_predictions: pd.DataFrame):
     for w in WEIGHTS:
         p = w * val["prob_ml"].to_numpy(float) + (1.0 - w) * val["prob_mc"].to_numpy(float)
         b, ll = _metric(y, p)
-        score = b + 0.15 * ll
-        trials.append({"ml_weight": float(w), "brier": b, "log_loss": ll, "score": score})
+        trials.append({"ml_weight": float(w), "brier": b, "log_loss": ll, "score": b + 0.15 * ll})
     trials.sort(key=lambda z: (z["score"], abs(z["ml_weight"] - 0.50)))
     return float(trials[0]["ml_weight"]), trials
 
 
 def main():
     games = prepare_games(pd.read_csv(DATA / "mlb_games.csv"))
-    games = games.dropna(subset=["Date", "Home_Score", "Away_Score"]).sort_values(["Date"]).copy()
+    games = games.dropna(subset=["Date", "Home_Score", "Away_Score"]).sort_values("Date").copy()
     games["Date"] = pd.to_datetime(games["Date"], errors="coerce").dt.normalize()
     games = games[games["Date"] >= pd.Timestamp("2025-01-01")].copy()
     if len(games) < 1500:
@@ -201,15 +190,15 @@ def main():
 
     folds = _outer_folds(games)
     first_test = min(x[1] for x in folds)
-    initial_train = games[games["Date"] < first_test].copy()
+    prediction_start = first_test - pd.Timedelta(days=120)
+    model_train = games[games["Date"] < prediction_start].copy()
     model = PredictorMLMLB()
-    if not model.entrenar(bat, pit, initial_train):
+    if not model.entrenar(bat, pit, model_train):
         raise RuntimeError("No se pudo entrenar PredictorMLMLB")
 
     predictions = []
-    # Generate all dates sequentially once; same-day results are deferred.
     for day, day_games in games.groupby("Date", sort=True):
-        if day < first_test - pd.Timedelta(days=120):
+        if day < prediction_start:
             continue
         prior_games = games[games["Date"] < day]
         pending = []
@@ -223,49 +212,42 @@ def main():
             team_p_h = _pitch_value(h, season, p_lookup, p_fallback)
             team_p_a = _pitch_value(a, season, p_lookup, p_fallback)
             gid = int(_safe_num(r.get("GameID"), -1))
-            sp_h = _starter_prior_era(starters, starter_ids.get((gid, "home")), day) or team_p_h
-            sp_a = _starter_prior_era(starters, starter_ids.get((gid, "away")), day) or team_p_a
+            sid_h = starter_ids.get((gid, "home")); sid_a = starter_ids.get((gid, "away"))
+            real_sp_h = _starter_prior_era(starters, sid_h, day)
+            real_sp_a = _starter_prior_era(starters, sid_a, day)
+            sp_h = real_sp_h or team_p_h; sp_a = real_sp_a or team_p_a
             pf, alt = parks.get(h, (100.0, 0.0))
 
             ml = model.predecir_partido(
                 h, a,
                 _safe_num(b_lookup.get((h, season - 1)), b_fallback),
                 _safe_num(b_lookup.get((a, season - 1)), b_fallback),
-                team_p_h, team_p_a,
-                pf, game_date=day,
+                team_p_h, team_p_a, pf, game_date=day,
             )
             mc = simular_partido_mlb(
-                local=h, visita=a,
-                pitcher_loc_xfip=sp_h, pitcher_vis_xfip=sp_a,
-                wrc_loc=off_h, wrc_vis=off_a,
-                bullpen_loc_era=team_p_h, bullpen_vis_era=team_p_a,
-                park_factor=pf, altitud_ft=alt,
-                viento_mph=0.0, direccion_viento="None", temp_f=72.0,
-                linea_carreras_casino=8.5,
-                df_games=prior_games,
-                num_simulaciones=MC_SIMS,
+                local=h, visita=a, pitcher_loc_xfip=sp_h, pitcher_vis_xfip=sp_a,
+                wrc_loc=off_h, wrc_vis=off_a, bullpen_loc_era=team_p_h, bullpen_vis_era=team_p_a,
+                park_factor=pf, altitud_ft=alt, viento_mph=0.0, direccion_viento="None", temp_f=72.0,
+                linea_carreras_casino=8.5, df_games=prior_games, num_simulaciones=MC_SIMS,
                 simulation_seed=gid if gid > 0 else None,
             )
             hs = float(r["Home_Score"]); aw = float(r["Away_Score"])
             predictions.append({
                 "GameID": gid, "Date": day, "fold": 0,
-                "actual_home_win": int(hs > aw),
-                "actual_total_runs": hs + aw,
+                "actual_home_win": int(hs > aw), "actual_total_runs": hs + aw,
                 "prob_ml": float(ml["Probabilidad_Local"]) / 100.0,
                 "prob_mc": float(mc["Moneyline"]["Gana Local"]) / 100.0,
                 "ml_runs": float(ml.get("Proyeccion_Carreras", np.nan)),
                 "mc_runs": float(mc.get("Carreras", {}).get("Promedio_Total", np.nan)),
                 "starter_home_prior": float(sp_h), "starter_away_prior": float(sp_a),
-                "starter_home_real_prior": int(starter_ids.get((gid, "home")) is not None and _starter_prior_era(starters, starter_ids.get((gid, "home")), day) is not None),
-                "starter_away_real_prior": int(starter_ids.get((gid, "away")) is not None and _starter_prior_era(starters, starter_ids.get((gid, "away")), day) is not None),
+                "starter_home_real_prior": int(real_sp_h is not None), "starter_away_real_prior": int(real_sp_a is not None),
             })
             pending.append((h, a, hs, aw, day))
         for h, a, hs, aw, d in pending:
             model.actualizar_resultado(h, a, hs, aw, game_date=d)
 
     pred = pd.DataFrame(predictions).sort_values("Date").reset_index(drop=True)
-    pooled = []
-    fold_reports = []
+    pooled = []; fold_reports = []
     for fold, start, end in folds:
         test = pred[(pred["Date"] >= start) & (pred["Date"] <= end)].copy()
         train = pred[pred["Date"] < start].copy()
@@ -273,13 +255,14 @@ def main():
             continue
         weight, trials = _choose_weight(train)
         test["fold"] = fold
+        test["selected_ml_weight"] = weight
+        test["selected_mc_weight"] = 1.0 - weight
         test["baseline_home_prob"] = 0.50 * test["prob_ml"] + 0.50 * test["prob_mc"]
         test["candidate_home_prob"] = weight * test["prob_ml"] + (1.0 - weight) * test["prob_mc"]
         test["baseline_total_runs"] = 0.50 * test["ml_runs"] + 0.50 * test["mc_runs"]
         test["candidate_total_runs"] = test["baseline_total_runs"]
         y = test["actual_home_win"].to_numpy(int)
-        bb, bl = _metric(y, test["baseline_home_prob"])
-        cb, cl = _metric(y, test["candidate_home_prob"])
+        bb, bl = _metric(y, test["baseline_home_prob"]); cb, cl = _metric(y, test["candidate_home_prob"])
         fold_reports.append({
             "fold": fold, "test_start": str(start.date()), "test_end": str(end.date()),
             "train_rows": int(len(train)), "test_rows": int(len(test)),
@@ -294,8 +277,6 @@ def main():
         raise RuntimeError("No se generaron folds válidos")
     out = pd.concat(pooled, ignore_index=True)
     coverage = float(((out["starter_home_real_prior"] == 1) & (out["starter_away_real_prior"] == 1)).mean())
-
-    # Diagnostic fixed-weight table on pooled outer predictions (not used to select/promote).
     y = out["actual_home_win"].to_numpy(int)
     fixed = []
     for w in WEIGHTS:
@@ -304,16 +285,12 @@ def main():
         fixed.append({"ml_weight": float(w), "mc_weight": float(1.0 - w), "brier": b, "log_loss": ll})
 
     report = {
-        "policy": "nested_walkforward_ml_mc_blend_v1",
-        "production_baseline": "50pct_ML_50pct_MC",
-        "rows": int(len(out)), "dates": int(out["Date"].nunique()),
-        "starter_real_prior_both_coverage": coverage,
-        "historical_weather": "neutral_72F_0mph_no_direction",
-        "market_total_for_moneyline_simulation": 8.5,
-        "mc_simulations_per_game": MC_SIMS,
-        "batting_metric": bc, "pitching_metric": pc,
+        "policy": "nested_walkforward_ml_mc_blend_v1", "production_baseline": "50pct_ML_50pct_MC",
+        "rows": int(len(out)), "dates": int(out["Date"].nunique()), "starter_real_prior_both_coverage": coverage,
+        "historical_weather": "neutral_72F_0mph_no_direction", "market_total_for_moneyline_simulation": 8.5,
+        "mc_simulations_per_game": MC_SIMS, "batting_metric": bc, "pitching_metric": pc,
         "folds": fold_reports, "fixed_weight_diagnostics_not_for_selection": fixed,
-        "note": "Validation-only. Outer folds choose weight only from earlier predictions; same-day results are deferred in ML updates. No production code is changed.",
+        "note": "Validation-only. Outer folds choose weight only from earlier predictions; ML model is initialized strictly before prediction_start and same-day results are deferred. No production code is changed.",
     }
     out.to_csv(ART / "ml_mc_blend_walkforward_predictions.csv", index=False)
     (ART / "ml_mc_blend_walkforward_report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
