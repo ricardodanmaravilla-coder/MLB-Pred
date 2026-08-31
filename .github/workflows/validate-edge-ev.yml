@@ -4,6 +4,12 @@ on:
   schedule:
     - cron: '30 12 * * 1'
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'validate_edge_ev_history.py'
+      - 'backtest_ml_mc_blend_walkforward.py'
+      - '.github/workflows/validate-edge-ev.yml'
 
 jobs:
   validate:
