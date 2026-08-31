@@ -1,0 +1,39 @@
+name: Validate MLB Enrichment
+
+on:
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Build historical pitcher metrics
+        run: python build_pitcher_history.py
+
+      - name: Generate paired holdout predictions
+        run: python backtest_enrichment_paired.py
+
+      - name: Evaluate promotion gate
+        run: python validate_enrichment.py artifacts/enrichment_paired_predictions.csv --json-out artifacts/enrichment_validation.json
+
+      - name: Upload validation artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: enrichment-validation
+          path: |
+            artifacts/enrichment_paired_predictions.csv
+            artifacts/enrichment_validation.json
+          retention-days: 14
