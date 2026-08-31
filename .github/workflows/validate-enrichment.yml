@@ -6,6 +6,7 @@ on:
     branches: [main]
     paths:
       - 'build_pitcher_history.py'
+      - 'build_game_starters_history.py'
       - 'backtest_enrichment_paired.py'
       - 'validate_enrichment.py'
       - '.github/workflows/validate-enrichment.yml'
@@ -45,6 +46,9 @@ jobs:
       - name: Build historical pitcher metrics
         run: python build_pitcher_history.py
 
+      - name: Build exact historical starter IDs
+        run: python build_game_starters_history.py
+
       - name: Generate paired holdout predictions
         run: python backtest_enrichment_paired.py
 
@@ -58,6 +62,7 @@ jobs:
           name: enrichment-validation
           path: |
             data/mlb_pitching_individual_history.csv
+            data/mlb_game_starters_history.csv
             artifacts/enrichment_paired_predictions.csv
             artifacts/enrichment_validation.json
           if-no-files-found: warn
