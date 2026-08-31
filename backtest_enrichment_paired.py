@@ -6,9 +6,9 @@ Design:
   pregame enrichment features built only from prior completed seasons
 - final 15%: untouched holdout used by the promotion gate
 
-Pitcher performance is always restricted to Season <= game_year-1. Throwing hand is
-read from the historical MLB StatsAPI pitcher row when available; the current roster
-file is only a fail-soft biographical fallback. Missing inputs remain neutral.
+Pitcher identity is joined by MLB GameID -> PlayerID from the official schedule API.
+Pitcher PERFORMANCE is always restricted to Season <= game_year-1. Throwing hand is
+biographical only. Name matching remains a fail-soft fallback for legacy rows.
 """
 from __future__ import annotations
 
@@ -27,10 +27,6 @@ from modules.ml_mlb import PredictorMLMLB
 from modules.team_utils import normalize_team
 
 OUT = Path("artifacts/enrichment_paired_predictions.csv")
-
-# Historical StatsAPI does not directly expose xFIP/SIERA.  The validator therefore
-# uses only genuinely available prior-season components.  The live model may have
-# richer coverage, but it must first pass this conservative historical test.
 LOWER = {"FIP": 0.28, "ERA": 0.18, "WHIP": 0.18, "BB%": 0.08, "HR/9": 0.08}
 HIGHER = {"K-BB%": 0.12, "K%": 0.05, "GB%": 0.03}
 
@@ -58,24 +54,32 @@ def _maps(df, metric):
     return x.dropna(subset=["Team", "Season", metric]).set_index(["Team", "Season"])[metric].to_dict()
 
 
-def _starter_prior(history, name, team, game_year):
-    if history.empty or not name or str(name) == "nan":
+def _starter_prior(history, player_id, name, team, game_year):
+    if history.empty:
         return None
-    key = _name_key(name)
-    m = history[history["_name_key"] == key]
-    if team and not m.empty:
-        mt = m[m["Team"].map(normalize_team) == normalize_team(team)]
-        if not mt.empty:
-            m = mt
-    if m.empty:
-        surname = key.split()[-1] if key else ""
-        m = history[history["_name_key"].str.split().str[-1] == surname]
+    m = pd.DataFrame()
+    pid = pd.to_numeric(pd.Series([player_id]), errors="coerce").iloc[0]
+    if pd.notna(pid) and "PlayerID" in history.columns:
+        ids = pd.to_numeric(history["PlayerID"], errors="coerce")
+        m = history[ids == int(pid)]
+    if m.empty and name and str(name) != "nan":
+        key = _name_key(name)
+        m = history[history["_name_key"] == key]
         if team and not m.empty:
             mt = m[m["Team"].map(normalize_team) == normalize_team(team)]
             if not mt.empty:
                 m = mt
-        if m["Name"].nunique() != 1:
-            return None
+        if m.empty:
+            surname = key.split()[-1] if key else ""
+            m = history[history["_name_key"].str.split().str[-1] == surname]
+            if team and not m.empty:
+                mt = m[m["Team"].map(normalize_team) == normalize_team(team)]
+                if not mt.empty:
+                    m = mt
+            if m.empty or m["Name"].nunique() != 1:
+                return None
+    if m.empty:
+        return None
     m = m[pd.to_numeric(m["Season"], errors="coerce") <= int(game_year)-1]
     if m.empty:
         return None
@@ -89,8 +93,6 @@ def _starter_factor(row, population):
     if pd.isna(year):
         return 1.0, 0.0
     pop = population[pd.to_numeric(population["Season"], errors="coerce") == int(year)].copy()
-    # Exclude tiny samples from the reference distribution, but still allow a
-    # matched starter row to fall back neutral if its own data are incomplete.
     if "IP" in pop.columns:
         ip = pd.to_numeric(pop["IP"], errors="coerce")
         eligible = pop[ip >= 20.0]
@@ -112,17 +114,6 @@ def _starter_factor(row, population):
         f = float(np.clip(f, 0.82, 1.18))
         logsum += w * math.log(f); used += w
     return (float(math.exp(logsum/used)) if used else 1.0, float(used/total_w) if total_w else 0.0)
-
-
-def _hand_map(current_pitchers):
-    if current_pitchers.empty or "Name" not in current_pitchers.columns or "PitchHand" not in current_pitchers.columns:
-        return {}
-    out = {}
-    for r in current_pitchers.itertuples(index=False):
-        h = str(getattr(r, "PitchHand", "")).strip().upper()[:1]
-        if h in {"L", "R"}:
-            out[_name_key(getattr(r, "Name", ""))] = h
-    return out
 
 
 def _row_hand(row):
@@ -156,14 +147,13 @@ def _platoon_factor(batting, team, season, hand):
     return (float(math.exp(logsum/used)) if used else 1.0, min(1.0,used))
 
 
-def _extra_features(row, batting, pitcher_hist, hands):
+def _extra_features(row, batting, pitcher_hist):
     year=int(row["Season"]); h=normalize_team(row["Home"]); a=normalize_team(row["Away"])
     hs=str(row.get("Home_Starter", "")); as_=str(row.get("Away_Starter", ""))
-    hr=_starter_prior(pitcher_hist,hs,h,year); ar=_starter_prior(pitcher_hist,as_,a,year)
+    hid=row.get("HomeStarterID"); aid=row.get("AwayStarterID")
+    hr=_starter_prior(pitcher_hist,hid,hs,h,year); ar=_starter_prior(pitcher_hist,aid,as_,a,year)
     hf,hcov=_starter_factor(hr,pitcher_hist); af,acov=_starter_factor(ar,pitcher_hist)
-    # Prefer historical biography attached to the prior-season row. Current roster
-    # hand is only a fallback and never supplies performance statistics.
-    hh=_row_hand(hr) or hands.get(_name_key(hs)); ah=_row_hand(ar) or hands.get(_name_key(as_))
+    hh=_row_hand(hr); ah=_row_hand(ar)
     home_bat,hbcov=_platoon_factor(batting,h,year,ah); away_bat,abcov=_platoon_factor(batting,a,year,hh)
     return np.asarray([
         math.log(max(.80,min(1.20,home_bat))), math.log(max(.80,min(1.20,away_bat))),
@@ -172,6 +162,8 @@ def _extra_features(row, batting, pitcher_hist, hands):
     ],dtype=float), {
         "home_pitcher_coverage": hcov, "away_pitcher_coverage": acov,
         "home_platoon_coverage": hbcov, "away_platoon_coverage": abcov,
+        "home_exact_id": float(pd.notna(pd.to_numeric(pd.Series([hid]), errors="coerce").iloc[0])),
+        "away_exact_id": float(pd.notna(pd.to_numeric(pd.Series([aid]), errors="coerce").iloc[0])),
     }
 
 
@@ -179,18 +171,28 @@ def main():
     bat=pd.read_csv("data/mlb_batting.csv"); pit=pd.read_csv("data/mlb_pitching.csv")
     games=prepare_games(pd.read_csv("data/mlb_games.csv"))
     ph_path=Path("data/mlb_pitching_individual_history.csv")
-    if not ph_path.exists():
-        raise RuntimeError("Ejecuta primero build_pitcher_history.py")
+    gs_path=Path("data/mlb_game_starters_history.csv")
+    if not ph_path.exists(): raise RuntimeError("Ejecuta primero build_pitcher_history.py")
+    if not gs_path.exists(): raise RuntimeError("Ejecuta primero build_game_starters_history.py")
     ph=pd.read_csv(ph_path); ph["_name_key"]=ph["Name"].map(_name_key)
-    current_path=Path("data/mlb_pitching_individual.csv")
-    current=pd.read_csv(current_path) if current_path.exists() else pd.DataFrame(); hands=_hand_map(current)
+    starters=pd.read_csv(gs_path)
+    starters["GameID"]=pd.to_numeric(starters["GameID"],errors="coerce")
+    if "GameID" not in games.columns:
+        raise RuntimeError("mlb_games.csv no contiene GameID para matching exacto")
+    games["GameID"]=pd.to_numeric(games["GameID"],errors="coerce")
+    keep=["GameID","HomeStarterID","AwayStarterID","HomeStarterName","AwayStarterName"]
+    games=games.merge(starters[keep].drop_duplicates("GameID"),on="GameID",how="left")
+    # Fill legacy name columns from exact official schedule names when absent.
+    for old,new in (("Home_Starter","HomeStarterName"),("Away_Starter","AwayStarterName")):
+        if old not in games.columns:
+            games[old]=games[new]
+        else:
+            games[old]=games[old].where(games[old].notna() & games[old].astype(str).str.strip().ne(""),games[new])
     d1,d2=_date_boundaries(games); train=games[games["Date"].dt.normalize()<d1].copy(); later=games[games["Date"].dt.normalize()>=d1].copy()
     model=PredictorMLMLB()
-    if not model.entrenar(bat,pit,train):
-        raise RuntimeError("No se pudo entrenar baseline")
+    if not model.entrenar(bat,pit,train): raise RuntimeError("No se pudo entrenar baseline")
     bc=batting_metric(bat); pc=pitching_metric(pit)
-    if not bc or not pc:
-        raise RuntimeError("Métricas base no válidas")
+    if not bc or not pc: raise RuntimeError("Métricas base no válidas")
     bd=_maps(bat,bc); pdict=_maps(pit,pc)
     bmed=float(pd.to_numeric(bat[bc],errors="coerce").median()); pmed=float(pd.to_numeric(pit[pc],errors="coerce").median())
     rows=[]
@@ -199,20 +201,14 @@ def main():
         for _,r in day_games.iterrows():
             h=normalize_team(r["Home"]); a=normalize_team(r["Away"]); year=int(r["Season"]); sy=year-1
             pred=model.predecir_partido(h,a,float(bd.get((h,sy),bmed)),float(bd.get((a,sy),bmed)),float(pdict.get((h,sy),pmed)),float(pdict.get((a,sy),pmed)),game_date=r["Date"])
-            pb=float(pred["Probabilidad_Local"])/100.0; extra,cov=_extra_features(r,bat,ph,hands)
+            pb=float(pred["Probabilidad_Local"])/100.0; extra,cov=_extra_features(r,bat,ph)
             hs=float(r["Home_Score"]); aw=float(r["Away_Score"])
-            rows.append({
-                "Date":r["Date"],"actual_home_win":int(hs>aw),"actual_total_runs":hs+aw,
-                "baseline_home_prob":pb,"baseline_total_runs":float(pred["Proyeccion_Carreras"]),
-                **cov,"_extra":extra,
-            })
+            rows.append({"Date":r["Date"],"actual_home_win":int(hs>aw),"actual_total_runs":hs+aw,"baseline_home_prob":pb,"baseline_total_runs":float(pred["Proyeccion_Carreras"]),**cov,"_extra":extra})
             pending.append((h,a,hs,aw,r["Date"]))
-        for h,a,hs,aw,gd in pending:
-            model.actualizar_resultado(h,a,hs,aw,game_date=gd)
+        for h,a,hs,aw,gd in pending: model.actualizar_resultado(h,a,hs,aw,game_date=gd)
     frame=pd.DataFrame(rows); frame["Date"]=pd.to_datetime(frame["Date"])
     fit=frame[frame["Date"].dt.normalize()<d2].copy(); test=frame[frame["Date"].dt.normalize()>=d2].copy()
-    if len(fit)<300 or len(test)<400:
-        raise RuntimeError(f"Muestra insuficiente fit={len(fit)} test={len(test)}")
+    if len(fit)<300 or len(test)<400: raise RuntimeError(f"Muestra insuficiente fit={len(fit)} test={len(test)}")
     def design(df):
         p=np.clip(df["baseline_home_prob"].to_numpy(float),1e-5,1-1e-5); logit=np.log(p/(1-p)).reshape(-1,1)
         ex=np.vstack(df["_extra"].to_numpy()); return np.hstack([logit,ex])
@@ -222,10 +218,9 @@ def main():
     out=test.drop(columns=["_extra"]).copy(); out["candidate_home_prob"]=pcand
     out["candidate_total_runs"]=out["baseline_total_runs"]
     OUT.parent.mkdir(parents=True,exist_ok=True); out.to_csv(OUT,index=False)
-    cov_cols=["home_pitcher_coverage","away_pitcher_coverage","home_platoon_coverage","away_platoon_coverage"]
+    cov_cols=["home_pitcher_coverage","away_pitcher_coverage","home_platoon_coverage","away_platoon_coverage","home_exact_id","away_exact_id"]
     coverage={c:round(float(out[c].mean()),4) for c in cov_cols}
     print(f"OK paired holdout: {OUT} rows={len(out)} fit={len(fit)} holdout_start={d2.date()} coverage={coverage}")
 
 
-if __name__=="__main__":
-    main()
+if __name__=="__main__": main()
