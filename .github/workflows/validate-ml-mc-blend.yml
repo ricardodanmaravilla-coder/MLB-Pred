@@ -9,11 +9,14 @@ on:
       - 'validate_ml_mc_blend.py'
       - 'validate_probability_calibration.py'
       - 'validate_calibration_gate.py'
+      - 'validate_scanner_thresholds.py'
+      - 'validate_scanner_threshold_gate.py'
       - 'build_starter_quality_history.py'
       - 'modules/ml_mlb.py'
       - 'modules/montecarlo_mlb.py'
       - 'modules/historical_mlb.py'
       - 'modules/metric_quality.py'
+      - 'modules/scanner_engine.py'
       - 'data/mlb_games.csv'
       - 'data/mlb_batting.csv'
       - 'data/mlb_pitching.csv'
@@ -52,7 +55,11 @@ jobs:
         run: python validate_probability_calibration.py
       - name: Evaluate strict calibration date-block gate
         run: python validate_calibration_gate.py artifacts/probability_calibration_predictions.csv --json-out artifacts/probability_calibration_validation.json
-      - name: Upload blend and calibration validation artifacts
+      - name: Generate leak-safe moneyline scanner threshold walk-forward
+        run: python validate_scanner_thresholds.py
+      - name: Evaluate strict scanner threshold date-block gate
+        run: python validate_scanner_threshold_gate.py artifacts/scanner_threshold_predictions.csv --json-out artifacts/scanner_threshold_validation.json
+      - name: Upload blend calibration and scanner artifacts
         uses: actions/upload-artifact@v4
         with:
           name: ml-mc-blend-validation
@@ -65,3 +72,6 @@ jobs:
             artifacts/probability_calibration_predictions.csv
             artifacts/probability_calibration_report.json
             artifacts/probability_calibration_validation.json
+            artifacts/scanner_threshold_predictions.csv
+            artifacts/scanner_threshold_report.json
+            artifacts/scanner_threshold_validation.json
