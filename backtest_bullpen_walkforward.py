@@ -45,14 +45,31 @@ def _prep_usage(path):
  u=pd.read_csv(path); u['Date']=pd.to_datetime(u.Date,errors='coerce'); u['Team']=u.Team.map(normalize_team)
  for c in ('Pitches','BF','ER','BB','SO','HR','IP'): u[c]=pd.to_numeric(u[c],errors='coerce')
  return u.dropna(subset=['Date','Team','PitcherID']).sort_values(['Team','Date','GameID'])
+def _empty_reliever_table():
+ return pd.DataFrame(columns=['PitcherID','Pitches','BF','BB','SO','HR','ER','IP','kbb','hr9','era','quality','role_score'])
 def _reliever_table(prior):
- if prior.empty:return pd.DataFrame()
+ if prior.empty:return _empty_reliever_table()
  g=prior.groupby('PitcherID',as_index=False)[['Pitches','BF','BB','SO','HR','ER','IP']].sum(min_count=1); g=g[(g.BF>=25)&(g.IP>=8)].copy()
- if g.empty:return g
+ if g.empty:return _empty_reliever_table()
  g['kbb']=(g.SO.fillna(0)-g.BB.fillna(0))/g.BF.replace(0,np.nan); g['hr9']=9*g.HR.fillna(0)/g.IP.replace(0,np.nan); g['era']=9*g.ER.fillna(0)/g.IP.replace(0,np.nan)
  # Leverage proxy is pregame-only: quality plus how often the manager has used the arm.
- q=1.8*g.kbb-.055*g.hr9-.015*g.era; qmed=q.median(); qs=(q.quantile(.75)-q.quantile(.25)) or q.std() or 1.; g['quality']=((q-qmed)/(2.5*qs)).clip(-.5,.5)
- ipmed=g.IP.median() or 1.; g['role_score']=g.quality+0.18*np.log1p(g.IP/ipmed)+0.08*np.log1p(g.Pitches.fillna(0)/max(float(g.Pitches.median() or 1),1)); return g.sort_values('role_score',ascending=False)
+ q=1.8*g.kbb-.055*g.hr9-.015*g.era
+ valid=q.replace([np.inf,-np.inf],np.nan).dropna()
+ if len(valid)<3:
+  # Sparse early-season history is unknown, not bad/good. Keep quality neutral while
+  # retaining prior workload as the only role signal. Never fabricate missing stats.
+  g['quality']=0.0
+ else:
+  qmed=float(valid.median()); qs=float(valid.quantile(.75)-valid.quantile(.25))
+  if not np.isfinite(qs) or qs<=0: qs=float(valid.std())
+  if not np.isfinite(qs) or qs<=0: qs=1.0
+  g['quality']=((q-qmed)/(2.5*qs)).replace([np.inf,-np.inf],np.nan).fillna(0).clip(-.5,.5)
+ ipmed=float(pd.to_numeric(g.IP,errors='coerce').median())
+ if not np.isfinite(ipmed) or ipmed<=0: ipmed=1.0
+ pmed=float(pd.to_numeric(g.Pitches,errors='coerce').median())
+ if not np.isfinite(pmed) or pmed<=0: pmed=1.0
+ g['role_score']=g.quality+0.18*np.log1p(g.IP.fillna(0)/ipmed)+0.08*np.log1p(g.Pitches.fillna(0)/pmed)
+ return g.sort_values('role_score',ascending=False)
 def _team_state(tu,date):
  prior=tu[tu.Date<date]; keys=('pitches1','pitches3','heavy2','quality_tired','top2_load','top3_load','top2_pitches2','top3_pitches3','top3_b2b','top3_heavy')
  if prior.empty:return {k:0. for k in keys}
