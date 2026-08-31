@@ -1,0 +1,44 @@
+name: Validate MLB Official Lineups
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'build_lineup_history.py'
+      - 'backtest_lineup_walkforward.py'
+      - 'validate_enrichment.py'
+      - '.github/workflows/validate-lineups.yml'
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Smoke test official MLB game feed
+        run: |
+          python - <<'PY'
+          import requests
+          r=requests.get('https://statsapi.mlb.com/api/v1.1/game/777000/feed/live',timeout=20)
+          print('MLB feed endpoint reachable:', r.status_code)
+          assert r.status_code in (200,404)
+          PY
+      - name: Build official historical starting lineups
+        run: python build_lineup_history.py
+      - name: Upload lineup history
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lineup-history
+          path: data/mlb_lineup_history.csv
+          if-no-files-found: warn
+          retention-days: 14
