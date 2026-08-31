@@ -10,6 +10,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 import os
+import time
 import pandas as pd
 import requests
 
@@ -74,13 +75,25 @@ def rows_from_production_game(game, stamp_dt):
 def _production_rows(stamp_dt):
     base=os.getenv('MLB_PROD_URL','').strip().rstrip('/')
     if not base: return []
-    r=requests.get(f'{base}/api/slate',timeout=30); r.raise_for_status()
-    payload=r.json(); games=payload.get('games',[]) if isinstance(payload,dict) else []
-    rows=[]
-    for game in games or []:
-        if isinstance(game,dict): rows.extend(rows_from_production_game(game,stamp_dt))
-    print(f'PRODUCTION_SLATE games_seen={len(games)} rows_eligible={len(rows)}')
-    return rows
+    last_exc=None
+    for attempt in range(1,4):
+        try:
+            timeout=150 if attempt == 1 else 90
+            r=requests.get(f'{base}/api/slate',timeout=timeout)
+            r.raise_for_status()
+            payload=r.json(); games=payload.get('games',[]) if isinstance(payload,dict) else []
+            rows=[]
+            for game in games or []:
+                if isinstance(game,dict): rows.extend(rows_from_production_game(game,stamp_dt))
+            print(f'PRODUCTION_SLATE attempt={attempt} games_seen={len(games)} rows_eligible={len(rows)}')
+            return rows
+        except (requests.Timeout, requests.ConnectionError) as exc:
+            last_exc=exc
+            print(f'::warning::Cloud Run slate attempt {attempt}/3 failed: {type(exc).__name__}')
+            if attempt < 3: time.sleep(8*attempt)
+    if last_exc:
+        print(f'::warning::Cloud Run slate unavailable after retries: {type(last_exc).__name__}')
+    return []
 
 
 def main():
