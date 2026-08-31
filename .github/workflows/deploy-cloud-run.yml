@@ -33,7 +33,7 @@ jobs:
             --timeout 900 \
             --min 0 \
             --max 3 \
-            --set-env-vars="MLB_DATA_DIR=data"
+            --update-env-vars="MLB_DATA_DIR=data"
       - name: Show service URL
         run: |
           gcloud run services describe mlb-pred-v7 \
