@@ -7,13 +7,15 @@ on:
     paths:
       - 'build_lineup_history.py'
       - 'backtest_lineup_walkforward.py'
+      - 'backtest_lineup_platoon_walkforward.py'
       - 'validate_enrichment.py'
+      - 'validate_lineup_dateblock.py'
       - '.github/workflows/validate-lineups.yml'
 
 jobs:
   validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 75
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -32,12 +34,16 @@ jobs:
           print('MLB feed endpoint reachable:', r.status_code)
           assert r.status_code in (200,404)
           PY
-      - name: Build official historical starting lineups and hitter logs
+      - name: Build official lineups, hitter logs, platoon history and starter hands
         run: python build_lineup_history.py
-      - name: Generate nested walk-forward lineup predictions
+      - name: Generate original confirmed-lineup walk-forward predictions
         run: python backtest_lineup_walkforward.py
-      - name: Evaluate lineup promotion gate
+      - name: Evaluate original lineup gate
         run: python validate_enrichment.py artifacts/lineup_walkforward_predictions.csv --json-out artifacts/lineup_validation.json
+      - name: Generate strict lineup x starter-hand walk-forward predictions
+        run: python backtest_lineup_platoon_walkforward.py
+      - name: Evaluate strict date-block promotion gate
+        run: python validate_lineup_dateblock.py artifacts/lineup_platoon_walkforward_predictions.csv --json-out artifacts/lineup_platoon_dateblock_validation.json
       - name: Upload lineup validation artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -46,8 +52,13 @@ jobs:
           path: |
             data/mlb_lineup_history.csv
             data/mlb_hitter_game_history.csv
+            data/mlb_hitter_platoon_game_history.csv
+            data/mlb_starter_hand_history.csv
             artifacts/lineup_walkforward_predictions.csv
             artifacts/lineup_walkforward_report.json
             artifacts/lineup_validation.json
+            artifacts/lineup_platoon_walkforward_predictions.csv
+            artifacts/lineup_platoon_walkforward_report.json
+            artifacts/lineup_platoon_dateblock_validation.json
           if-no-files-found: warn
           retention-days: 14
