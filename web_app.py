@@ -11,19 +11,20 @@ from fastapi.staticfiles import StaticFiles
 from modules import multi_odds
 from modules.game_context import market_from_event, match_odds_game
 from modules.therundown_odds import _fetch_therundown
-from modules.web_service import MLBWebService, american_to_decimal
+from modules.enriched_web_service import EnrichedMLBWebService
+from modules.web_service import american_to_decimal
 
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-app = FastAPI(title="MLB Quant Analytics V7", version="7.0-cloudrun")
+app = FastAPI(title="MLB Quant Analytics V7", version="7.1-enrichment-gated")
 if STATIC_DIR.exists():
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
 @lru_cache(maxsize=1)
-def get_service() -> MLBWebService:
-    return MLBWebService()
+def get_service() -> EnrichedMLBWebService:
+    return EnrichedMLBWebService()
 
 
 @app.get("/")
