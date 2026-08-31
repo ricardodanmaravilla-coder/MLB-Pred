@@ -8,10 +8,10 @@ This script uses three temporal layers:
 3) final 15%: one untouched evaluation used by validate_enrichment.py.
 
 Pitcher identity is joined by official MLB GameID -> PlayerID. Pitcher performance
-is restricted to seasons <= game_year-1. Missing data stay neutral. The search uses
-compact matchup DIFFERENTIALS instead of separate home/away values and never feeds
-coverage flags as predictive variables; this reduces dimensionality and avoids
-learning accidental missing-data patterns.
+is restricted to seasons <= game_year-1. Missing data stay neutral. Pitcher signals
+use a recency- and workload-weighted multi-season prior, shrunk toward the league
+median for small samples. This is designed to stabilize noisy HR/9 and batted-ball
+rates without leaking future performance.
 """
 from __future__ import annotations
 
@@ -38,23 +38,26 @@ HIGHER_BETTER = ("K-BB%", "K%", "GB%")
 PITCH_METRICS = LOWER_BETTER + HIGHER_BETTER
 PLATOON_METRICS = ("OPS", "OBP", "SLG")
 
-# Candidate families are deliberately small. Every set includes baseline logit.
 FEATURE_SETS = {
     "platoon_ops": ("platoon_OPS_diff",),
     "platoon_all": tuple(f"platoon_{m}_diff" for m in PLATOON_METRICS),
     "starter_fip": ("pitch_FIP_diff",),
     "starter_whip": ("pitch_WHIP_diff",),
     "starter_kbb": ("pitch_K-BB%_diff",),
+    "starter_hr9": ("pitch_HR/9_diff",),
+    "starter_gb": ("pitch_GB%_diff",),
     "starter_core": ("pitch_FIP_diff", "pitch_WHIP_diff", "pitch_K-BB%_diff"),
     "starter_contact": ("pitch_HR/9_diff", "pitch_GB%_diff"),
+    "starter_contact_interaction": ("pitch_HR/9_diff", "pitch_GB%_diff", "contact_interaction"),
+    "starter_contact_kbb": ("pitch_HR/9_diff", "pitch_GB%_diff", "pitch_K-BB%_diff"),
+    "starter_contact_fip": ("pitch_HR/9_diff", "pitch_GB%_diff", "pitch_FIP_diff"),
     "starter_all": tuple(f"pitch_{m}_diff" for m in PITCH_METRICS),
-    "core_plus_platoon": (
-        "pitch_FIP_diff", "pitch_WHIP_diff", "pitch_K-BB%_diff", "platoon_OPS_diff"
-    ),
-    "all_compact": tuple(f"pitch_{m}_diff" for m in PITCH_METRICS)
-        + tuple(f"platoon_{m}_diff" for m in PLATOON_METRICS),
+    "core_plus_platoon": ("pitch_FIP_diff", "pitch_WHIP_diff", "pitch_K-BB%_diff", "platoon_OPS_diff"),
+    "contact_plus_platoon": ("pitch_HR/9_diff", "pitch_GB%_diff", "platoon_OPS_diff"),
+    "all_compact": tuple(f"pitch_{m}_diff" for m in PITCH_METRICS) + tuple(f"platoon_{m}_diff" for m in PLATOON_METRICS),
 }
-C_GRID = (0.03, 0.10, 0.30, 1.00)
+C_GRID = (0.01, 0.03, 0.10, 0.30, 1.00)
+RECENCY_WEIGHTS = (1.0, 0.65, 0.40)
 
 
 def _name_key(v):
@@ -80,9 +83,9 @@ def _maps(df, metric):
     return x.dropna(subset=["Team", "Season", metric]).set_index(["Team", "Season"])[metric].to_dict()
 
 
-def _starter_prior(history, player_id, name, team, game_year):
+def _starter_rows(history, player_id, name, team, game_year):
     if history.empty:
-        return None
+        return pd.DataFrame()
     m = pd.DataFrame()
     pid = pd.to_numeric(pd.Series([player_id]), errors="coerce").iloc[0]
     if pd.notna(pid) and "PlayerID" in history.columns:
@@ -103,13 +106,14 @@ def _starter_prior(history, player_id, name, team, game_year):
                 if not mt.empty:
                     m = mt
             if m.empty or m["Name"].nunique() != 1:
-                return None
+                return pd.DataFrame()
     if m.empty:
-        return None
-    m = m[pd.to_numeric(m["Season"], errors="coerce") <= int(game_year)-1]
+        return m
+    m = m[pd.to_numeric(m["Season"], errors="coerce") <= int(game_year)-1].copy()
     if m.empty:
-        return None
-    return m.assign(_s=pd.to_numeric(m["Season"], errors="coerce")).sort_values("_s").iloc[-1]
+        return m
+    m["_s"] = pd.to_numeric(m["Season"], errors="coerce")
+    return m.sort_values("_s", ascending=False).head(3)
 
 
 def _reference_population(population, season):
@@ -120,6 +124,53 @@ def _reference_population(population, season):
         if len(eligible) >= 30:
             pop = eligible
     return pop
+
+
+def _aggregate_pitcher(rows, population):
+    """Build a pregame multi-season prior with empirical-Bayes shrinkage."""
+    if rows is None or rows.empty:
+        return None
+    latest = rows.iloc[0].copy()
+    latest_season = int(pd.to_numeric(pd.Series([latest.get("Season")]), errors="coerce").iloc[0])
+    out = latest.copy()
+    total_ip = 0.0
+    for rank, (_, r) in enumerate(rows.iterrows()):
+        ip = pd.to_numeric(pd.Series([r.get("IP")]), errors="coerce").iloc[0]
+        if pd.notna(ip) and float(ip) > 0:
+            total_ip += float(ip) * RECENCY_WEIGHTS[min(rank, len(RECENCY_WEIGHTS)-1)]
+    reliability = float(np.clip(total_ip / 180.0, 0.0, 1.0))
+    ref = _reference_population(population, latest_season)
+    for metric in PITCH_METRICS:
+        if metric not in rows.columns or metric not in ref.columns:
+            continue
+        vals = []
+        weights = []
+        for rank, (_, r) in enumerate(rows.iterrows()):
+            v = pd.to_numeric(pd.Series([r.get(metric)]), errors="coerce").iloc[0]
+            ip = pd.to_numeric(pd.Series([r.get("IP")]), errors="coerce").iloc[0]
+            if pd.isna(v):
+                continue
+            workload = 0.35 if pd.isna(ip) else float(np.clip(float(ip)/120.0, 0.20, 1.0))
+            w = RECENCY_WEIGHTS[min(rank, len(RECENCY_WEIGHTS)-1)] * workload
+            vals.append(float(v)); weights.append(w)
+        if not vals:
+            continue
+        raw = float(np.average(vals, weights=weights))
+        league = pd.to_numeric(ref[metric], errors="coerce").replace([np.inf,-np.inf], np.nan).dropna()
+        if len(league) >= 30:
+            center = float(league.median())
+            out[metric] = reliability * raw + (1.0-reliability) * center
+        else:
+            out[metric] = raw
+    out["IP"] = total_ip
+    out["Season"] = latest_season
+    out["_reliability"] = reliability
+    return out
+
+
+def _starter_prior(history, player_id, name, team, game_year):
+    rows = _starter_rows(history, player_id, name, team, game_year)
+    return _aggregate_pitcher(rows, history)
 
 
 def _pitch_signal(row, population, metric):
@@ -134,21 +185,20 @@ def _pitch_signal(row, population, metric):
     vals = pd.to_numeric(pop[metric], errors="coerce").replace([np.inf, -np.inf], np.nan).dropna()
     if len(vals) < 30:
         return 0.0, 0.0
-    median = float(vals.median())
-    v = float(value)
+    median = float(vals.median()); v = float(value)
+    reliability = float(row.get("_reliability", 1.0) or 0.0)
     if metric in LOWER_BETTER:
         if v <= 0 or median <= 0:
             return 0.0, 0.0
-        ratio = median / v
+        sig = math.log(np.clip(median / v, .75, 1.25))
     else:
-        # K-BB% can be near/under zero for poor pitchers; use robust z-like scaling.
         scale = float(vals.quantile(.75) - vals.quantile(.25))
         if not math.isfinite(scale) or scale < 1e-6:
             scale = float(vals.std())
         if not math.isfinite(scale) or scale < 1e-6:
             return 0.0, 0.0
-        return float(np.clip((v - median) / (3.0 * scale), -.25, .25)), 1.0
-    return float(np.clip(math.log(np.clip(ratio, .75, 1.25)), -.25, .25)), 1.0
+        sig = (v - median) / (3.0 * scale)
+    return float(np.clip(sig * (0.60 + 0.40*reliability), -.25, .25)), 1.0
 
 
 def _row_hand(row):
@@ -178,62 +228,52 @@ def _platoon_signals(batting, team, season, hand):
         median = float(vals.median())
         if median <= 0 or float(value) <= 0:
             continue
-        out[metric] = float(np.clip(math.log(np.clip(float(value)/median, .80, 1.20)), -.23, .23))
-        coverage[metric] = 1.0
+        out[metric] = float(np.clip(math.log(np.clip(float(value)/median, .80,1.20)), -.23,.23)); coverage[metric] = 1.0
     return out, coverage
 
 
 def _extra_features(row, batting, pitcher_hist):
     year=int(row["Season"]); h=normalize_team(row["Home"]); a=normalize_team(row["Away"])
-    hs=str(row.get("Home_Starter", "")); as_=str(row.get("Away_Starter", ""))
-    hid=row.get("HomeStarterID"); aid=row.get("AwayStarterID")
+    hs=str(row.get("Home_Starter", "")); as_=str(row.get("Away_Starter", "")); hid=row.get("HomeStarterID"); aid=row.get("AwayStarterID")
     hr=_starter_prior(pitcher_hist,hid,hs,h,year); ar=_starter_prior(pitcher_hist,aid,as_,a,year)
     hh=_row_hand(hr); ah=_row_hand(ar)
-
-    features = {}
-    pitch_cov = []
+    features={}
+    home_sigs={}; away_sigs={}
     for metric in PITCH_METRICS:
-        home_sig, hc = _pitch_signal(hr, pitcher_hist, metric)
-        away_sig, ac = _pitch_signal(ar, pitcher_hist, metric)
-        # Positive differential favours the home team.
-        features[f"pitch_{metric}_diff"] = home_sig - away_sig
-        pitch_cov.extend([hc, ac])
-
-    home_bat, home_cov = _platoon_signals(batting,h,year,ah)
-    away_bat, away_cov = _platoon_signals(batting,a,year,hh)
+        home_sig,_=_pitch_signal(hr,pitcher_hist,metric); away_sig,_=_pitch_signal(ar,pitcher_hist,metric)
+        home_sigs[metric]=home_sig; away_sigs[metric]=away_sig
+        features[f"pitch_{metric}_diff"] = home_sig-away_sig
+    # interaction rewards pitchers who simultaneously suppress HR and generate grounders
+    features["contact_interaction"] = (home_sigs.get("HR/9",0.0)*home_sigs.get("GB%",0.0)) - (away_sigs.get("HR/9",0.0)*away_sigs.get("GB%",0.0))
+    home_bat,home_cov=_platoon_signals(batting,h,year,ah); away_bat,away_cov=_platoon_signals(batting,a,year,hh)
     for metric in PLATOON_METRICS:
-        features[f"platoon_{metric}_diff"] = home_bat[metric] - away_bat[metric]
-
-    diagnostics = {
-        "home_pitcher_coverage": float(np.mean([_pitch_signal(hr,pitcher_hist,m)[1] for m in PITCH_METRICS])),
-        "away_pitcher_coverage": float(np.mean([_pitch_signal(ar,pitcher_hist,m)[1] for m in PITCH_METRICS])),
-        "home_platoon_coverage": float(np.mean(list(home_cov.values()))),
-        "away_platoon_coverage": float(np.mean(list(away_cov.values()))),
-        "home_exact_id": float(pd.notna(pd.to_numeric(pd.Series([hid]), errors="coerce").iloc[0])),
-        "away_exact_id": float(pd.notna(pd.to_numeric(pd.Series([aid]), errors="coerce").iloc[0])),
+        features[f"platoon_{metric}_diff"] = home_bat[metric]-away_bat[metric]
+    diagnostics={
+        "home_pitcher_coverage":float(np.mean([_pitch_signal(hr,pitcher_hist,m)[1] for m in PITCH_METRICS])),
+        "away_pitcher_coverage":float(np.mean([_pitch_signal(ar,pitcher_hist,m)[1] for m in PITCH_METRICS])),
+        "home_platoon_coverage":float(np.mean(list(home_cov.values()))),
+        "away_platoon_coverage":float(np.mean(list(away_cov.values()))),
+        "home_exact_id":float(pd.notna(pd.to_numeric(pd.Series([hid]),errors="coerce").iloc[0])),
+        "away_exact_id":float(pd.notna(pd.to_numeric(pd.Series([aid]),errors="coerce").iloc[0])),
     }
-    return features, diagnostics
+    return features,diagnostics
 
 
 def _logit(p):
-    p=np.clip(np.asarray(p,dtype=float),1e-5,1-1e-5)
-    return np.log(p/(1-p))
+    p=np.clip(np.asarray(p,dtype=float),1e-5,1-1e-5); return np.log(p/(1-p))
 
 
-def _design(df, cols):
+def _design(df,cols):
     base=_logit(df["baseline_home_prob"].to_numpy(float)).reshape(-1,1)
-    extras=df[list(cols)].to_numpy(float) if cols else np.empty((len(df),0))
-    return np.hstack([base, extras])
+    extras=df[list(cols)].to_numpy(float) if cols else np.empty((len(df),0)); return np.hstack([base,extras])
 
 
 def _brier(y,p):
-    y=np.asarray(y,float); p=np.asarray(p,float)
-    return float(np.mean((p-y)**2))
+    y=np.asarray(y,float); p=np.asarray(p,float); return float(np.mean((p-y)**2))
 
 
 def _logloss(y,p):
-    y=np.asarray(y,float); p=np.clip(np.asarray(p,float),1e-9,1-1e-9)
-    return float(-np.mean(y*np.log(p)+(1-y)*np.log(1-p)))
+    y=np.asarray(y,float); p=np.clip(np.asarray(p,float),1e-9,1-1e-9); return float(-np.mean(y*np.log(p)+(1-y)*np.log(1-p)))
 
 
 def _ece(y,p,bins=10):
@@ -244,38 +284,31 @@ def _ece(y,p,bins=10):
     return float(out)
 
 
-def _fit_meta(train, cols, c):
+def _fit_meta(train,cols,c):
     model=make_pipeline(StandardScaler(),LogisticRegression(C=float(c),max_iter=2000,solver="lbfgs",random_state=42))
-    model.fit(_design(train,cols),train["actual_home_win"].to_numpy(int))
-    return model
+    model.fit(_design(train,cols),train["actual_home_win"].to_numpy(int)); return model
 
 
 def _select_features(fit):
-    """Select only on an inner chronological validation slice."""
     days=pd.Series(fit["Date"].dt.normalize().unique()).sort_values().reset_index(drop=True)
     cut=pd.Timestamp(days.iloc[max(1,min(len(days)-1,int(len(days)*.60)))])
     inner_train=fit[fit["Date"].dt.normalize()<cut].copy(); inner_val=fit[fit["Date"].dt.normalize()>=cut].copy()
-    if len(inner_train)<500 or len(inner_val)<250:
-        raise RuntimeError(f"Inner split insuficiente train={len(inner_train)} val={len(inner_val)}")
-    y=inner_val["actual_home_win"].to_numpy(int)
-    baseline=inner_val["baseline_home_prob"].to_numpy(float)
+    if len(inner_train)<500 or len(inner_val)<250: raise RuntimeError(f"Inner split insuficiente train={len(inner_train)} val={len(inner_val)}")
+    y=inner_val["actual_home_win"].to_numpy(int); baseline=inner_val["baseline_home_prob"].to_numpy(float)
     baseline_metrics={"brier":_brier(y,baseline),"log_loss":_logloss(y,baseline),"ece":_ece(y,baseline)}
     trials=[]
     for name,cols in FEATURE_SETS.items():
         for c in C_GRID:
             model=_fit_meta(inner_train,cols,c); p=model.predict_proba(_design(inner_val,cols))[:,1]
             metrics={"brier":_brier(y,p),"log_loss":_logloss(y,p),"ece":_ece(y,p)}
-            # Primary predictive loss, with a small calibration penalty. No accuracy tuning.
-            score=metrics["brier"] + .15*metrics["log_loss"] + .10*max(0.0,metrics["ece"]-baseline_metrics["ece"])
+            score=metrics["brier"]+.15*metrics["log_loss"]+.10*max(0.0,metrics["ece"]-baseline_metrics["ece"])
             trials.append({"name":name,"C":c,"features":list(cols),"score":score,**metrics})
     trials.sort(key=lambda x:(x["score"],x["brier"],x["log_loss"],len(x["features"])))
-    best=trials[0]
-    return best, baseline_metrics, trials[:10], cut, len(inner_train), len(inner_val)
+    return trials[0],baseline_metrics,trials[:10],cut,len(inner_train),len(inner_val)
 
 
 def main():
-    bat=pd.read_csv("data/mlb_batting.csv"); pit=pd.read_csv("data/mlb_pitching.csv")
-    games=prepare_games(pd.read_csv("data/mlb_games.csv"))
+    bat=pd.read_csv("data/mlb_batting.csv"); pit=pd.read_csv("data/mlb_pitching.csv"); games=prepare_games(pd.read_csv("data/mlb_games.csv"))
     ph_path=Path("data/mlb_pitching_individual_history.csv"); gs_path=Path("data/mlb_game_starters_history.csv")
     if not ph_path.exists(): raise RuntimeError("Ejecuta primero build_pitcher_history.py")
     if not gs_path.exists(): raise RuntimeError("Ejecuta primero build_game_starters_history.py")
@@ -288,45 +321,32 @@ def main():
     for old,new in (("Home_Starter","HomeStarterName"),("Away_Starter","AwayStarterName")):
         if old not in games.columns: games[old]=games[new]
         else: games[old]=games[old].where(games[old].notna() & games[old].astype(str).str.strip().ne(""),games[new])
-
     d1,d2=_date_boundaries(games); train=games[games["Date"].dt.normalize()<d1].copy(); later=games[games["Date"].dt.normalize()>=d1].copy()
     model=PredictorMLMLB()
     if not model.entrenar(bat,pit,train): raise RuntimeError("No se pudo entrenar baseline")
     bc=batting_metric(bat); pc=pitching_metric(pit)
     if not bc or not pc: raise RuntimeError("Métricas base no válidas")
-    bd=_maps(bat,bc); pdict=_maps(pit,pc)
-    bmed=float(pd.to_numeric(bat[bc],errors="coerce").median()); pmed=float(pd.to_numeric(pit[pc],errors="coerce").median())
-
+    bd=_maps(bat,bc); pdict=_maps(pit,pc); bmed=float(pd.to_numeric(bat[bc],errors="coerce").median()); pmed=float(pd.to_numeric(pit[pc],errors="coerce").median())
     rows=[]
     for day,day_games in later.groupby(later["Date"].dt.normalize(),sort=True):
         pending=[]
         for _,r in day_games.iterrows():
             h=normalize_team(r["Home"]); a=normalize_team(r["Away"]); year=int(r["Season"]); sy=year-1
             pred=model.predecir_partido(h,a,float(bd.get((h,sy),bmed)),float(bd.get((a,sy),bmed)),float(pdict.get((h,sy),pmed)),float(pdict.get((a,sy),pmed)),game_date=r["Date"])
-            pb=float(pred["Probabilidad_Local"])/100.0; extra,cov=_extra_features(r,bat,ph)
-            hs=float(r["Home_Score"]); aw=float(r["Away_Score"])
+            pb=float(pred["Probabilidad_Local"])/100.0; extra,cov=_extra_features(r,bat,ph); hs=float(r["Home_Score"]); aw=float(r["Away_Score"])
             rows.append({"Date":r["Date"],"actual_home_win":int(hs>aw),"actual_total_runs":hs+aw,"baseline_home_prob":pb,"baseline_total_runs":float(pred["Proyeccion_Carreras"]),**cov,**extra})
             pending.append((h,a,hs,aw,r["Date"]))
         for h,a,hs,aw,gd in pending: model.actualizar_resultado(h,a,hs,aw,game_date=gd)
-
     frame=pd.DataFrame(rows); frame["Date"]=pd.to_datetime(frame["Date"])
     fit=frame[frame["Date"].dt.normalize()<d2].copy(); test=frame[frame["Date"].dt.normalize()>=d2].copy()
     if len(fit)<1000 or len(test)<400: raise RuntimeError(f"Muestra insuficiente fit={len(fit)} test={len(test)}")
-
     best,inner_base,top10,inner_cut,ntrain,nval=_select_features(fit)
-    final_model=_fit_meta(fit,best["features"],best["C"])
-    pcand=final_model.predict_proba(_design(test,best["features"]))[:,1]
+    final_model=_fit_meta(fit,best["features"],best["C"]); pcand=final_model.predict_proba(_design(test,best["features"]))[:,1]
     out=test.copy(); out["candidate_home_prob"]=pcand; out["candidate_total_runs"]=out["baseline_total_runs"]
     OUT.parent.mkdir(parents=True,exist_ok=True); out.to_csv(OUT,index=False)
-
     cov_cols=["home_pitcher_coverage","away_pitcher_coverage","home_platoon_coverage","away_platoon_coverage","home_exact_id","away_exact_id"]
     coverage={c:round(float(out[c].mean()),4) for c in cov_cols}
-    report={
-        "policy":"inner_temporal_selection_final_holdout_untouched",
-        "fit_rows":len(fit),"holdout_rows":len(out),"holdout_start":str(d2.date()),
-        "inner_cut":str(inner_cut.date()),"inner_train_rows":ntrain,"inner_validation_rows":nval,
-        "inner_baseline":inner_base,"selected":best,"top10":top10,"coverage":coverage,
-    }
+    report={"policy":"inner_temporal_selection_final_holdout_untouched_multiyear_shrinkage","fit_rows":len(fit),"holdout_rows":len(out),"holdout_start":str(d2.date()),"inner_cut":str(inner_cut.date()),"inner_train_rows":ntrain,"inner_validation_rows":nval,"inner_baseline":inner_base,"selected":best,"top10":top10,"coverage":coverage}
     REPORT.write_text(json.dumps(report,indent=2,ensure_ascii=False),encoding="utf-8")
     print("FEATURE_SEARCH",json.dumps(report,ensure_ascii=False))
     print(f"OK paired holdout: {OUT} rows={len(out)} selected={best['name']} C={best['C']} features={best['features']} coverage={coverage}")
