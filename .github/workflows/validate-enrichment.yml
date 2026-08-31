@@ -2,6 +2,13 @@ name: Validate MLB Enrichment
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'build_pitcher_history.py'
+      - 'backtest_enrichment_paired.py'
+      - 'validate_enrichment.py'
+      - '.github/workflows/validate-enrichment.yml'
 
 jobs:
   validate:
@@ -20,6 +27,21 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Smoke test official MLB StatsAPI
+        run: |
+          python - <<'PY'
+          import requests
+          r = requests.get(
+              'https://statsapi.mlb.com/api/v1/stats',
+              params={'stats':'season','group':'pitching','season':2025,'sportIds':1,'limit':1},
+              timeout=20,
+          )
+          r.raise_for_status()
+          data = r.json()
+          assert data.get('stats'), 'MLB StatsAPI returned no stats blocks'
+          print('MLB StatsAPI OK')
+          PY
+
       - name: Build historical pitcher metrics
         run: python build_pitcher_history.py
 
@@ -30,10 +52,13 @@ jobs:
         run: python validate_enrichment.py artifacts/enrichment_paired_predictions.csv --json-out artifacts/enrichment_validation.json
 
       - name: Upload validation artifacts
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: enrichment-validation
           path: |
+            data/mlb_pitching_individual_history.csv
             artifacts/enrichment_paired_predictions.csv
             artifacts/enrichment_validation.json
+          if-no-files-found: warn
           retention-days: 14
