@@ -32,13 +32,22 @@ jobs:
           print('MLB feed endpoint reachable:', r.status_code)
           assert r.status_code in (200,404)
           PY
-      - name: Build official historical starting lineups
+      - name: Build official historical starting lineups and hitter logs
         run: python build_lineup_history.py
-      - name: Upload lineup history
+      - name: Generate nested walk-forward lineup predictions
+        run: python backtest_lineup_walkforward.py
+      - name: Evaluate lineup promotion gate
+        run: python validate_enrichment.py artifacts/lineup_walkforward_predictions.csv --json-out artifacts/lineup_validation.json
+      - name: Upload lineup validation artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: lineup-history
-          path: data/mlb_lineup_history.csv
+          name: lineup-validation
+          path: |
+            data/mlb_lineup_history.csv
+            data/mlb_hitter_game_history.csv
+            artifacts/lineup_walkforward_predictions.csv
+            artifacts/lineup_walkforward_report.json
+            artifacts/lineup_validation.json
           if-no-files-found: warn
           retention-days: 14
