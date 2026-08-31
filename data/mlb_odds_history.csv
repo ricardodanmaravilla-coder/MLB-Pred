@@ -1,1 +1,43 @@
 snapshot_utc,event_id,commence_time_utc,home,away,book,market,selection,line,odds_american,odds_decimal
+2026-08-31T22:53:58.159304Z,823663,2026-08-31T23:40:00Z,Minnesota Twins,Detroit Tigers,Production consensus,h2h,Detroit Tigers,,110,2.1
+2026-08-31T22:53:58.159304Z,823663,2026-08-31T23:40:00Z,Minnesota Twins,Detroit Tigers,Production consensus,h2h,Minnesota Twins,,-118,1.85
+2026-08-31T22:53:58.159304Z,823663,2026-08-31T23:40:00Z,Minnesota Twins,Detroit Tigers,Production consensus,spreads,Detroit Tigers,-1.5,168,2.68
+2026-08-31T22:53:58.159304Z,823663,2026-08-31T23:40:00Z,Minnesota Twins,Detroit Tigers,Production consensus,spreads,Minnesota Twins,1.5,-204,1.49
+2026-08-31T22:53:58.159304Z,823663,2026-08-31T23:40:00Z,Minnesota Twins,Detroit Tigers,Production consensus,totals,Over,9.0,-105,1.95
+2026-08-31T22:53:58.159304Z,823663,2026-08-31T23:40:00Z,Minnesota Twins,Detroit Tigers,Production consensus,totals,Under,9.0,-115,1.87
+2026-08-31T22:53:58.159304Z,824635,2026-08-31T23:40:00Z,Chicago Cubs,Milwaukee Brewers,Production consensus,h2h,Chicago Cubs,,-105,1.95
+2026-08-31T22:53:58.159304Z,824635,2026-08-31T23:40:00Z,Chicago Cubs,Milwaukee Brewers,Production consensus,h2h,Milwaukee Brewers,,-106,1.94
+2026-08-31T22:53:58.159304Z,824635,2026-08-31T23:40:00Z,Chicago Cubs,Milwaukee Brewers,Production consensus,spreads,Chicago Cubs,1.5,-167,1.6
+2026-08-31T22:53:58.159304Z,824635,2026-08-31T23:40:00Z,Chicago Cubs,Milwaukee Brewers,Production consensus,spreads,Milwaukee Brewers,-1.5,139,2.39
+2026-08-31T22:53:58.159304Z,824635,2026-08-31T23:40:00Z,Chicago Cubs,Milwaukee Brewers,Production consensus,totals,Over,9.5,-105,1.95
+2026-08-31T22:53:58.159304Z,824635,2026-08-31T23:40:00Z,Chicago Cubs,Milwaukee Brewers,Production consensus,totals,Under,9.5,-115,1.87
+2026-08-31T22:53:58.159304Z,822855,2026-09-01T00:05:00Z,Texas Rangers,Athletics,Production consensus,h2h,Athletics,,194,2.94
+2026-08-31T22:53:58.159304Z,822855,2026-09-01T00:05:00Z,Texas Rangers,Athletics,Production consensus,h2h,Texas Rangers,,-213,1.47
+2026-08-31T22:53:58.159304Z,822855,2026-09-01T00:05:00Z,Texas Rangers,Athletics,Production consensus,spreads,Athletics,1.5,-120,1.83
+2026-08-31T22:53:58.159304Z,822855,2026-09-01T00:05:00Z,Texas Rangers,Athletics,Production consensus,spreads,Texas Rangers,-1.5,100,2.0
+2026-08-31T22:53:58.159304Z,822855,2026-09-01T00:05:00Z,Texas Rangers,Athletics,Production consensus,totals,Over,7.5,-105,1.95
+2026-08-31T22:53:58.159304Z,822855,2026-09-01T00:05:00Z,Texas Rangers,Athletics,Production consensus,totals,Under,7.5,-115,1.87
+2026-08-31T22:53:58.159304Z,824149,2026-09-01T00:10:00Z,Houston Astros,Chicago White Sox,Production consensus,h2h,Chicago White Sox,,118,2.18
+2026-08-31T22:53:58.159304Z,824149,2026-09-01T00:10:00Z,Houston Astros,Chicago White Sox,Production consensus,h2h,Houston Astros,,-128,1.78
+2026-08-31T22:53:58.159304Z,824149,2026-09-01T00:10:00Z,Houston Astros,Chicago White Sox,Production consensus,spreads,Chicago White Sox,1.5,-189,1.53
+2026-08-31T22:53:58.159304Z,824149,2026-09-01T00:10:00Z,Houston Astros,Chicago White Sox,Production consensus,spreads,Houston Astros,-1.5,155,2.55
+2026-08-31T22:53:58.159304Z,824149,2026-09-01T00:10:00Z,Houston Astros,Chicago White Sox,Production consensus,totals,Over,8.5,-118,1.85
+2026-08-31T22:53:58.159304Z,824149,2026-09-01T00:10:00Z,Houston Astros,Chicago White Sox,Production consensus,totals,Under,8.5,-102,1.98
+2026-08-31T22:53:58.159304Z,824314,2026-09-01T00:40:00Z,Colorado Rockies,Baltimore Orioles,Production consensus,h2h,Baltimore Orioles,,-120,1.83
+2026-08-31T22:53:58.159304Z,824314,2026-09-01T00:40:00Z,Colorado Rockies,Baltimore Orioles,Production consensus,h2h,Colorado Rockies,,108,2.08
+2026-08-31T22:53:58.159304Z,824314,2026-09-01T00:40:00Z,Colorado Rockies,Baltimore Orioles,Production consensus,spreads,Baltimore Orioles,-1.5,120,2.2
+2026-08-31T22:53:58.159304Z,824314,2026-09-01T00:40:00Z,Colorado Rockies,Baltimore Orioles,Production consensus,spreads,Colorado Rockies,1.5,-145,1.69
+2026-08-31T22:53:58.159304Z,824314,2026-09-01T00:40:00Z,Colorado Rockies,Baltimore Orioles,Production consensus,totals,Over,11.0,-108,1.93
+2026-08-31T22:53:58.159304Z,824314,2026-09-01T00:40:00Z,Colorado Rockies,Baltimore Orioles,Production consensus,totals,Under,11.0,-112,1.89
+2026-08-31T22:53:58.159304Z,823982,2026-09-01T01:38:00Z,Los Angeles Angels,New York Yankees,Production consensus,h2h,Los Angeles Angels,,110,2.1
+2026-08-31T22:53:58.159304Z,823982,2026-09-01T01:38:00Z,Los Angeles Angels,New York Yankees,Production consensus,h2h,New York Yankees,,-120,1.83
+2026-08-31T22:53:58.159304Z,823982,2026-09-01T01:38:00Z,Los Angeles Angels,New York Yankees,Production consensus,spreads,Los Angeles Angels,1.5,-164,1.61
+2026-08-31T22:53:58.159304Z,823982,2026-09-01T01:38:00Z,Los Angeles Angels,New York Yankees,Production consensus,spreads,New York Yankees,-1.5,135,2.35
+2026-08-31T22:53:58.159304Z,823982,2026-09-01T01:38:00Z,Los Angeles Angels,New York Yankees,Production consensus,totals,Over,8.0,-106,1.94
+2026-08-31T22:53:58.159304Z,823982,2026-09-01T01:38:00Z,Los Angeles Angels,New York Yankees,Production consensus,totals,Under,8.0,-114,1.88
+2026-08-31T22:53:58.159304Z,825040,2026-09-01T01:40:00Z,Arizona Diamondbacks,Philadelphia Phillies,Production consensus,h2h,Arizona Diamondbacks,,102,2.02
+2026-08-31T22:53:58.159304Z,825040,2026-09-01T01:40:00Z,Arizona Diamondbacks,Philadelphia Phillies,Production consensus,h2h,Philadelphia Phillies,,-112,1.89
+2026-08-31T22:53:58.159304Z,825040,2026-09-01T01:40:00Z,Arizona Diamondbacks,Philadelphia Phillies,Production consensus,spreads,Arizona Diamondbacks,1.5,-169,1.59
+2026-08-31T22:53:58.159304Z,825040,2026-09-01T01:40:00Z,Arizona Diamondbacks,Philadelphia Phillies,Production consensus,spreads,Philadelphia Phillies,-1.5,140,2.4
+2026-08-31T22:53:58.159304Z,825040,2026-09-01T01:40:00Z,Arizona Diamondbacks,Philadelphia Phillies,Production consensus,totals,Over,8.5,-102,1.98
+2026-08-31T22:53:58.159304Z,825040,2026-09-01T01:40:00Z,Arizona Diamondbacks,Philadelphia Phillies,Production consensus,totals,Under,8.5,-118,1.85
