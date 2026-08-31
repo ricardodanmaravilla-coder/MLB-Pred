@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: '17 * * * *'
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'snapshot_mlb_odds.py'
+      - '.github/workflows/collect-mlb-odds.yml'
 
 concurrency:
   group: mlb-odds-archive
