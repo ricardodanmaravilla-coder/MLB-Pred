@@ -7,6 +7,8 @@ on:
     paths:
       - 'backtest_ml_mc_blend_walkforward.py'
       - 'validate_ml_mc_blend.py'
+      - 'validate_probability_calibration.py'
+      - 'validate_calibration_gate.py'
       - 'build_starter_quality_history.py'
       - 'modules/ml_mlb.py'
       - 'modules/montecarlo_mlb.py'
@@ -25,16 +27,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: pip
-
       - name: Install dependencies
         run: pip install -r requirements.txt
-
       - name: Smoke test official MLB feed
         run: |
           python - <<'PY'
@@ -43,17 +42,17 @@ jobs:
           print('MLB feed endpoint reachable:',r.status_code)
           assert r.status_code in (200,404)
           PY
-
       - name: Build official starter quality history
         run: python build_starter_quality_history.py
-
       - name: Generate leak-safe ML Monte Carlo blend walk-forward
         run: python backtest_ml_mc_blend_walkforward.py
-
       - name: Evaluate strict date-block blend gate
         run: python validate_ml_mc_blend.py artifacts/ml_mc_blend_walkforward_predictions.csv --json-out artifacts/ml_mc_blend_validation.json
-
-      - name: Upload blend validation artifacts
+      - name: Generate leak-safe probability calibration walk-forward
+        run: python validate_probability_calibration.py
+      - name: Evaluate strict calibration date-block gate
+        run: python validate_calibration_gate.py artifacts/probability_calibration_predictions.csv --json-out artifacts/probability_calibration_validation.json
+      - name: Upload blend and calibration validation artifacts
         uses: actions/upload-artifact@v4
         with:
           name: ml-mc-blend-validation
@@ -63,3 +62,6 @@ jobs:
             artifacts/ml_mc_blend_walkforward_predictions.csv
             artifacts/ml_mc_blend_walkforward_report.json
             artifacts/ml_mc_blend_validation.json
+            artifacts/probability_calibration_predictions.csv
+            artifacts/probability_calibration_report.json
+            artifacts/probability_calibration_validation.json
