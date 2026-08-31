@@ -1,0 +1,36 @@
+name: Validate MLB Edge EV
+
+on:
+  schedule:
+    - cron: '30 12 * * 1'
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Build official starter history
+        run: python build_starter_quality_history.py
+      - name: Generate leak-safe ML Monte Carlo probabilities
+        run: python backtest_ml_mc_blend_walkforward.py
+      - name: Validate edge and EV with real archived odds
+        run: python validate_edge_ev_history.py
+      - name: Upload edge EV validation artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: edge-ev-validation
+          retention-days: 30
+          path: |
+            artifacts/edge_ev_validation.json
+            artifacts/ml_mc_blend_walkforward_predictions.csv
+            data/mlb_odds_history.csv
