@@ -14,7 +14,7 @@ permissions:
 jobs:
   diagnose:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -53,11 +53,37 @@ jobs:
           REGION: ${{ vars.GCP_REGION || 'us-central1' }}
         run: |
           URL=$(gcloud run services describe mlb-pred-v7 --project "$PROJECT_ID" --region "$REGION" --format='value(status.url)')
+          curl -fsS --max-time 120 "$URL/api/health" -o /tmp/health.json
           python - <<'PY'
-          import json, os, urllib.request
-          url=os.popen("gcloud run services describe mlb-pred-v7 --project '$PROJECT_ID' --region '$REGION' --format='value(status.url)'").read().strip()
-          with urllib.request.urlopen(url.rstrip('/')+'/api/health', timeout=90) as r:
-              data=json.load(r)
+          import json
+          data=json.load(open('/tmp/health.json'))
           safe={k:data.get(k) for k in ['status','service','model_ready','ledger_persistent','slate_date']}
           print(json.dumps(safe, indent=2))
           PY
+      - name: Trigger live scanner persistence test
+        env:
+          PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          REGION: ${{ vars.GCP_REGION || 'us-central1' }}
+        run: |
+          URL=$(gcloud run services describe mlb-pred-v7 --project "$PROJECT_ID" --region "$REGION" --format='value(status.url)')
+          curl -fsS --max-time 900 -X POST "$URL/api/scan?persist=true" -o /tmp/scan.json
+          python - <<'PY'
+          import json
+          d=json.load(open('/tmp/scan.json'))
+          recs=d.get('recommendations') or []
+          errs=d.get('errors') or []
+          print('games_seen=',d.get('games_seen'))
+          print('recommendations=',len(recs))
+          print('scanner_errors=',len(errs))
+          for r in recs:
+              print('pick=',r.get('game_pk'),r.get('mercado'),r.get('apuesta'))
+          for e in errs[:5]:
+              print('scanner_error=',e)
+          PY
+      - name: Read recent Sheets sync logs if permitted
+        continue-on-error: true
+        env:
+          PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+        run: |
+          gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="mlb-pred-v7" AND textPayload:"Google Sheets"' \
+            --project "$PROJECT_ID" --freshness=2h --limit=20 --format='value(timestamp,textPayload)'
