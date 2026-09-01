@@ -131,3 +131,57 @@ snapshot_utc,event_id,commence_time_utc,home,away,book,market,selection,line,odd
 2026-09-01T21:05:07.635120Z,823908,2026-09-02T02:10:00Z,Los Angeles Dodgers,St. Louis Cardinals,Production consensus,spreads,St. Louis Cardinals,1.5,-127,1.79
 2026-09-01T21:05:07.635120Z,823908,2026-09-02T02:10:00Z,Los Angeles Dodgers,St. Louis Cardinals,Production consensus,totals,Over,9.0,100,2.0
 2026-09-01T21:05:07.635120Z,823908,2026-09-02T02:10:00Z,Los Angeles Dodgers,St. Louis Cardinals,Production consensus,totals,Under,9.0,-120,1.83
+2026-09-01T23:21:15.533220Z,823661,2026-09-01T23:40:00Z,Minnesota Twins,Detroit Tigers,Production consensus,h2h,Detroit Tigers,,-105,1.95
+2026-09-01T23:21:15.533220Z,823661,2026-09-01T23:40:00Z,Minnesota Twins,Detroit Tigers,Production consensus,h2h,Minnesota Twins,,-112,1.89
+2026-09-01T23:21:15.533220Z,823661,2026-09-01T23:40:00Z,Minnesota Twins,Detroit Tigers,Production consensus,spreads,Detroit Tigers,-1.5,155,2.55
+2026-09-01T23:21:15.533220Z,823661,2026-09-01T23:40:00Z,Minnesota Twins,Detroit Tigers,Production consensus,spreads,Minnesota Twins,1.5,-185,1.54
+2026-09-01T23:21:15.533220Z,823661,2026-09-01T23:40:00Z,Minnesota Twins,Detroit Tigers,Production consensus,totals,Over,8.5,-110,1.91
+2026-09-01T23:21:15.533220Z,823661,2026-09-01T23:40:00Z,Minnesota Twins,Detroit Tigers,Production consensus,totals,Under,8.5,-110,1.91
+2026-09-01T23:21:15.533220Z,824070,2026-09-01T23:40:00Z,Kansas City Royals,Miami Marlins,Production consensus,h2h,Kansas City Royals,,-114,1.88
+2026-09-01T23:21:15.533220Z,824070,2026-09-01T23:40:00Z,Kansas City Royals,Miami Marlins,Production consensus,h2h,Miami Marlins,,-105,1.95
+2026-09-01T23:21:15.533220Z,824070,2026-09-01T23:40:00Z,Kansas City Royals,Miami Marlins,Production consensus,spreads,Kansas City Royals,1.5,-185,1.54
+2026-09-01T23:21:15.533220Z,824070,2026-09-01T23:40:00Z,Kansas City Royals,Miami Marlins,Production consensus,spreads,Miami Marlins,-1.5,154,2.54
+2026-09-01T23:21:15.533220Z,824070,2026-09-01T23:40:00Z,Kansas City Royals,Miami Marlins,Production consensus,totals,Over,9.5,-118,1.85
+2026-09-01T23:21:15.533220Z,824070,2026-09-01T23:40:00Z,Kansas City Royals,Miami Marlins,Production consensus,totals,Under,9.5,-102,1.98
+2026-09-01T23:21:15.533220Z,824633,2026-09-01T23:40:00Z,Chicago Cubs,Milwaukee Brewers,Production consensus,h2h,Chicago Cubs,,-122,1.82
+2026-09-01T23:21:15.533220Z,824633,2026-09-01T23:40:00Z,Chicago Cubs,Milwaukee Brewers,Production consensus,h2h,Milwaukee Brewers,,104,2.04
+2026-09-01T23:21:15.533220Z,824633,2026-09-01T23:40:00Z,Chicago Cubs,Milwaukee Brewers,Production consensus,spreads,Chicago Cubs,-1.5,154,2.54
+2026-09-01T23:21:15.533220Z,824633,2026-09-01T23:40:00Z,Chicago Cubs,Milwaukee Brewers,Production consensus,spreads,Milwaukee Brewers,1.5,-185,1.54
+2026-09-01T23:21:15.533220Z,824633,2026-09-01T23:40:00Z,Chicago Cubs,Milwaukee Brewers,Production consensus,totals,Over,10.0,-106,1.94
+2026-09-01T23:21:15.533220Z,824633,2026-09-01T23:40:00Z,Chicago Cubs,Milwaukee Brewers,Production consensus,totals,Under,10.0,-112,1.89
+2026-09-01T23:21:15.533220Z,822854,2026-09-02T00:05:00Z,Texas Rangers,Athletics,Production consensus,h2h,Athletics,,180,2.8
+2026-09-01T23:21:15.533220Z,822854,2026-09-02T00:05:00Z,Texas Rangers,Athletics,Production consensus,h2h,Texas Rangers,,-222,1.45
+2026-09-01T23:21:15.533220Z,822854,2026-09-02T00:05:00Z,Texas Rangers,Athletics,Production consensus,spreads,Athletics,1.5,-125,1.8
+2026-09-01T23:21:15.533220Z,822854,2026-09-02T00:05:00Z,Texas Rangers,Athletics,Production consensus,spreads,Texas Rangers,-1.5,105,2.05
+2026-09-01T23:21:15.533220Z,822854,2026-09-02T00:05:00Z,Texas Rangers,Athletics,Production consensus,totals,Over,7.5,-110,1.91
+2026-09-01T23:21:15.533220Z,822854,2026-09-02T00:05:00Z,Texas Rangers,Athletics,Production consensus,totals,Under,7.5,-110,1.91
+2026-09-01T23:21:15.533220Z,824148,2026-09-02T00:10:00Z,Houston Astros,Chicago White Sox,Production consensus,h2h,Chicago White Sox,,-112,1.89
+2026-09-01T23:21:15.533220Z,824148,2026-09-02T00:10:00Z,Houston Astros,Chicago White Sox,Production consensus,h2h,Houston Astros,,-105,1.95
+2026-09-01T23:21:15.533220Z,824148,2026-09-02T00:10:00Z,Houston Astros,Chicago White Sox,Production consensus,spreads,Chicago White Sox,-1.5,145,2.45
+2026-09-01T23:21:15.533220Z,824148,2026-09-02T00:10:00Z,Houston Astros,Chicago White Sox,Production consensus,spreads,Houston Astros,1.5,-175,1.57
+2026-09-01T23:21:15.533220Z,824148,2026-09-02T00:10:00Z,Houston Astros,Chicago White Sox,Production consensus,totals,Over,8.5,-115,1.87
+2026-09-01T23:21:15.533220Z,824148,2026-09-02T00:10:00Z,Houston Astros,Chicago White Sox,Production consensus,totals,Under,8.5,-106,1.94
+2026-09-01T23:21:15.533220Z,824313,2026-09-02T00:40:00Z,Colorado Rockies,Baltimore Orioles,Production consensus,h2h,Baltimore Orioles,,-152,1.66
+2026-09-01T23:21:15.533220Z,824313,2026-09-02T00:40:00Z,Colorado Rockies,Baltimore Orioles,Production consensus,h2h,Colorado Rockies,,132,2.32
+2026-09-01T23:21:15.533220Z,824313,2026-09-02T00:40:00Z,Colorado Rockies,Baltimore Orioles,Production consensus,spreads,Baltimore Orioles,-1.5,100,2.0
+2026-09-01T23:21:15.533220Z,824313,2026-09-02T00:40:00Z,Colorado Rockies,Baltimore Orioles,Production consensus,spreads,Colorado Rockies,1.5,-120,1.83
+2026-09-01T23:21:15.533220Z,824313,2026-09-02T00:40:00Z,Colorado Rockies,Baltimore Orioles,Production consensus,totals,Over,11.0,-119,1.84
+2026-09-01T23:21:15.533220Z,824313,2026-09-02T00:40:00Z,Colorado Rockies,Baltimore Orioles,Production consensus,totals,Under,11.0,100,2.0
+2026-09-01T23:21:15.533220Z,823984,2026-09-02T01:38:00Z,Los Angeles Angels,New York Yankees,Production consensus,h2h,Los Angeles Angels,,151,2.51
+2026-09-01T23:21:15.533220Z,823984,2026-09-02T01:38:00Z,Los Angeles Angels,New York Yankees,Production consensus,h2h,New York Yankees,,-175,1.57
+2026-09-01T23:21:15.533220Z,823984,2026-09-02T01:38:00Z,Los Angeles Angels,New York Yankees,Production consensus,spreads,Los Angeles Angels,1.5,-118,1.85
+2026-09-01T23:21:15.533220Z,823984,2026-09-02T01:38:00Z,Los Angeles Angels,New York Yankees,Production consensus,spreads,New York Yankees,-1.5,-103,1.97
+2026-09-01T23:21:15.533220Z,823984,2026-09-02T01:38:00Z,Los Angeles Angels,New York Yankees,Production consensus,totals,Over,7.0,10000,101.0
+2026-09-01T23:21:15.533220Z,823984,2026-09-02T01:38:00Z,Los Angeles Angels,New York Yankees,Production consensus,totals,Under,7.0,-118,1.85
+2026-09-01T23:21:15.533220Z,825038,2026-09-02T01:40:00Z,Arizona Diamondbacks,Philadelphia Phillies,Production consensus,h2h,Arizona Diamondbacks,,114,2.14
+2026-09-01T23:21:15.533220Z,825038,2026-09-02T01:40:00Z,Arizona Diamondbacks,Philadelphia Phillies,Production consensus,h2h,Philadelphia Phillies,,-133,1.75
+2026-09-01T23:21:15.533220Z,825038,2026-09-02T01:40:00Z,Arizona Diamondbacks,Philadelphia Phillies,Production consensus,spreads,Arizona Diamondbacks,1.5,-154,1.65
+2026-09-01T23:21:15.533220Z,825038,2026-09-02T01:40:00Z,Arizona Diamondbacks,Philadelphia Phillies,Production consensus,spreads,Philadelphia Phillies,-1.5,130,2.3
+2026-09-01T23:21:15.533220Z,825038,2026-09-02T01:40:00Z,Arizona Diamondbacks,Philadelphia Phillies,Production consensus,totals,Over,7.5,-102,1.98
+2026-09-01T23:21:15.533220Z,825038,2026-09-02T01:40:00Z,Arizona Diamondbacks,Philadelphia Phillies,Production consensus,totals,Under,7.5,-118,1.85
+2026-09-01T23:21:15.533220Z,823908,2026-09-02T02:10:00Z,Los Angeles Dodgers,St. Louis Cardinals,Production consensus,h2h,Los Angeles Dodgers,,-196,1.51
+2026-09-01T23:21:15.533220Z,823908,2026-09-02T02:10:00Z,Los Angeles Dodgers,St. Louis Cardinals,Production consensus,h2h,St. Louis Cardinals,,164,2.64
+2026-09-01T23:21:15.533220Z,823908,2026-09-02T02:10:00Z,Los Angeles Dodgers,St. Louis Cardinals,Production consensus,spreads,Los Angeles Dodgers,-1.5,108,2.08
+2026-09-01T23:21:15.533220Z,823908,2026-09-02T02:10:00Z,Los Angeles Dodgers,St. Louis Cardinals,Production consensus,spreads,St. Louis Cardinals,1.5,-130,1.77
+2026-09-01T23:21:15.533220Z,823908,2026-09-02T02:10:00Z,Los Angeles Dodgers,St. Louis Cardinals,Production consensus,totals,Over,8.5,-122,1.82
+2026-09-01T23:21:15.533220Z,823908,2026-09-02T02:10:00Z,Los Angeles Dodgers,St. Louis Cardinals,Production consensus,totals,Under,8.5,100,2.0
