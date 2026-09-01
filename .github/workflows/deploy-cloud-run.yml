@@ -2,6 +2,12 @@ name: Deploy MLB to Cloud Run
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'web_app.py'
+      - 'modules/live_sheet_settlement.py'
+      - '.github/workflows/deploy-cloud-run.yml'
 
 permissions:
   contents: read
@@ -34,9 +40,11 @@ jobs:
             --min 0 \
             --max 3 \
             --update-env-vars="MLB_DATA_DIR=data"
-      - name: Show service URL
+      - name: Verify live settlement endpoint
         run: |
-          gcloud run services describe mlb-pred-v7 \
+          URL=$(gcloud run services describe mlb-pred-v7 \
             --project "${{ secrets.GCP_PROJECT_ID }}" \
             --region "${{ vars.GCP_REGION || 'us-central1' }}" \
-            --format='value(status.url)'
+            --format='value(status.url)')
+          test -n "$URL"
+          curl -fsS --max-time 180 -X POST "$URL/api/settle"
