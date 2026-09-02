@@ -185,3 +185,15 @@ snapshot_utc,event_id,commence_time_utc,home,away,book,market,selection,line,odd
 2026-09-01T23:21:15.533220Z,823908,2026-09-02T02:10:00Z,Los Angeles Dodgers,St. Louis Cardinals,Production consensus,spreads,St. Louis Cardinals,1.5,-130,1.77
 2026-09-01T23:21:15.533220Z,823908,2026-09-02T02:10:00Z,Los Angeles Dodgers,St. Louis Cardinals,Production consensus,totals,Over,8.5,-122,1.82
 2026-09-01T23:21:15.533220Z,823908,2026-09-02T02:10:00Z,Los Angeles Dodgers,St. Louis Cardinals,Production consensus,totals,Under,8.5,100,2.0
+2026-09-02T09:41:29.237428Z,824470,2026-09-02T16:40:00Z,Cincinnati Reds,San Diego Padres,Production consensus,h2h,Cincinnati Reds,,124,2.24
+2026-09-02T09:41:29.237428Z,824470,2026-09-02T16:40:00Z,Cincinnati Reds,San Diego Padres,Production consensus,h2h,San Diego Padres,,-147,1.68
+2026-09-02T09:41:29.237428Z,824470,2026-09-02T16:40:00Z,Cincinnati Reds,San Diego Padres,Production consensus,spreads,Cincinnati Reds,1.5,-125,1.8
+2026-09-02T09:41:29.237428Z,824470,2026-09-02T16:40:00Z,Cincinnati Reds,San Diego Padres,Production consensus,spreads,San Diego Padres,-1.5,105,2.05
+2026-09-02T09:41:29.237428Z,824470,2026-09-02T16:40:00Z,Cincinnati Reds,San Diego Padres,Production consensus,totals,Over,9.5,-108,1.93
+2026-09-02T09:41:29.237428Z,824470,2026-09-02T16:40:00Z,Cincinnati Reds,San Diego Padres,Production consensus,totals,Under,9.5,-111,1.9
+2026-09-02T09:41:29.237428Z,822686,2026-09-02T17:05:00Z,Washington Nationals,Atlanta Braves,Production consensus,h2h,Atlanta Braves,,-159,1.63
+2026-09-02T09:41:29.237428Z,822686,2026-09-02T17:05:00Z,Washington Nationals,Atlanta Braves,Production consensus,h2h,Washington Nationals,,135,2.35
+2026-09-02T09:41:29.237428Z,822686,2026-09-02T17:05:00Z,Washington Nationals,Atlanta Braves,Production consensus,spreads,Atlanta Braves,-1.5,-102,1.98
+2026-09-02T09:41:29.237428Z,822686,2026-09-02T17:05:00Z,Washington Nationals,Atlanta Braves,Production consensus,spreads,Washington Nationals,1.5,-119,1.84
+2026-09-02T09:41:29.237428Z,822686,2026-09-02T17:05:00Z,Washington Nationals,Atlanta Braves,Production consensus,totals,Over,9.0,-112,1.89
+2026-09-02T09:41:29.237428Z,822686,2026-09-02T17:05:00Z,Washington Nationals,Atlanta Braves,Production consensus,totals,Under,9.0,-108,1.93
