@@ -16,6 +16,11 @@ RUN pip install --no-cache-dir --upgrade pip && pip install --no-cache-dir -r re
 
 COPY . .
 
+# Build the leak-safe DuckDB/Parquet feature store from the canonical CSV data
+# during the image build. The artifacts are intentionally gitignored, but are
+# present in the deployed Cloud Run image and revalidated at model startup.
+RUN python build_bigdata.py
+
 EXPOSE 8080
 
 CMD ["sh", "-c", "uvicorn web_app:app --host 0.0.0.0 --port ${PORT} --workers 1 --timeout-keep-alive 75"]
