@@ -9,6 +9,8 @@ on:
     paths:
       - 'modules/experimental_parquet.py'
       - 'backtest_experimental_parquet.py'
+      - 'build_game_starters_history.py'
+      - 'prepare_experimental_starters.py'
       - '.github/workflows/experimental-parquet-backtest.yml'
 
 permissions:
@@ -25,6 +27,8 @@ jobs:
           python-version: '3.11'
       - name: Install dependencies
         run: pip install -r requirements.txt
+      - name: Populate exact historical starters
+        run: python prepare_experimental_starters.py
       - name: Build isolated research Parquet
         run: python -m modules.experimental_parquet
       - name: Verify production isolation
@@ -34,6 +38,7 @@ jobs:
           for p in ('modules/web_service.py','modules/ml_mlb.py','web_app.py'):
               text=Path(p).read_text(encoding='utf-8')
               assert 'experimental_parquet' not in text, f'Production imports experiment: {p}'
+              assert 'prepare_experimental_starters' not in text, f'Production imports starter experiment: {p}'
           print('Production isolation OK')
           PY
       - name: Run temporal holdout backtest
@@ -47,7 +52,6 @@ jobs:
           print('PROMOTE_TO_INTEGRATION_REVIEW=',p['PROMOTE_TO_INTEGRATION_REVIEW'])
           print('improvement_pct=',p['improvement_pct'])
           print('selected=',p['selected_extra_features'])
-          # Research may fail to improve; that is a valid result, not a CI failure.
           PY
       - name: Upload research artifacts
         uses: actions/upload-artifact@v4
