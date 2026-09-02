@@ -55,6 +55,20 @@ def record_key(row: Mapping[str, Any]) -> str:
     ])
 
 
+def market_slot_key(row: Mapping[str, Any]) -> str:
+    """Stable one-pick slot per game and market.
+
+    Selection/line/model version are intentionally excluded. Once a recommendation for
+    a game+market is persisted, later scans cannot add a second wager for that same slot.
+    This preserves the original recommendation instead of rewriting betting history.
+    """
+    return "|".join([
+        _clean(row.get("game_date")),
+        _clean(row.get("game_pk")),
+        _clean(row.get("market")),
+    ])
+
+
 def _credentials_payload(config: Mapping[str, Any] | None = None):
     config = dict(config or {})
     raw = config.get("service_account_json")
@@ -158,15 +172,19 @@ def _column_letter(number: int) -> str:
 
 
 def sync_rows(rows: Iterable[Mapping[str, Any]], config: Mapping[str, Any] | None = None):
-    """Idempotently append new rows and update existing settled rows. Never raises."""
+    """Idempotently append new rows and update existing settled rows. Never raises.
+
+    New pending recommendations are limited to one row per game+market. Exact existing
+    records can still be updated normally so settlement remains idempotent.
+    """
     rows = [dict(r) for r in rows or []]
     if not rows:
-        return {"ok": True, "configured": configured(config), "inserted": 0, "updated": 0, "message": "no rows"}
+        return {"ok": True, "configured": configured(config), "inserted": 0, "updated": 0, "duplicates_skipped": 0, "message": "no rows"}
 
     sheet_id = _sheet_id(config)
     worksheet_name = _worksheet_name(config)
     if not sheet_id:
-        return {"ok": True, "configured": False, "inserted": 0, "updated": 0, "message": "GOOGLE_SHEETS_ID not configured"}
+        return {"ok": True, "configured": False, "inserted": 0, "updated": 0, "duplicates_skipped": 0, "message": "GOOGLE_SHEETS_ID not configured"}
 
     try:
         credentials, auth_source = _google_credentials(config)
@@ -183,16 +201,23 @@ def sync_rows(rows: Iterable[Mapping[str, Any]], config: Mapping[str, Any] | Non
         if ws is None:
             return {
                 "ok": False, "configured": True, "inserted": 0, "updated": 0,
-                "message": schema_message, "auth_source": auth_source,
+                "duplicates_skipped": 0, "message": schema_message, "auth_source": auth_source,
             }
 
         key_to_row = {}
+        slot_to_row = {}
         for idx, existing in enumerate(values[1:], start=2):
-            if existing and existing[0]:
-                key_to_row[existing[0]] = idx
+            padded = list(existing) + [""] * max(0, len(SHEET_HEADERS) - len(existing))
+            existing_row = dict(zip(SHEET_HEADERS, padded[:len(SHEET_HEADERS)]))
+            if existing_row.get("record_key"):
+                key_to_row[existing_row["record_key"]] = idx
+            slot = market_slot_key(existing_row)
+            if slot.strip("|"):
+                slot_to_row.setdefault(slot, idx)
 
         append_payload = []
         update_payload = []
+        duplicates_skipped = 0
         last_col = _column_letter(len(SHEET_HEADERS))
         for row in rows:
             key = record_key(row)
@@ -202,9 +227,18 @@ def sync_rows(rows: Iterable[Mapping[str, Any]], config: Mapping[str, Any] | Non
             existing_row = key_to_row.get(key)
             if existing_row:
                 update_payload.append({"range": f"A{existing_row}:{last_col}{existing_row}", "values": [cells]})
-            else:
-                append_payload.append(cells)
-                key_to_row[key] = -1
+                continue
+
+            status = _clean(enriched.get("result_status") or "pending").lower()
+            slot = market_slot_key(enriched)
+            if status == "pending" and slot in slot_to_row:
+                duplicates_skipped += 1
+                continue
+
+            append_payload.append(cells)
+            key_to_row[key] = -1
+            if slot.strip("|"):
+                slot_to_row.setdefault(slot, -1)
 
         if update_payload:
             ws.batch_update(update_payload, value_input_option="USER_ENTERED")
@@ -213,8 +247,8 @@ def sync_rows(rows: Iterable[Mapping[str, Any]], config: Mapping[str, Any] | Non
 
         return {
             "ok": True, "configured": True, "inserted": len(append_payload),
-            "updated": len(update_payload), "worksheet": actual_name,
-            "message": schema_message, "auth_source": auth_source,
+            "updated": len(update_payload), "duplicates_skipped": duplicates_skipped,
+            "worksheet": actual_name, "message": schema_message, "auth_source": auth_source,
         }
     except Exception as exc:
         exc_type = type(exc).__name__
@@ -223,6 +257,7 @@ def sync_rows(rows: Iterable[Mapping[str, Any]], config: Mapping[str, Any] | Non
         detail = exc_text or exc_repr or exc_type
         return {
             "ok": False, "configured": True, "inserted": 0, "updated": 0,
+            "duplicates_skipped": 0,
             "message": f"{exc_type}: {detail}"[:500],
             "exception_type": exc_type,
             "auth_source": "unknown",
