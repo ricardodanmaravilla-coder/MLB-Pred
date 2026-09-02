@@ -9,12 +9,14 @@ on:
     paths:
       - 'modules/experimental_parquet.py'
       - 'backtest_experimental_parquet.py'
+      - 'backtest_experimental_daynight.py'
       - 'build_game_starters_history.py'
       - 'prepare_experimental_starters.py'
       - 'build_starter_performance_history.py'
       - 'build_bullpen_usage_history.py'
       - 'prepare_experimental_bullpen.py'
       - 'enrich_experimental_context.py'
+      - 'enrich_experimental_daynight.py'
       - 'prepare_experimental_statcast.py'
       - '.github/workflows/experimental-parquet-backtest.yml'
 
@@ -42,6 +44,8 @@ jobs:
         run: python -m modules.experimental_parquet
       - name: Enrich Parquet with real pregame context
         run: python enrich_experimental_context.py
+      - name: Enrich Parquet with starter Day-Night splits
+        run: python enrich_experimental_daynight.py
       - name: Enrich Parquet with real Statcast
         run: python prepare_experimental_statcast.py
       - name: Verify production isolation
@@ -54,6 +58,8 @@ jobs:
               'build_starter_performance_history',
               'prepare_experimental_bullpen',
               'enrich_experimental_context',
+              'enrich_experimental_daynight',
+              'backtest_experimental_daynight',
               'prepare_experimental_statcast',
           )
           for p in ('modules/web_service.py','modules/ml_mlb.py','web_app.py'):
@@ -63,7 +69,7 @@ jobs:
           print('Production isolation OK')
           PY
       - name: Run temporal holdout backtest
-        run: python backtest_experimental_parquet.py
+        run: python backtest_experimental_daynight.py
       - name: Print promotion gate
         run: |
           python - <<'PY'
