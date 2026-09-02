@@ -36,7 +36,16 @@ MIN_BBE = 15
 
 
 def _num(s):
-    return pd.to_numeric(s, errors="coerce")
+    """Return a plain float64 Series, never pandas nullable integer dtype.
+
+    pybaseball's post-processing can yield nullable Int64/Float64 extension
+    arrays depending on the date chunk. Explicit float64 normalization keeps
+    later `where`/arithmetic operations stable across pandas versions while
+    preserving missing values as np.nan.
+    """
+    if isinstance(s, pd.Series):
+        return pd.Series(pd.to_numeric(s, errors="coerce").to_numpy(dtype="float64", na_value=np.nan), index=s.index)
+    return pd.Series(pd.to_numeric(pd.Series(s), errors="coerce").to_numpy(dtype="float64", na_value=np.nan))
 
 
 def _fetch_chunk(start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
@@ -70,14 +79,14 @@ def _daily_from_raw(raw: pd.DataFrame) -> pd.DataFrame:
     events = x["events"] if "events" in x.columns else pd.Series(np.nan, index=x.index)
     pa = x[events.notna()].copy()
     if not pa.empty:
-        denom = _num(pa["woba_denom"]) if "woba_denom" in pa.columns else pd.Series(np.nan, index=pa.index)
-        actual = _num(pa["woba_value"]) if "woba_value" in pa.columns else pd.Series(np.nan, index=pa.index)
-        est = _num(pa["estimated_woba_using_speedangle"]) if "estimated_woba_using_speedangle" in pa.columns else pd.Series(np.nan, index=pa.index)
-        pa["_woba_den"] = denom.where(denom > 0, 0.0).fillna(0.0)
+        denom = _num(pa["woba_denom"]) if "woba_denom" in pa.columns else pd.Series(np.nan, index=pa.index, dtype="float64")
+        actual = _num(pa["woba_value"]) if "woba_value" in pa.columns else pd.Series(np.nan, index=pa.index, dtype="float64")
+        est = _num(pa["estimated_woba_using_speedangle"]) if "estimated_woba_using_speedangle" in pa.columns else pd.Series(np.nan, index=pa.index, dtype="float64")
+        pa["_woba_den"] = denom.where(denom > 0, 0.0).fillna(0.0).astype("float64")
         # For balls in play use Statcast expected contact value. For walks/HBP/K,
         # where speed-angle expectation is undefined, the deterministic wOBA event
         # value is the correct non-contact component of the PA.
-        component = est.where(est.notna(), actual)
+        component = est.combine_first(actual).astype("float64")
         pa["_xwoba_num"] = component.fillna(0.0) * pa["_woba_den"]
         pa_daily = pa.groupby(["Date", "Team"], as_index=False).agg(
             xwoba_num=("_xwoba_num", "sum"), woba_den=("_woba_den", "sum")
@@ -86,7 +95,7 @@ def _daily_from_raw(raw: pd.DataFrame) -> pd.DataFrame:
         pa_daily = pd.DataFrame(columns=["Date", "Team", "xwoba_num", "woba_den"])
 
     # Batted-ball events are the valid denominator for contact-quality metrics.
-    ev = _num(x["launch_speed"]) if "launch_speed" in x.columns else pd.Series(np.nan, index=x.index)
+    ev = _num(x["launch_speed"]) if "launch_speed" in x.columns else pd.Series(np.nan, index=x.index, dtype="float64")
     bbe = x[ev.notna()].copy()
     if not bbe.empty:
         bbe["_ev"] = _num(bbe["launch_speed"])
