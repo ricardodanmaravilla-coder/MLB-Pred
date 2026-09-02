@@ -7,6 +7,7 @@ on:
     paths:
       - 'web_app.py'
       - 'modules/live_sheet_settlement.py'
+      - 'modules/google_sheets_ledger.py'
       - '.github/workflows/deploy-cloud-run.yml'
 
 permissions:
