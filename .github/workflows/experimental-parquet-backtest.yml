@@ -1,0 +1,59 @@
+name: MLB Experimental Parquet Backtest
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '30 12 * * 1'
+  push:
+    branches: [main]
+    paths:
+      - 'modules/experimental_parquet.py'
+      - 'backtest_experimental_parquet.py'
+      - '.github/workflows/experimental-parquet-backtest.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  research-backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Build isolated research Parquet
+        run: python -m modules.experimental_parquet
+      - name: Verify production isolation
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          for p in ('modules/web_service.py','modules/ml_mlb.py','web_app.py'):
+              text=Path(p).read_text(encoding='utf-8')
+              assert 'experimental_parquet' not in text, f'Production imports experiment: {p}'
+          print('Production isolation OK')
+          PY
+      - name: Run temporal holdout backtest
+        run: python backtest_experimental_parquet.py
+      - name: Print promotion gate
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=json.loads(Path('artifacts/experimental_parquet_backtest.json').read_text())
+          print('PROMOTE_TO_INTEGRATION_REVIEW=',p['PROMOTE_TO_INTEGRATION_REVIEW'])
+          print('improvement_pct=',p['improvement_pct'])
+          print('selected=',p['selected_extra_features'])
+          # Research may fail to improve; that is a valid result, not a CI failure.
+          PY
+      - name: Upload research artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: mlb-experimental-parquet-backtest
+          path: |
+            data/experimental/mlb_research_features_v1_coverage.json
+            artifacts/experimental_parquet_backtest.json
+          if-no-files-found: error
