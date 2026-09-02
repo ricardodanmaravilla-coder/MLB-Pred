@@ -88,14 +88,9 @@ def _fill_starter_quality(frame: pd.DataFrame) -> pd.DataFrame:
     hist = _starter_history()
     if hist.empty:
         return frame
-
-    # Process target games chronologically. For each pitcher, maintain only starts
-    # whose date is strictly earlier than the target game. Same-day starts are NOT
-    # admitted, which also protects doubleheaders from accidental leakage.
     target = frame.copy()
     target["_date"] = pd.to_datetime(target["Date"], errors="coerce").dt.normalize()
     order = target.sort_values(["_date", "gamePk"], kind="mergesort").index.tolist()
-
     by_pid = defaultdict(list)
     for r in hist.itertuples(index=False):
         by_pid[int(r.PitcherID)].append({
@@ -105,36 +100,26 @@ def _fill_starter_quality(frame: pd.DataFrame) -> pd.DataFrame:
         })
     cursors = defaultdict(int)
     windows = defaultdict(lambda: deque(maxlen=STARTER_WINDOW))
-
     cols = ["era", "whip", "k_pct", "bb_pct", "kbb_pct", "hr9"]
     values = {f"{side}_{metric}": {} for side in ("home_starter", "away_starter") for metric in cols}
-
     for idx in order:
         d = target.at[idx, "_date"]
         if pd.isna(d):
             continue
-        # Update only the pitchers required for this target row, and only with
-        # starts from dates strictly before the target date.
         for side, id_col in (("home_starter", "home_starter_id"), ("away_starter", "away_starter_id")):
             pid_raw = target.at[idx, id_col] if id_col in target.columns else np.nan
             if pd.isna(pid_raw):
                 continue
-            pid = int(float(pid_raw))
-            logs = by_pid.get(pid, [])
-            cur = cursors[pid]
+            pid = int(float(pid_raw)); logs = by_pid.get(pid, []); cur = cursors[pid]
             while cur < len(logs) and logs[cur]["Date"] < d:
-                windows[pid].append(logs[cur])
-                cur += 1
+                windows[pid].append(logs[cur]); cur += 1
             cursors[pid] = cur
             agg = _aggregate_starts(windows[pid])
             if agg:
                 for metric in cols:
                     values[f"{side}_{metric}"][idx] = agg[metric]
-
     for col, mapping in values.items():
         series = pd.Series(mapping, dtype=float)
-        # Research rolling metrics supersede the old prior-season lookup where
-        # available because they are closer to the actual pregame state.
         if col in target.columns:
             target.loc[series.index, col] = series
         else:
@@ -157,7 +142,7 @@ def _bullpen_daily() -> pd.DataFrame:
 
 def _team_day_maps(u: pd.DataFrame):
     if u.empty:
-        return {}, {}
+        return {}, {}, {}
     daily = u.groupby(["Team", "Date"], as_index=False)["Pitches"].sum(min_count=1)
     pitch_map = {(r.Team, pd.Timestamp(r.Date)): float(r.Pitches) if pd.notna(r.Pitches) else np.nan for r in daily.itertuples(index=False)}
     by_pitcher = {}
@@ -167,19 +152,36 @@ def _team_day_maps(u: pd.DataFrame):
             by_pitcher[(team, pd.Timestamp(date))] = {
                 int(pid): float(p) for pid, p in g.groupby("PitcherID")["Pitches"].sum(min_count=1).dropna().items()
             }
-    return pitch_map, by_pitcher
+    bounds = {}
+    for team, g in u.groupby("Team"):
+        ds = g["Date"].dropna()
+        if not ds.empty:
+            bounds[team] = (pd.Timestamp(ds.min()), pd.Timestamp(ds.max()))
+    return pitch_map, by_pitcher, bounds
 
 
-def _recent_sum(pitch_map, team, date, days):
+def _recent_sum(pitch_map, bounds, team, date, days):
+    if team not in bounds:
+        return np.nan
+    lo, hi = bounds[team]
+    # Need enough source history to observe the complete requested lookback.
+    if date - pd.Timedelta(days=days) < lo or date > hi + pd.Timedelta(days=1):
+        return np.nan
     vals = []
     for delta in range(1, int(days) + 1):
         v = pitch_map.get((team, date - pd.Timedelta(days=delta)))
         if v is not None and pd.notna(v):
             vals.append(float(v))
+    # Inside a known covered window, no appearance is a real zero workload.
     return float(sum(vals)) if vals else 0.0
 
 
-def _high_leverage_available(by_pitcher, team, date):
+def _high_leverage_available(by_pitcher, bounds, team, date):
+    if team not in bounds:
+        return np.nan
+    lo, hi = bounds[team]
+    if date - pd.Timedelta(days=30) < lo or date > hi + pd.Timedelta(days=1):
+        return np.nan
     totals = {}
     for delta in range(1, 31):
         day = by_pitcher.get((team, date - pd.Timedelta(days=delta)), {})
@@ -201,7 +203,7 @@ def _fill_bullpen(frame: pd.DataFrame) -> pd.DataFrame:
     u = _bullpen_daily()
     if u.empty:
         return frame
-    pitch_map, by_pitcher = _team_day_maps(u)
+    pitch_map, by_pitcher, bounds = _team_day_maps(u)
     dates = pd.to_datetime(frame["Date"], errors="coerce").dt.normalize()
     for side, team_col in (("home", "Home"), ("away", "Away")):
         teams = frame[team_col].map(normalize_team)
@@ -210,9 +212,9 @@ def _fill_bullpen(frame: pd.DataFrame) -> pd.DataFrame:
             if pd.isna(date) or not team:
                 p1.append(np.nan); p3.append(np.nan); avail.append(np.nan); continue
             d = pd.Timestamp(date)
-            p1.append(_recent_sum(pitch_map, team, d, 1))
-            p3.append(_recent_sum(pitch_map, team, d, 3))
-            avail.append(_high_leverage_available(by_pitcher, team, d))
+            p1.append(_recent_sum(pitch_map, bounds, team, d, 1))
+            p3.append(_recent_sum(pitch_map, bounds, team, d, 3))
+            avail.append(_high_leverage_available(by_pitcher, bounds, team, d))
         frame[f"{side}_bullpen_pitches_1d"] = p1
         frame[f"{side}_bullpen_pitches_3d"] = p3
         frame[f"{side}_bullpen_high_leverage_available"] = avail
@@ -227,7 +229,6 @@ def main():
     frame = _fill_starter_quality(frame)
     frame = _fill_bullpen(frame)
     frame.to_parquet(OUT, index=False)
-
     coverage = {c: round(float(frame[c].notna().mean()), 4) for c in frame.columns if c not in {"Date", "Home", "Away", "game_key"}}
     payload = json.loads(REPORT.read_text(encoding="utf-8")) if REPORT.exists() else {}
     payload["coverage_after_context"] = coverage
@@ -238,7 +239,7 @@ def main():
         "starter_available_metrics": ["ERA", "WHIP", "K%", "BB%", "K-BB%", "HR/9"],
         "starter_unfabricated_missing_metrics": ["FIP", "xFIP", "xERA", "GB%"],
         "bullpen_usage": str(BULLPEN),
-        "bullpen_rule": "strictly prior calendar days; no same-day/future usage",
+        "bullpen_rule": "strictly prior calendar days; outside observed team/date bounds is missing, not zero",
     }
     REPORT.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
     print(json.dumps({
