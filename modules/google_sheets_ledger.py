@@ -14,12 +14,14 @@ import json
 import os
 from typing import Iterable, Mapping, Any
 
+# Compact audit/tracking schema. Detailed pregame context (starters, park and weather)
+# belongs to the prediction/research data layer, not the betting ledger. V7 no longer
+# emits those six fields to Sheets, so keeping empty columns only adds noise.
 LEGACY_HEADERS = [
     "record_key", "snapshot_utc", "game_date", "game_pk", "away", "home", "market",
     "selection", "line", "odds", "prob_ml", "prob_mc", "prob_combined",
     "market_no_vig", "edge_pp", "ev_pct", "disagreement_pp", "score",
-    "starter_away", "starter_home", "park_factor", "temperature_f", "wind_mph",
-    "wind_direction", "model_version", "result_status", "result_value", "profit_units"
+    "model_version", "result_status", "result_value", "profit_units"
 ]
 SHEET_HEADERS = LEGACY_HEADERS + ["kelly_pct", "bankroll_mxn", "stake_mxn", "profit_mxn"]
 GOOGLE_SCOPES = [
