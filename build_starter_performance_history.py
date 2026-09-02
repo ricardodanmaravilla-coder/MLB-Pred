@@ -74,6 +74,9 @@ def _extract_game(game_pk: int):
     date = pd.to_datetime(((gd.get("datetime") or {}).get("officialDate")), errors="coerce")
     if pd.isna(date):
         return []
+    day_night = str(((gd.get("datetime") or {}).get("dayNight") or "")).strip().lower()
+    if day_night not in {"day", "night"}:
+        day_night = None
 
     live = data.get("liveData", {}) or {}
     box = live.get("boxscore", {}) or {}
@@ -97,6 +100,7 @@ def _extract_game(game_pk: int):
             "GameID": int(game_pk),
             "Date": pd.Timestamp(date).date().isoformat(),
             "Season": int(pd.Timestamp(date).year),
+            "DayNight": day_night,
             "Team": team,
             "Side": side,
             "PitcherID": pid,
@@ -144,11 +148,12 @@ def main():
     df = pd.DataFrame(rows).drop_duplicates(["GameID", "Side"], keep="last")
     request_cov = 1.0 - len(failures) / max(1, len(ids))
     game_cov = df["GameID"].nunique() / max(1, len(ids))
+    dn_cov = df["DayNight"].notna().mean() if "DayNight" in df.columns else 0.0
     if request_cov < 0.95 or game_cov < 0.90:
         raise RuntimeError(f"Cobertura insuficiente: requests={request_cov:.1%}, games={game_cov:.1%}")
     OUT.parent.mkdir(parents=True, exist_ok=True)
     df.sort_values(["Date", "GameID", "Side"]).to_csv(OUT, index=False)
-    print(f"OK: {OUT} rows={len(df)} games={df['GameID'].nunique()} request_coverage={request_cov:.1%} game_coverage={game_cov:.1%}")
+    print(f"OK: {OUT} rows={len(df)} games={df['GameID'].nunique()} request_coverage={request_cov:.1%} game_coverage={game_cov:.1%} daynight_coverage={dn_cov:.1%}")
 
 
 if __name__ == "__main__":
