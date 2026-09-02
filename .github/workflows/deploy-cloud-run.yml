@@ -6,8 +6,22 @@ on:
     branches: [main]
     paths:
       - 'web_app.py'
+      - 'Dockerfile'
+      - 'requirements.txt'
+      - 'build_bigdata.py'
+      - 'modules/ml_mlb.py'
+      - 'modules/bigdata_mlb.py'
+      - 'modules/bigdata_tracking.py'
+      - 'modules/web_service.py'
+      - 'modules/enriched_web_service.py'
       - 'modules/live_sheet_settlement.py'
       - 'modules/google_sheets_ledger.py'
+      - 'data/mlb_games.csv'
+      - 'data/mlb_batting.csv'
+      - 'data/mlb_pitching.csv'
+      - 'data/mlb_pitching_individual.csv'
+      - 'data/mlb_bullpen.csv'
+      - 'data/mlb_park_factors.csv'
       - '.github/workflows/deploy-cloud-run.yml'
 
 permissions:
@@ -41,11 +55,12 @@ jobs:
             --min 0 \
             --max 3 \
             --update-env-vars="MLB_DATA_DIR=data"
-      - name: Verify live settlement endpoint
+      - name: Verify model health and live settlement endpoint
         run: |
           URL=$(gcloud run services describe mlb-pred-v7 \
             --project "${{ secrets.GCP_PROJECT_ID }}" \
             --region "${{ vars.GCP_REGION || 'us-central1' }}" \
             --format='value(status.url)')
           test -n "$URL"
+          curl -fsS --max-time 180 "$URL/api/health"
           curl -fsS --max-time 180 -X POST "$URL/api/settle"
