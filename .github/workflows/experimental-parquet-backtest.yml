@@ -11,6 +11,7 @@ on:
       - 'backtest_experimental_parquet.py'
       - 'build_game_starters_history.py'
       - 'prepare_experimental_starters.py'
+      - 'build_starter_performance_history.py'
       - 'build_bullpen_usage_history.py'
       - 'prepare_experimental_bullpen.py'
       - 'enrich_experimental_context.py'
@@ -22,7 +23,7 @@ permissions:
 jobs:
   research-backtest:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -32,6 +33,8 @@ jobs:
         run: pip install -r requirements.txt
       - name: Populate exact historical starters
         run: python prepare_experimental_starters.py
+      - name: Build historical starter performance
+        run: python build_starter_performance_history.py
       - name: Build historical bullpen usage
         run: python prepare_experimental_bullpen.py
       - name: Build isolated research Parquet
@@ -45,6 +48,7 @@ jobs:
           forbidden = (
               'experimental_parquet',
               'prepare_experimental_starters',
+              'build_starter_performance_history',
               'prepare_experimental_bullpen',
               'enrich_experimental_context',
           )
