@@ -10,6 +10,7 @@ on:
       - 'modules/experimental_parquet.py'
       - 'backtest_experimental_parquet.py'
       - 'backtest_experimental_daynight.py'
+      - 'backtest_experimental_ablation.py'
       - 'build_game_starters_history.py'
       - 'prepare_experimental_starters.py'
       - 'build_starter_performance_history.py'
@@ -60,6 +61,7 @@ jobs:
               'enrich_experimental_context',
               'enrich_experimental_daynight',
               'backtest_experimental_daynight',
+              'backtest_experimental_ablation',
               'prepare_experimental_statcast',
           )
           for p in ('modules/web_service.py','modules/ml_mlb.py','web_app.py'):
@@ -68,25 +70,26 @@ jobs:
                   assert marker not in text, f'Production imports experiment {marker}: {p}'
           print('Production isolation OK')
           PY
-      - name: Run temporal holdout backtest
-        run: python backtest_experimental_daynight.py
-      - name: Print promotion gate
+      - name: Run exhaustive semantic ablation
+        run: python backtest_experimental_ablation.py
+      - name: Print ablation promotion gate
         run: |
           python - <<'PY'
           import json
           from pathlib import Path
-          p=json.loads(Path('artifacts/experimental_parquet_backtest.json').read_text())
+          p=json.loads(Path('artifacts/experimental_ablation_backtest.json').read_text())
           print('PROMOTE_TO_INTEGRATION_REVIEW=',p['PROMOTE_TO_INTEGRATION_REVIEW'])
           print('improvement_pct=',p['improvement_pct'])
+          print('combinations_tested=',p['combinations_tested'])
           print('selected_groups=',p.get('selected_groups'))
           print('selected=',p['selected_extra_features'])
           PY
       - name: Upload research artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: mlb-experimental-parquet-backtest
+          name: mlb-experimental-parquet-ablation
           path: |
             data/experimental/mlb_research_features_v1_coverage.json
             data/experimental/statcast_team_daily_real.csv
-            artifacts/experimental_parquet_backtest.json
+            artifacts/experimental_ablation_backtest.json
           if-no-files-found: error
