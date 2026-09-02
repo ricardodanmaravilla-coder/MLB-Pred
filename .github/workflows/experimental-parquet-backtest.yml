@@ -11,6 +11,9 @@ on:
       - 'backtest_experimental_parquet.py'
       - 'build_game_starters_history.py'
       - 'prepare_experimental_starters.py'
+      - 'build_bullpen_usage_history.py'
+      - 'prepare_experimental_bullpen.py'
+      - 'enrich_experimental_context.py'
       - '.github/workflows/experimental-parquet-backtest.yml'
 
 permissions:
@@ -19,7 +22,7 @@ permissions:
 jobs:
   research-backtest:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -29,16 +32,26 @@ jobs:
         run: pip install -r requirements.txt
       - name: Populate exact historical starters
         run: python prepare_experimental_starters.py
+      - name: Build historical bullpen usage
+        run: python prepare_experimental_bullpen.py
       - name: Build isolated research Parquet
         run: python -m modules.experimental_parquet
+      - name: Enrich Parquet with real pregame context
+        run: python enrich_experimental_context.py
       - name: Verify production isolation
         run: |
           python - <<'PY'
           from pathlib import Path
+          forbidden = (
+              'experimental_parquet',
+              'prepare_experimental_starters',
+              'prepare_experimental_bullpen',
+              'enrich_experimental_context',
+          )
           for p in ('modules/web_service.py','modules/ml_mlb.py','web_app.py'):
               text=Path(p).read_text(encoding='utf-8')
-              assert 'experimental_parquet' not in text, f'Production imports experiment: {p}'
-              assert 'prepare_experimental_starters' not in text, f'Production imports starter experiment: {p}'
+              for marker in forbidden:
+                  assert marker not in text, f'Production imports experiment {marker}: {p}'
           print('Production isolation OK')
           PY
       - name: Run temporal holdout backtest
