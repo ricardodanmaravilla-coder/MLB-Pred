@@ -26,6 +26,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: mlb-shadow-model-build
+  cancel-in-progress: false
+
 jobs:
   research-backtest:
     runs-on: ubuntu-latest
@@ -91,6 +95,19 @@ jobs:
           if 'ablation_best' not in w.get('robust_candidates', []):
               raise SystemExit('Frozen starter_day_night+team_context candidate did not pass walk-forward gate')
           subprocess.check_call(['python','train_shadow_candidate.py'])
+          PY
+      - name: Verify deployable Shadow bundle
+        run: |
+          test -s models/shadow_candidate.joblib
+          test -s models/shadow_candidate.json
+          test -s data/shadow/starter_performance_history.csv
+          python - <<'PY'
+          from modules.shadow_candidate import available, metadata
+          assert available(), 'Shadow bundle was built but is not loadable'
+          m = metadata()
+          assert m.get('version'), 'Shadow model version missing'
+          assert m.get('training_rows'), 'Shadow training row count missing'
+          print('Deployable isolated Shadow bundle OK:', m)
           PY
       - name: Commit shadow candidate artifact and starter history
         run: |
