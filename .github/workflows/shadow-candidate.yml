@@ -1,0 +1,58 @@
+name: MLB Shadow Candidate
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 16 * * *'
+    - cron: '*/30 18-23 * * *'
+    - cron: '*/30 0-6 * * *'
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: mlb-shadow-candidate
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '0 16 * * *'
+    runs-on: ubuntu-latest
+    steps:
+      - id: auth
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_WIF_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v3
+      - name: Run isolated candidate scanner
+        run: |
+          URL=$(gcloud run services describe mlb-pred-v7 \
+            --project "${{ secrets.GCP_PROJECT_ID }}" \
+            --region "${{ vars.GCP_REGION || 'us-central1' }}" \
+            --format='value(status.url)')
+          test -n "$URL"
+          RESPONSE=$(curl -fsS --max-time 600 -X POST "$URL/api/candidate/scan?persist=true")
+          echo "$RESPONSE"
+          echo "$RESPONSE" | grep -q '"mode":"shadow_candidate_only"'
+          echo "$RESPONSE" | grep -q '"production_write":false'
+
+  settle:
+    if: github.event_name == 'workflow_dispatch' || github.event.schedule != '0 16 * * *'
+    runs-on: ubuntu-latest
+    steps:
+      - id: auth
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_WIF_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v3
+      - name: Settle candidate picks only
+        run: |
+          URL=$(gcloud run services describe mlb-pred-v7 \
+            --project "${{ secrets.GCP_PROJECT_ID }}" \
+            --region "${{ vars.GCP_REGION || 'us-central1' }}" \
+            --format='value(status.url)')
+          test -n "$URL"
+          curl -fsS --max-time 180 -X POST "$URL/api/candidate/settle"
