@@ -11,6 +11,7 @@ on:
       - 'backtest_experimental_parquet.py'
       - 'backtest_experimental_daynight.py'
       - 'backtest_experimental_ablation.py'
+      - 'backtest_experimental_walkforward.py'
       - 'build_game_starters_history.py'
       - 'prepare_experimental_starters.py'
       - 'build_starter_performance_history.py'
@@ -62,6 +63,7 @@ jobs:
               'enrich_experimental_daynight',
               'backtest_experimental_daynight',
               'backtest_experimental_ablation',
+              'backtest_experimental_walkforward',
               'prepare_experimental_statcast',
           )
           for p in ('modules/web_service.py','modules/ml_mlb.py','web_app.py'):
@@ -72,24 +74,30 @@ jobs:
           PY
       - name: Run exhaustive semantic ablation
         run: python backtest_experimental_ablation.py
-      - name: Print ablation promotion gate
+      - name: Run multi-season walk-forward
+        run: python backtest_experimental_walkforward.py
+      - name: Print robustness gates
         run: |
           python - <<'PY'
           import json
           from pathlib import Path
-          p=json.loads(Path('artifacts/experimental_ablation_backtest.json').read_text())
-          print('PROMOTE_TO_INTEGRATION_REVIEW=',p['PROMOTE_TO_INTEGRATION_REVIEW'])
-          print('improvement_pct=',p['improvement_pct'])
-          print('combinations_tested=',p['combinations_tested'])
-          print('selected_groups=',p.get('selected_groups'))
-          print('selected=',p['selected_extra_features'])
+          a=json.loads(Path('artifacts/experimental_ablation_backtest.json').read_text())
+          w=json.loads(Path('artifacts/experimental_walkforward_backtest.json').read_text())
+          print('ABLATION_PROMOTE=',a['PROMOTE_TO_INTEGRATION_REVIEW'])
+          print('ablation_improvement_pct=',a['improvement_pct'])
+          print('ablation_selected_groups=',a.get('selected_groups'))
+          print('WALKFORWARD_PROMOTE=',w['PROMOTE_TO_INTEGRATION_REVIEW'])
+          print('robust_candidates=',w['robust_candidates'])
+          for name, result in w['candidates'].items():
+              print(name, 'mean=', result.get('mean_improvement_pct'), 'improved_seasons=', result.get('improved_seasons'), 'robust=', result.get('robust'))
           PY
       - name: Upload research artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: mlb-experimental-parquet-ablation
+          name: mlb-experimental-parquet-robustness
           path: |
             data/experimental/mlb_research_features_v1_coverage.json
             data/experimental/statcast_team_daily_real.csv
             artifacts/experimental_ablation_backtest.json
+            artifacts/experimental_walkforward_backtest.json
           if-no-files-found: error
