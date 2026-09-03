@@ -81,8 +81,14 @@ jobs:
           print('SHADOW_SHEET_ID=' + sheet)
           print('SHADOW_BANKROLL=' + bankroll)
           PY
-          test -n "$SHADOW_SHEET_ID"
           echo "THERUNDOWN_KEY=$THERUNDOWN_KEY_SECRET" >> "$GITHUB_ENV"
+
+      - name: Validate isolated runtime bindings
+        run: |
+          test -n "$THERUNDOWN_KEY"
+          test -n "$SHADOW_SHEET_ID"
+          test -n "$SHADOW_BANKROLL"
+          echo "Shadow runtime bindings resolved without exposing secret values."
 
       - name: Deploy isolated Shadow service
         env:
