@@ -16,6 +16,7 @@ on:
       - 'modules/live_sheet_settlement.py'
       - 'modules/google_sheets_ledger.py'
       - 'modules/pick_ledger.py'
+      - 'modules/therundown_odds.py'
       - 'models/shadow_candidate.joblib'
       - 'models/shadow_candidate.json'
       - 'data/shadow/starter_performance_history.csv'
@@ -55,12 +56,47 @@ jobs:
 
       - uses: google-github-actions/setup-gcloud@v3
 
-      - name: Deploy isolated Shadow service
+      - name: Resolve isolated runtime bindings
+        env:
+          PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          REGION: ${{ vars.GCP_REGION || 'us-central1' }}
+          THERUNDOWN_KEY_SECRET: ${{ secrets.THERUNDOWN_KEY }}
+          GOOGLE_SHEETS_ID_SECRET: ${{ secrets.GOOGLE_SHEETS_ID }}
         run: |
+          test -n "$THERUNDOWN_KEY_SECRET"
+          gcloud run services describe mlb-pred-v7 \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --format=json > /tmp/v7.json
+          python - <<'PY' >> "$GITHUB_ENV"
+          import json, os
+          p=json.load(open('/tmp/v7.json'))
+          spec=p.get('spec',{}).get('template',{}).get('spec',{})
+          print('SHADOW_RUNTIME_SA=' + str(spec.get('serviceAccountName') or ''))
+          containers=spec.get('containers') or []
+          envs=(containers[0].get('env') or []) if containers else []
+          vals={e.get('name'):e.get('value','') for e in envs if isinstance(e,dict)}
+          sheet=vals.get('GOOGLE_SHEETS_ID') or os.getenv('GOOGLE_SHEETS_ID_SECRET','')
+          bankroll=vals.get('BANKROLL_MXN') or '5000'
+          print('SHADOW_SHEET_ID=' + sheet)
+          print('SHADOW_BANKROLL=' + bankroll)
+          PY
+          test -n "$SHADOW_SHEET_ID"
+          echo "THERUNDOWN_KEY=$THERUNDOWN_KEY_SECRET" >> "$GITHUB_ENV"
+
+      - name: Deploy isolated Shadow service
+        env:
+          PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          REGION: ${{ vars.GCP_REGION || 'us-central1' }}
+        run: |
+          SA_ARG=()
+          if test -n "$SHADOW_RUNTIME_SA"; then
+            SA_ARG=(--service-account "$SHADOW_RUNTIME_SA")
+          fi
           gcloud run deploy mlb-pred-shadow \
             --source . \
-            --project "${{ secrets.GCP_PROJECT_ID }}" \
-            --region "${{ vars.GCP_REGION || 'us-central1' }}" \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
             --platform managed \
             --allow-unauthenticated \
             --port 8080 \
@@ -72,27 +108,56 @@ jobs:
             --max 2 \
             --command uvicorn \
             --args="web_shadow:app,--host,0.0.0.0,--port,8080,--workers,1,--timeout-keep-alive,75" \
-            --update-env-vars="MLB_DATA_DIR=data"
+            "${SA_ARG[@]}" \
+            --update-env-vars="MLB_DATA_DIR=data,THERUNDOWN_KEY=$THERUNDOWN_KEY,THERUNDOWN_AFFILIATE_IDS=19\,22\,23,GOOGLE_SHEETS_ID=$SHADOW_SHEET_ID,BANKROLL_MXN=$SHADOW_BANKROLL"
 
-      - name: Verify isolated Shadow runtime
+      - name: Verify isolated Shadow runtime and live dependencies
+        env:
+          PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          REGION: ${{ vars.GCP_REGION || 'us-central1' }}
         run: |
           URL=$(gcloud run services describe mlb-pred-shadow \
-            --project "${{ secrets.GCP_PROJECT_ID }}" \
-            --region "${{ vars.GCP_REGION || 'us-central1' }}" \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
             --format='value(status.url)')
           test -n "$URL"
-          HEALTH=$(curl -fsS --max-time 180 "$URL/api/health")
-          echo "$HEALTH"
-          echo "$HEALTH" | grep -q '"service_role":"shadow_only"'
-          echo "$HEALTH" | grep -q '"runtime_isolated_from_v7":true'
-          echo "$HEALTH" | grep -q '"production_endpoints_exposed":false'
-          echo "$HEALTH" | grep -q '"production_write":false'
-          echo "$HEALTH" | grep -q '"worksheet":"MLB_Candidate_Picks"'
-          echo "$HEALTH" | grep -q '"shadow_candidate_ready":true'
-          TEST=$(curl -fsS --max-time 600 -X POST "$URL/api/candidate/scan?persist=false")
-          echo "$TEST"
-          echo "$TEST" | grep -q '"mode":"shadow_candidate_only"'
-          echo "$TEST" | grep -q '"service":"mlb-pred-shadow"'
-          echo "$TEST" | grep -q '"runtime_isolated_from_v7":true'
-          echo "$TEST" | grep -q '"production_write":false'
-          echo "$TEST" | grep -q '"worksheet":"MLB_Candidate_Picks"'
+          curl -fsS --max-time 180 "$URL/api/health" -o /tmp/health.json
+          cat /tmp/health.json
+          python - <<'PY'
+          import json
+          d=json.load(open('/tmp/health.json'))
+          assert d.get('service_role') == 'shadow_only'
+          assert d.get('runtime_isolated_from_v7') is True
+          assert d.get('production_endpoints_exposed') is False
+          assert d.get('production_write') is False
+          assert d.get('worksheet') == 'MLB_Candidate_Picks'
+          assert d.get('shadow_candidate_ready') is True
+          assert d.get('odds_configured') is True
+          assert d.get('google_sheets_configured') is True
+          print('Shadow health OK; odds provider=', d.get('shadow_odds_provider'))
+          PY
+
+          curl -fsS --max-time 600 -X POST "$URL/api/candidate/scan?persist=true" -o /tmp/scan.json
+          cat /tmp/scan.json
+          python - <<'PY'
+          import json
+          d=json.load(open('/tmp/scan.json'))
+          assert d.get('mode') == 'shadow_candidate_only'
+          assert d.get('service') == 'mlb-pred-shadow'
+          assert d.get('runtime_isolated_from_v7') is True
+          assert d.get('production_write') is False
+          assert d.get('worksheet') == 'MLB_Candidate_Picks'
+          recs=d.get('recommendations') or []
+          diag=d.get('diagnostics') or []
+          errs=d.get('errors') or []
+          odds_errors=[e for e in errs if 'Cuotas/total no disponibles' in str(e)]
+          assert diag or recs, f'No evaluable Shadow markets; errors={errs[:3]}'
+          assert len(odds_errors) < max(1, len(errs)), 'All remaining games lack odds'
+          sheet=d.get('sheet')
+          if recs:
+              assert isinstance(sheet,dict) and sheet.get('ok') is True, f'Shadow sheet write failed: {sheet}'
+          print('Shadow scan OK recommendations=',len(recs),'diagnostics=',len(diag),'errors=',len(errs),'sheet=',sheet)
+          PY
+
+          curl -fsS --max-time 180 -X POST "$URL/api/candidate/settle" -o /tmp/settle.json
+          cat /tmp/settle.json
