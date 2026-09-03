@@ -19,7 +19,7 @@ jobs:
   shadow:
     runs-on: ubuntu-latest
     steps:
-      - name: Determine first-game timing
+      - name: Determine next pregame timing
         id: timing
         shell: bash
         run: |
@@ -37,41 +37,43 @@ jobs:
           except Exception as exc:
               print("scan_due=false")
               print(f"scan_date={today}")
-              print("first_game_utc=")
-              print("minutes_to_first=")
+              print("next_game_utc=")
+              print("minutes_to_next=")
               print(f"timing_error={type(exc).__name__}")
               print("settle_due=false")
               raise SystemExit(0)
 
-          starts = []
+          future = []
           for day in payload.get("dates", []):
               for game in day.get("games", []):
                   detailed = str(game.get("status", {}).get("detailedState") or "").strip().lower()
-                  if detailed in {"postponed", "cancelled", "canceled"}:
+                  if detailed in {"postponed", "cancelled", "canceled", "final", "game over", "completed early"}:
                       continue
                   raw = game.get("gameDate")
                   if not raw:
                       continue
                   try:
-                      starts.append(dt.datetime.fromisoformat(raw.replace("Z", "+00:00")))
+                      start = dt.datetime.fromisoformat(raw.replace("Z", "+00:00"))
                   except ValueError:
-                      pass
+                      continue
+                  if start > now:
+                      future.append(start)
 
-          if not starts:
+          if not future:
               print("scan_due=false")
               print(f"scan_date={today}")
-              print("first_game_utc=")
-              print("minutes_to_first=")
+              print("next_game_utc=")
+              print("minutes_to_next=")
           else:
-              first = min(starts)
-              minutes = (first - now).total_seconds() / 60.0
-              # Target = about one hour before first pitch. This remains eligible
-              # after a delayed scheduled job, right up until first pitch.
+              next_game = min(future)
+              minutes = (next_game - now).total_seconds() / 60.0
+              # Catch-up safe: if the first game has already started, use the next
+              # unstarted game. Shadow itself filters all started games from its slate.
               due = 0.0 < minutes <= 70.0
               print(f"scan_due={'true' if due else 'false'}")
               print(f"scan_date={today}")
-              print(f"first_game_utc={first.isoformat()}")
-              print(f"minutes_to_first={minutes:.2f}")
+              print(f"next_game_utc={next_game.isoformat()}")
+              print(f"minutes_to_next={minutes:.2f}")
 
           settle_window = (now.hour >= 18 or now.hour <= 6) and now.minute in {0, 30}
           print(f"settle_due={'true' if settle_window else 'false'}")
@@ -79,8 +81,8 @@ jobs:
 
       - name: Show timing decision
         run: |
-          echo "First game UTC: ${{ steps.timing.outputs.first_game_utc }}"
-          echo "Minutes to first game: ${{ steps.timing.outputs.minutes_to_first }}"
+          echo "Next unstarted game UTC: ${{ steps.timing.outputs.next_game_utc }}"
+          echo "Minutes to next game: ${{ steps.timing.outputs.minutes_to_next }}"
           echo "Candidate scan due: ${{ steps.timing.outputs.scan_due }}"
           echo "Candidate settlement due: ${{ steps.timing.outputs.settle_due }}"
 
@@ -131,9 +133,11 @@ jobs:
           echo "$HEALTH" | grep -q '"runtime_isolated_from_v7":true'
           echo "$HEALTH" | grep -q '"production_endpoints_exposed":false'
           echo "$HEALTH" | grep -q '"shadow_candidate_ready":true'
+          echo "$HEALTH" | grep -q '"odds_configured":true'
+          echo "$HEALTH" | grep -q '"google_sheets_configured":true'
           echo "$HEALTH" | grep -q '"worksheet":"MLB_Candidate_Picks"'
 
-      - name: Run isolated Shadow scanner one hour before first game
+      - name: Run isolated Shadow scanner before next unstarted game
         if: >-
           steps.cloudrun.outputs.url != '' &&
           (github.event_name == 'workflow_dispatch' ||
@@ -142,13 +146,26 @@ jobs:
         run: |
           RESPONSE=$(curl -fsS --max-time 600 -X POST "${{ steps.cloudrun.outputs.url }}/api/candidate/scan?persist=true")
           echo "$RESPONSE"
-          echo "$RESPONSE" | grep -q '"mode":"shadow_candidate_only"'
-          echo "$RESPONSE" | grep -q '"service":"mlb-pred-shadow"'
-          echo "$RESPONSE" | grep -q '"runtime_isolated_from_v7":true'
-          echo "$RESPONSE" | grep -q '"worksheet":"MLB_Candidate_Picks"'
-          echo "$RESPONSE" | grep -q '"production_write":false'
+          printf '%s' "$RESPONSE" > /tmp/shadow-scan.json
+          python - <<'PY'
+          import json
+          d=json.load(open('/tmp/shadow-scan.json'))
+          assert d.get('mode') == 'shadow_candidate_only'
+          assert d.get('service') == 'mlb-pred-shadow'
+          assert d.get('runtime_isolated_from_v7') is True
+          assert d.get('worksheet') == 'MLB_Candidate_Picks'
+          assert d.get('production_write') is False
+          recs=d.get('recommendations') or []
+          diag=d.get('diagnostics') or []
+          errs=d.get('errors') or []
+          assert diag or recs, f'No evaluable candidate markets: {errs[:3]}'
+          if recs:
+              sheet=d.get('sheet') or {}
+              assert sheet.get('ok') is True, f'Sheet write failed: {sheet}'
+          print('shadow recommendations=',len(recs),'diagnostics=',len(diag),'errors=',len(errs))
+          PY
           mkdir -p .shadow_scan_marker
-          printf '%s\n' "${{ steps.timing.outputs.scan_date }} ${{ steps.timing.outputs.first_game_utc }}" > .shadow_scan_marker/completed.txt
+          printf '%s\n' "${{ steps.timing.outputs.scan_date }} ${{ steps.timing.outputs.next_game_utc }}" > .shadow_scan_marker/completed.txt
 
       - name: Save daily shadow scan lock
         if: >-
