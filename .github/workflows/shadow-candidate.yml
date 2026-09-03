@@ -3,9 +3,9 @@ name: MLB Shadow Candidate
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 16 * * *'
-    - cron: '*/30 18-23 * * *'
-    - cron: '*/30 0-6 * * *'
+    # Check the MLB slate every 5 minutes. The timing gate below runs the
+    # candidate only once, approximately one hour before the first game.
+    - cron: '*/5 * * * *'
 
 permissions:
   contents: read
@@ -16,43 +16,136 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  scan:
-    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '0 16 * * *'
+  shadow:
     runs-on: ubuntu-latest
     steps:
+      - name: Determine first-game timing
+        id: timing
+        shell: bash
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import datetime as dt
+          import json
+          import urllib.request
+
+          now = dt.datetime.now(dt.timezone.utc)
+          today = now.date().isoformat()
+          url = f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={today}"
+          try:
+              with urllib.request.urlopen(url, timeout=15) as r:
+                  payload = json.load(r)
+          except Exception as exc:
+              print("scan_due=false")
+              print(f"scan_date={today}")
+              print("first_game_utc=")
+              print("minutes_to_first=")
+              print(f"timing_error={type(exc).__name__}")
+              raise SystemExit(0)
+
+          starts = []
+          for day in payload.get("dates", []):
+              for game in day.get("games", []):
+                  detailed = str(game.get("status", {}).get("detailedState") or "").strip().lower()
+                  if detailed in {"postponed", "cancelled", "canceled"}:
+                      continue
+                  raw = game.get("gameDate")
+                  if not raw:
+                      continue
+                  try:
+                      starts.append(dt.datetime.fromisoformat(raw.replace("Z", "+00:00")))
+                  except ValueError:
+                      pass
+
+          if not starts:
+              print("scan_due=false")
+              print(f"scan_date={today}")
+              print("first_game_utc=")
+              print("minutes_to_first=")
+          else:
+              first = min(starts)
+              minutes = (first - now).total_seconds() / 60.0
+              # With a 5-minute scheduler this normally fires within about
+              # five minutes of the one-hour target. The wider lower bound
+              # tolerates occasional GitHub Actions scheduling delays.
+              due = 50.0 <= minutes <= 65.0
+              print(f"scan_due={'true' if due else 'false'}")
+              print(f"scan_date={today}")
+              print(f"first_game_utc={first.isoformat()}")
+              print(f"minutes_to_first={minutes:.2f}")
+
+          settle_window = (now.hour >= 18 or now.hour <= 6) and now.minute in {0, 30}
+          print(f"settle_due={'true' if settle_window else 'false'}")
+          PY
+
+      - name: Show timing decision
+        run: |
+          echo "First game UTC: ${{ steps.timing.outputs.first_game_utc }}"
+          echo "Minutes to first game: ${{ steps.timing.outputs.minutes_to_first }}"
+          echo "Candidate scan due: ${{ steps.timing.outputs.scan_due }}"
+          echo "Candidate settlement due: ${{ steps.timing.outputs.settle_due }}"
+
+      - name: Restore daily shadow scan lock
+        id: scan_lock
+        if: github.event_name == 'schedule' && steps.timing.outputs.scan_due == 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: .shadow_scan_marker
+          key: mlb-shadow-scan-${{ steps.timing.outputs.scan_date }}
+
       - id: auth
+        if: >-
+          github.event_name == 'workflow_dispatch' ||
+          steps.timing.outputs.settle_due == 'true' ||
+          (steps.timing.outputs.scan_due == 'true' && steps.scan_lock.outputs.cache-hit != 'true')
         uses: google-github-actions/auth@v3
         with:
           workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
           service_account: ${{ secrets.GCP_WIF_SERVICE_ACCOUNT }}
-      - uses: google-github-actions/setup-gcloud@v3
-      - name: Run isolated candidate scanner
+
+      - name: Set up gcloud
+        if: steps.auth.outcome == 'success'
+        uses: google-github-actions/setup-gcloud@v3
+
+      - name: Resolve Cloud Run URL
+        id: cloudrun
+        if: steps.auth.outcome == 'success'
+        shell: bash
         run: |
           URL=$(gcloud run services describe mlb-pred-v7 \
             --project "${{ secrets.GCP_PROJECT_ID }}" \
             --region "${{ vars.GCP_REGION || 'us-central1' }}" \
             --format='value(status.url)')
           test -n "$URL"
-          RESPONSE=$(curl -fsS --max-time 600 -X POST "$URL/api/candidate/scan?persist=true")
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+
+      - name: Run isolated candidate scanner one hour before first game
+        if: >-
+          steps.cloudrun.outputs.url != '' &&
+          (github.event_name == 'workflow_dispatch' ||
+          (steps.timing.outputs.scan_due == 'true' && steps.scan_lock.outputs.cache-hit != 'true'))
+        shell: bash
+        run: |
+          RESPONSE=$(curl -fsS --max-time 600 -X POST "${{ steps.cloudrun.outputs.url }}/api/candidate/scan?persist=true")
           echo "$RESPONSE"
           echo "$RESPONSE" | grep -q '"mode":"shadow_candidate_only"'
           echo "$RESPONSE" | grep -q '"production_write":false'
+          mkdir -p .shadow_scan_marker
+          printf '%s\n' "${{ steps.timing.outputs.scan_date }} ${{ steps.timing.outputs.first_game_utc }}" > .shadow_scan_marker/completed.txt
 
-  settle:
-    if: github.event_name == 'workflow_dispatch' || github.event.schedule != '0 16 * * *'
-    runs-on: ubuntu-latest
-    steps:
-      - id: auth
-        uses: google-github-actions/auth@v3
+      - name: Save daily shadow scan lock
+        if: >-
+          github.event_name == 'schedule' &&
+          steps.timing.outputs.scan_due == 'true' &&
+          steps.scan_lock.outputs.cache-hit != 'true' &&
+          success()
+        uses: actions/cache/save@v4
         with:
-          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
-          service_account: ${{ secrets.GCP_WIF_SERVICE_ACCOUNT }}
-      - uses: google-github-actions/setup-gcloud@v3
+          path: .shadow_scan_marker
+          key: mlb-shadow-scan-${{ steps.timing.outputs.scan_date }}
+
       - name: Settle candidate picks only
+        if: >-
+          steps.cloudrun.outputs.url != '' &&
+          (github.event_name == 'workflow_dispatch' || steps.timing.outputs.settle_due == 'true')
         run: |
-          URL=$(gcloud run services describe mlb-pred-v7 \
-            --project "${{ secrets.GCP_PROJECT_ID }}" \
-            --region "${{ vars.GCP_REGION || 'us-central1' }}" \
-            --format='value(status.url)')
-          test -n "$URL"
-          curl -fsS --max-time 180 -X POST "$URL/api/candidate/settle"
+          curl -fsS --max-time 180 -X POST "${{ steps.cloudrun.outputs.url }}/api/candidate/settle"
