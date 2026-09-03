@@ -56,39 +56,61 @@ jobs:
 
       - uses: google-github-actions/setup-gcloud@v3
 
-      - name: Resolve isolated runtime bindings
+      - name: Resolve safe runtime bindings from V7
         env:
           PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
           REGION: ${{ vars.GCP_REGION || 'us-central1' }}
-          THERUNDOWN_KEY_SECRET: ${{ secrets.THERUNDOWN_KEY }}
-          GOOGLE_SHEETS_ID_SECRET: ${{ secrets.GOOGLE_SHEETS_ID }}
         run: |
-          test -n "$THERUNDOWN_KEY_SECRET"
           gcloud run services describe mlb-pred-v7 \
             --project "$PROJECT_ID" \
             --region "$REGION" \
             --format=json > /tmp/v7.json
+          V7_URL=$(gcloud run services describe mlb-pred-v7 \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --format='value(status.url)')
+          test -n "$V7_URL"
+          echo "MLB_PROD_URL=$V7_URL" >> "$GITHUB_ENV"
           python - <<'PY' >> "$GITHUB_ENV"
-          import json, os
+          import json
           p=json.load(open('/tmp/v7.json'))
           spec=p.get('spec',{}).get('template',{}).get('spec',{})
           print('SHADOW_RUNTIME_SA=' + str(spec.get('serviceAccountName') or ''))
           containers=spec.get('containers') or []
           envs=(containers[0].get('env') or []) if containers else []
-          vals={e.get('name'):e.get('value','') for e in envs if isinstance(e,dict)}
-          sheet=vals.get('GOOGLE_SHEETS_ID') or os.getenv('GOOGLE_SHEETS_ID_SECRET','')
-          bankroll=vals.get('BANKROLL_MXN') or '5000'
-          print('SHADOW_SHEET_ID=' + sheet)
-          print('SHADOW_BANKROLL=' + bankroll)
+          vals={e.get('name'):e.get('value','') for e in envs if isinstance(e,dict) and e.get('value') is not None}
+          # Sheet ID is configuration, not a credential. Prefer V7's configured value;
+          # retain the known MLB tracking workbook as a safe fallback.
+          print('SHADOW_SHEET_ID=' + str(vals.get('GOOGLE_SHEETS_ID') or '1VsB21QUsQL5EyXu7Sek5WVeNVznECiTuoIMMB4JXno4'))
+          print('SHADOW_BANKROLL=' + str(vals.get('BANKROLL_MXN') or '5000'))
+          names=[]
+          for e in envs:
+              if not isinstance(e,dict):
+                  continue
+              n=e.get('name')
+              if n in {'ODDS_API_KEY','THERUNDOWN_KEY','ODDS_API_IO_KEY','SHARPAPI_KEY','GOOGLE_SHEETS_ID','BANKROLL_MXN','GOOGLE_SERVICE_ACCOUNT_JSON'}:
+                  source='secret_ref' if e.get('valueFrom') else 'plain_value'
+                  names.append(f'{n}:{source}')
+          print('V7_BINDING_SUMMARY=' + ','.join(names))
           PY
-          echo "THERUNDOWN_KEY=$THERUNDOWN_KEY_SECRET" >> "$GITHUB_ENV"
 
-      - name: Validate isolated runtime bindings
+      - name: Validate read-only fallback and Sheets access target
         run: |
-          test -n "$THERUNDOWN_KEY"
+          test -n "$MLB_PROD_URL"
           test -n "$SHADOW_SHEET_ID"
           test -n "$SHADOW_BANKROLL"
-          echo "Shadow runtime bindings resolved without exposing secret values."
+          echo "V7 bindings present: $V7_BINDING_SUMMARY"
+          curl -fsS --max-time 180 "$MLB_PROD_URL/api/slate" -o /tmp/v7-slate.json
+          python - <<'PY'
+          import json
+          d=json.load(open('/tmp/v7-slate.json'))
+          games=d.get('games') or []
+          ml=sum(1 for g in games if g.get('cuota_loc') is not None and g.get('cuota_vis') is not None)
+          totals=sum(1 for g in games if g.get('linea_carreras') is not None)
+          print('V7 slate games=',len(games),'moneyline=',ml,'totals=',totals)
+          assert games, 'V7 slate is empty'
+          assert ml > 0 and totals > 0, 'V7 public slate has no usable live markets'
+          PY
 
       - name: Deploy isolated Shadow service
         env:
@@ -115,7 +137,7 @@ jobs:
             --command uvicorn \
             --args="web_shadow:app,--host,0.0.0.0,--port,8080,--workers,1,--timeout-keep-alive,75" \
             "${SA_ARG[@]}" \
-            --update-env-vars="MLB_DATA_DIR=data,THERUNDOWN_KEY=$THERUNDOWN_KEY,THERUNDOWN_AFFILIATE_IDS=19\,22\,23,GOOGLE_SHEETS_ID=$SHADOW_SHEET_ID,BANKROLL_MXN=$SHADOW_BANKROLL"
+            --update-env-vars="MLB_DATA_DIR=data,MLB_PROD_URL=$MLB_PROD_URL,GOOGLE_SHEETS_ID=$SHADOW_SHEET_ID,BANKROLL_MXN=$SHADOW_BANKROLL"
 
       - name: Verify isolated Shadow runtime and live dependencies
         env:
