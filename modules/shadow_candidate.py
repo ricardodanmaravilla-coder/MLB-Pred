@@ -19,14 +19,6 @@ MIN_SPLIT_IP = 5.0
 DN_METRICS = ("era", "whip", "k_pct", "bb_pct", "kbb_pct", "hr9")
 
 
-def _num(v, default=np.nan):
-    try:
-        x = float(v)
-        return x if np.isfinite(x) else default
-    except Exception:
-        return default
-
-
 def _agg(rows: pd.DataFrame):
     if rows is None or rows.empty:
         return None
@@ -133,16 +125,12 @@ def _metric(row, names):
     return np.nan
 
 
-def build_live_features(service, game: dict, off_h: float, off_a: float, pit_h: float, pit_a: float, game_date):
+def build_live_features(service, game: dict, home_code: str, away_code: str,
+                        off_h: float, off_a: float, pit_h: float, pit_a: float, game_date):
     a = _artifact()
     if a is None:
         raise RuntimeError("shadow candidate model artifact unavailable")
-    h = normalize_team(service.EQUIPOS_MAP.get(game["home"], "") if hasattr(service, "EQUIPOS_MAP") else "")
-    v = normalize_team(service.EQUIPOS_MAP.get(game["away"], "") if hasattr(service, "EQUIPOS_MAP") else "")
-    if not h or not v:
-        # web_service keeps EQUIPOS_MAP at module scope, so callers may pass normalized codes.
-        h = normalize_team(game.get("home_abbr") or game.get("home_code") or "")
-        v = normalize_team(game.get("away_abbr") or game.get("away_code") or "")
+    h, v = normalize_team(home_code), normalize_team(away_code)
     if not h or not v:
         raise RuntimeError("shadow team normalization unavailable")
 
@@ -176,11 +164,12 @@ def build_live_features(service, game: dict, off_h: float, off_a: float, pit_h: 
     return pd.DataFrame([[values.get(c, np.nan) for c in features]], columns=features), condition
 
 
-def predict(service, game: dict, off_h: float, off_a: float, pit_h: float, pit_a: float, game_date):
+def predict(service, game: dict, home_code: str, away_code: str,
+            off_h: float, off_a: float, pit_h: float, pit_a: float, game_date):
     a = _artifact()
     if a is None:
         return None
-    X, condition = build_live_features(service, game, off_h, off_a, pit_h, pit_a, game_date)
+    X, condition = build_live_features(service, game, home_code, away_code, off_h, off_a, pit_h, pit_a, game_date)
     p = float(a["classifier"].predict_proba(X)[0, 1])
     runs = float(a["runs_model"].predict(X)[0])
     diff = float(a["diff_model"].predict(X)[0])
