@@ -20,10 +20,11 @@ on:
       - 'enrich_experimental_context.py'
       - 'enrich_experimental_daynight.py'
       - 'prepare_experimental_statcast.py'
+      - 'train_shadow_candidate.py'
       - '.github/workflows/experimental-parquet-backtest.yml'
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   research-backtest:
@@ -55,15 +56,9 @@ jobs:
           python - <<'PY'
           from pathlib import Path
           forbidden = (
-              'experimental_parquet',
-              'prepare_experimental_starters',
-              'build_starter_performance_history',
-              'prepare_experimental_bullpen',
-              'enrich_experimental_context',
-              'enrich_experimental_daynight',
-              'backtest_experimental_daynight',
-              'backtest_experimental_ablation',
-              'backtest_experimental_walkforward',
+              'experimental_parquet','prepare_experimental_starters','build_starter_performance_history',
+              'prepare_experimental_bullpen','enrich_experimental_context','enrich_experimental_daynight',
+              'backtest_experimental_daynight','backtest_experimental_ablation','backtest_experimental_walkforward',
               'prepare_experimental_statcast',
           )
           for p in ('modules/web_service.py','modules/ml_mlb.py','web_app.py'):
@@ -84,13 +79,30 @@ jobs:
           a=json.loads(Path('artifacts/experimental_ablation_backtest.json').read_text())
           w=json.loads(Path('artifacts/experimental_walkforward_backtest.json').read_text())
           print('ABLATION_PROMOTE=',a['PROMOTE_TO_INTEGRATION_REVIEW'])
-          print('ablation_improvement_pct=',a['improvement_pct'])
-          print('ablation_selected_groups=',a.get('selected_groups'))
           print('WALKFORWARD_PROMOTE=',w['PROMOTE_TO_INTEGRATION_REVIEW'])
           print('robust_candidates=',w['robust_candidates'])
-          for name, result in w['candidates'].items():
-              print(name, 'mean=', result.get('mean_improvement_pct'), 'improved_seasons=', result.get('improved_seasons'), 'robust=', result.get('robust'))
           PY
+      - name: Train frozen shadow candidate
+        run: |
+          python - <<'PY'
+          import json, subprocess
+          from pathlib import Path
+          w=json.loads(Path('artifacts/experimental_walkforward_backtest.json').read_text())
+          if 'ablation_best' not in w.get('robust_candidates', []):
+              raise SystemExit('Frozen starter_day_night+team_context candidate did not pass walk-forward gate')
+          subprocess.check_call(['python','train_shadow_candidate.py'])
+          PY
+      - name: Commit shadow candidate artifact and starter history
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f models/shadow_candidate.joblib models/shadow_candidate.json data/shadow/starter_performance_history.csv
+          if git diff --cached --quiet; then
+            echo "Shadow candidate artifacts unchanged"
+          else
+            git commit -m "Refresh validated MLB shadow candidate"
+            git push
+          fi
       - name: Upload research artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -100,4 +112,5 @@ jobs:
             data/experimental/statcast_team_daily_real.csv
             artifacts/experimental_ablation_backtest.json
             artifacts/experimental_walkforward_backtest.json
+            models/shadow_candidate.json
           if-no-files-found: error
