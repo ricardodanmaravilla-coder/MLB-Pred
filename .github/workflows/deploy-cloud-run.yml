@@ -15,6 +15,7 @@ on:
       - 'modules/web_service.py'
       - 'modules/enriched_web_service.py'
       - 'modules/shadow_candidate.py'
+      - 'modules/candidate_isolation.py'
       - 'modules/live_sheet_settlement.py'
       - 'modules/google_sheets_ledger.py'
       - 'modules/pick_ledger.py'
@@ -60,7 +61,7 @@ jobs:
             --min 0 \
             --max 3 \
             --update-env-vars="MLB_DATA_DIR=data"
-      - name: Verify model health and live settlement endpoint
+      - name: Verify production and isolated candidate endpoints
         run: |
           URL=$(gcloud run services describe mlb-pred-v7 \
             --project "${{ secrets.GCP_PROJECT_ID }}" \
@@ -69,7 +70,12 @@ jobs:
           test -n "$URL"
           HEALTH=$(curl -fsS --max-time 180 "$URL/api/health")
           echo "$HEALTH"
+          echo "$HEALTH" | grep -q '"candidate_isolation":true'
           curl -fsS --max-time 180 -X POST "$URL/api/settle"
           if test -f models/shadow_candidate.joblib; then
             echo "$HEALTH" | grep -q '"shadow_candidate_ready":true'
+            CANDIDATE=$(curl -fsS --max-time 600 -X POST "$URL/api/candidate/scan?persist=false")
+            echo "$CANDIDATE"
+            echo "$CANDIDATE" | grep -q '"mode":"shadow_candidate_only"'
+            echo "$CANDIDATE" | grep -q '"production_write":false'
           fi
