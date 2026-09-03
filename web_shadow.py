@@ -18,20 +18,31 @@ SHADOW_WORKSHEET = "MLB_Candidate_Picks"
 
 
 class ShadowMLBWebService(EnrichedMLBWebService):
-    """Shadow-only runtime with its own live odds enrichment.
+    """Shadow-only runtime with independent compute and ledger.
 
-    It never calls V7 endpoints and never writes the production ledger. TheRundown is
-    used directly when available so the isolated service does not depend on V7's runtime
-    environment. Started games are excluded to prevent late/catch-up scans from creating
-    post-start recommendations.
+    Live odds are resolved in this order: Shadow's own configured provider, direct
+    TheRundown, then the production service's public /api/slate as a READ-ONLY market
+    fallback. The fallback copies only market fields; it never calls V7 scan/settle and
+    can never write MLB_Picks. Started games are excluded from Shadow recommendations.
     """
+
+    MARKET_FIELDS = (
+        "linea_carreras", "cuota_loc", "cuota_vis", "cuota_over", "cuota_under",
+        "spread_loc", "cuota_spread_loc", "spread_vis", "cuota_spread_vis",
+    )
 
     def health(self):
         data = super().health()
         therundown = bool(os.getenv("THERUNDOWN_KEY", "").strip())
         primary = bool(os.getenv("ODDS_API_KEY", "").strip())
-        data["odds_configured"] = bool(primary or therundown)
-        data["shadow_odds_provider"] = "the_odds_api" if primary else "therundown" if therundown else "none"
+        prod_fallback = bool(os.getenv("MLB_PROD_URL", "").strip())
+        data["odds_configured"] = bool(primary or therundown or prod_fallback)
+        data["shadow_odds_provider"] = (
+            "the_odds_api" if primary else
+            "therundown" if therundown else
+            "production_slate_read_only" if prod_fallback else "none"
+        )
+        data["production_slate_read_only_fallback"] = prod_fallback
         data["google_sheets_configured"] = bool(os.getenv("GOOGLE_SHEETS_ID", "").strip())
         return data
 
@@ -48,27 +59,25 @@ class ShadowMLBWebService(EnrichedMLBWebService):
         except Exception:
             return False
 
-    def slate(self):
-        games = [g for g in super().slate() if self._is_future_game(g)]
-        if not games or not os.getenv("THERUNDOWN_KEY", "").strip():
-            return games
+    @classmethod
+    def _market_complete(cls, game) -> bool:
+        return (
+            game.get("cuota_loc") is not None
+            and game.get("cuota_vis") is not None
+            and game.get("linea_carreras") is not None
+        )
 
+    def _fill_from_therundown(self, games):
+        if not games or not os.getenv("THERUNDOWN_KEY", "").strip():
+            return
         try:
             events = _fetch_therundown(requests.get)
         except Exception:
             events = []
-
         if not events:
-            return games
-
+            return
         for game in games:
-            # Keep any complete primary-provider market already present. Otherwise fill
-            # the missing market from Shadow's own TheRundown feed.
-            if (
-                game.get("cuota_loc") is not None
-                and game.get("cuota_vis") is not None
-                and game.get("linea_carreras") is not None
-            ):
+            if self._market_complete(game):
                 continue
             event = match_odds_game(
                 events,
@@ -81,16 +90,42 @@ class ShadowMLBWebService(EnrichedMLBWebService):
             )
             if event is not None:
                 game.update(market_from_event(event, american_to_decimal))
+
+    def _fill_from_production_slate(self, games):
+        base = os.getenv("MLB_PROD_URL", "").strip().rstrip("/")
+        if not base or not games or all(self._market_complete(g) for g in games):
+            return
+        try:
+            r = requests.get(f"{base}/api/slate", timeout=150)
+            r.raise_for_status()
+            payload = r.json()
+            prod_games = payload.get("games", []) if isinstance(payload, dict) else []
+        except Exception:
+            return
+
+        by_pk = {str(g.get("game_pk")): g for g in prod_games if isinstance(g, dict) and g.get("game_pk") is not None}
+        for game in games:
+            if self._market_complete(game):
+                continue
+            source = by_pk.get(str(game.get("game_pk")))
+            if not source:
+                continue
+            for field in self.MARKET_FIELDS:
+                if game.get(field) is None and source.get(field) is not None:
+                    game[field] = source.get(field)
+
+    def slate(self):
+        games = [g for g in super().slate() if self._is_future_game(g)]
+        self._fill_from_therundown(games)
+        self._fill_from_production_slate(games)
         return games
 
 
-app = FastAPI(title="MLB Shadow Candidate", version="1.1-shadow-only")
+app = FastAPI(title="MLB Shadow Candidate", version="1.2-shadow-only")
 
 
 @lru_cache(maxsize=1)
 def get_shadow_service() -> ShadowMLBWebService:
-    # Dedicated process-local service instance. This app never constructs or
-    # exposes the production V7 scanner/ledger endpoints.
     return ShadowMLBWebService()
 
 
@@ -125,7 +160,6 @@ def candidate_scan(persist: bool = True):
     """Run Shadow only. The only writable ledger is MLB_Candidate_Picks."""
     try:
         result = scan_candidate(get_shadow_service(), persist=persist)
-        # Defensive response invariants consumed by the scheduler.
         result["service"] = "mlb-pred-shadow"
         result["runtime_isolated_from_v7"] = True
         result["production_write"] = False
