@@ -14,8 +14,13 @@ on:
       - 'modules/bigdata_tracking.py'
       - 'modules/web_service.py'
       - 'modules/enriched_web_service.py'
+      - 'modules/shadow_candidate.py'
       - 'modules/live_sheet_settlement.py'
       - 'modules/google_sheets_ledger.py'
+      - 'modules/pick_ledger.py'
+      - 'models/shadow_candidate.joblib'
+      - 'models/shadow_candidate.json'
+      - 'data/shadow/starter_performance_history.csv'
       - 'data/mlb_games.csv'
       - 'data/mlb_batting.csv'
       - 'data/mlb_pitching.csv'
@@ -62,5 +67,9 @@ jobs:
             --region "${{ vars.GCP_REGION || 'us-central1' }}" \
             --format='value(status.url)')
           test -n "$URL"
-          curl -fsS --max-time 180 "$URL/api/health"
+          HEALTH=$(curl -fsS --max-time 180 "$URL/api/health")
+          echo "$HEALTH"
           curl -fsS --max-time 180 -X POST "$URL/api/settle"
+          if test -f models/shadow_candidate.joblib; then
+            echo "$HEALTH" | grep -q '"shadow_candidate_ready":true'
+          fi
