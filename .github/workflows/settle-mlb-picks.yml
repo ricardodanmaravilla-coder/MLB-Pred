@@ -2,9 +2,15 @@ name: Settle MLB Picks
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/settle-mlb-picks.yml'
+      - 'modules/live_sheet_settlement.py'
   schedule:
-    - cron: '*/30 18-23 * * *'
-    - cron: '*/30 0-6 * * *'
+    # Run all day. West-coast and extra-inning games can finish after 06:30 UTC;
+    # the previous window left a long gap until 18:00 UTC and stranded pending rows.
+    - cron: '*/30 * * * *'
 
 permissions:
   contents: read
@@ -31,4 +37,6 @@ jobs:
             --region "${{ vars.GCP_REGION || 'us-central1' }}" \
             --format='value(status.url)')
           test -n "$URL"
-          curl -fsS --max-time 180 -X POST "$URL/api/settle"
+          RESPONSE=$(curl -fsS --max-time 180 -X POST "$URL/api/settle")
+          echo "$RESPONSE"
+          echo "$RESPONSE" | grep -q '"ok":true'
