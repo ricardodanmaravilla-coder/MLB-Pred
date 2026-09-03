@@ -19,13 +19,25 @@ from modules.candidate_isolation import scan_production, scan_candidate
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-app = FastAPI(title="MLB Quant Analytics V7", version="7.4-isolated-shadow")
+app = FastAPI(title="MLB Quant Analytics V7", version="7.5-hard-isolated-shadow")
 if STATIC_DIR.exists():
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
 @lru_cache(maxsize=1)
 def get_service() -> EnrichedMLBWebService:
+    """Dedicated production V7 service instance."""
+    return EnrichedMLBWebService()
+
+
+@lru_cache(maxsize=1)
+def get_candidate_service() -> EnrichedMLBWebService:
+    """Dedicated Shadow service instance.
+
+    Shadow intentionally does not share mutable service/cache state with V7.
+    Both may read the same immutable source datasets and public odds feeds, but
+    their runtime objects and ledgers are separate.
+    """
     return EnrichedMLBWebService()
 
 
@@ -42,6 +54,7 @@ def health():
     data["production_settle_endpoint"] = "/api/settle"
     data["candidate_settle_endpoint"] = "/api/candidate/settle"
     data["candidate_isolation"] = True
+    data["candidate_service_isolated"] = get_candidate_service() is not get_service()
     return data
 
 
@@ -131,9 +144,9 @@ def scan(persist: bool = True):
 
 @app.post("/api/candidate/scan")
 def candidate_scan(persist: bool = True):
-    """Shadow candidate scanner. Writes only to MLB_Candidate_Picks."""
+    """Shadow scanner on its own service instance; writes only MLB_Candidate_Picks."""
     try:
-        result = scan_candidate(get_service(), persist=persist)
+        result = scan_candidate(get_candidate_service(), persist=persist)
         if persist:
             result["settlement"] = settle_pending_sheet({"worksheet": "MLB_Candidate_Picks"})
         return result
@@ -162,7 +175,9 @@ def candidate_settle():
 @app.post("/api/reload")
 def reload_model():
     try:
-        return get_service().reload()
+        production = get_service().reload()
+        candidate = get_candidate_service().reload()
+        return {"production": production, "candidate": candidate, "isolated": True}
     except Exception as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
