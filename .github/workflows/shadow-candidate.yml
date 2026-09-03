@@ -65,10 +65,8 @@ jobs:
           else:
               first = min(starts)
               minutes = (first - now).total_seconds() / 60.0
-              # Target = about one hour before first pitch. Unlike the old
-              # narrow 50-65 minute gate, this remains eligible after a delayed
-              # scheduled job, right up until first pitch. The daily lock still
-              # guarantees one Shadow scan only.
+              # Target = about one hour before first pitch. This remains eligible
+              # after a delayed scheduled job, right up until first pitch.
               due = 0.0 < minutes <= 70.0
               print(f"scan_due={'true' if due else 'false'}")
               print(f"scan_date={today}")
@@ -108,12 +106,12 @@ jobs:
         if: steps.auth.outcome == 'success'
         uses: google-github-actions/setup-gcloud@v3
 
-      - name: Resolve Cloud Run URL
+      - name: Resolve isolated Shadow Cloud Run URL
         id: cloudrun
         if: steps.auth.outcome == 'success'
         shell: bash
         run: |
-          URL=$(gcloud run services describe mlb-pred-v7 \
+          URL=$(gcloud run services describe mlb-pred-shadow \
             --project "${{ secrets.GCP_PROJECT_ID }}" \
             --region "${{ vars.GCP_REGION || 'us-central1' }}" \
             --format='value(status.url)')
@@ -129,9 +127,11 @@ jobs:
         run: |
           HEALTH=$(curl -fsS --max-time 180 "${{ steps.cloudrun.outputs.url }}/api/health")
           echo "$HEALTH"
-          echo "$HEALTH" | grep -q '"candidate_isolation":true'
-          echo "$HEALTH" | grep -q '"candidate_service_isolated":true'
+          echo "$HEALTH" | grep -q '"service_role":"shadow_only"'
+          echo "$HEALTH" | grep -q '"runtime_isolated_from_v7":true'
+          echo "$HEALTH" | grep -q '"production_endpoints_exposed":false'
           echo "$HEALTH" | grep -q '"shadow_candidate_ready":true'
+          echo "$HEALTH" | grep -q '"worksheet":"MLB_Candidate_Picks"'
 
       - name: Run isolated Shadow scanner one hour before first game
         if: >-
@@ -143,6 +143,8 @@ jobs:
           RESPONSE=$(curl -fsS --max-time 600 -X POST "${{ steps.cloudrun.outputs.url }}/api/candidate/scan?persist=true")
           echo "$RESPONSE"
           echo "$RESPONSE" | grep -q '"mode":"shadow_candidate_only"'
+          echo "$RESPONSE" | grep -q '"service":"mlb-pred-shadow"'
+          echo "$RESPONSE" | grep -q '"runtime_isolated_from_v7":true'
           echo "$RESPONSE" | grep -q '"worksheet":"MLB_Candidate_Picks"'
           echo "$RESPONSE" | grep -q '"production_write":false'
           mkdir -p .shadow_scan_marker
@@ -164,4 +166,6 @@ jobs:
           steps.cloudrun.outputs.url != '' &&
           (github.event_name == 'workflow_dispatch' || steps.timing.outputs.settle_due == 'true')
         run: |
-          curl -fsS --max-time 180 -X POST "${{ steps.cloudrun.outputs.url }}/api/candidate/settle"
+          RESPONSE=$(curl -fsS --max-time 180 -X POST "${{ steps.cloudrun.outputs.url }}/api/candidate/settle")
+          echo "$RESPONSE"
+          echo "$RESPONSE" | grep -q '"production_write":false'
