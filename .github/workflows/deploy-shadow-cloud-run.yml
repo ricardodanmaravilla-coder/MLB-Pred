@@ -1,0 +1,98 @@
+name: Deploy MLB Shadow to Cloud Run
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'web_shadow.py'
+      - 'Dockerfile'
+      - 'requirements.txt'
+      - 'build_bigdata.py'
+      - 'modules/web_service.py'
+      - 'modules/enriched_web_service.py'
+      - 'modules/shadow_candidate.py'
+      - 'modules/candidate_isolation.py'
+      - 'modules/live_sheet_settlement.py'
+      - 'modules/google_sheets_ledger.py'
+      - 'modules/pick_ledger.py'
+      - 'models/shadow_candidate.joblib'
+      - 'models/shadow_candidate.json'
+      - 'data/shadow/starter_performance_history.csv'
+      - 'data/mlb_games.csv'
+      - 'data/mlb_batting.csv'
+      - 'data/mlb_pitching.csv'
+      - 'data/mlb_pitching_individual.csv'
+      - 'data/mlb_bullpen.csv'
+      - 'data/mlb_park_factors.csv'
+      - '.github/workflows/deploy-shadow-cloud-run.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-mlb-shadow
+  cancel-in-progress: true
+
+jobs:
+  deploy-shadow:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Require deployable Shadow bundle
+        run: |
+          test -s models/shadow_candidate.joblib
+          test -s models/shadow_candidate.json
+          test -s data/shadow/starter_performance_history.csv
+
+      - id: auth
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_WIF_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v3
+
+      - name: Deploy isolated Shadow service
+        run: |
+          gcloud run deploy mlb-pred-shadow \
+            --source . \
+            --project "${{ secrets.GCP_PROJECT_ID }}" \
+            --region "${{ vars.GCP_REGION || 'us-central1' }}" \
+            --platform managed \
+            --allow-unauthenticated \
+            --port 8080 \
+            --cpu 2 \
+            --memory 2Gi \
+            --concurrency 2 \
+            --timeout 900 \
+            --min 0 \
+            --max 2 \
+            --command uvicorn \
+            --args="web_shadow:app,--host,0.0.0.0,--port,8080,--workers,1,--timeout-keep-alive,75" \
+            --update-env-vars="MLB_DATA_DIR=data"
+
+      - name: Verify isolated Shadow runtime
+        run: |
+          URL=$(gcloud run services describe mlb-pred-shadow \
+            --project "${{ secrets.GCP_PROJECT_ID }}" \
+            --region "${{ vars.GCP_REGION || 'us-central1' }}" \
+            --format='value(status.url)')
+          test -n "$URL"
+          HEALTH=$(curl -fsS --max-time 180 "$URL/api/health")
+          echo "$HEALTH"
+          echo "$HEALTH" | grep -q '"service_role":"shadow_only"'
+          echo "$HEALTH" | grep -q '"runtime_isolated_from_v7":true'
+          echo "$HEALTH" | grep -q '"production_endpoints_exposed":false'
+          echo "$HEALTH" | grep -q '"production_write":false'
+          echo "$HEALTH" | grep -q '"worksheet":"MLB_Candidate_Picks"'
+          echo "$HEALTH" | grep -q '"shadow_candidate_ready":true'
+          TEST=$(curl -fsS --max-time 600 -X POST "$URL/api/candidate/scan?persist=false")
+          echo "$TEST"
+          echo "$TEST" | grep -q '"mode":"shadow_candidate_only"'
+          echo "$TEST" | grep -q '"service":"mlb-pred-shadow"'
+          echo "$TEST" | grep -q '"runtime_isolated_from_v7":true'
+          echo "$TEST" | grep -q '"production_write":false'
+          echo "$TEST" | grep -q '"worksheet":"MLB_Candidate_Picks"'
