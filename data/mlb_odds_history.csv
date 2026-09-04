@@ -503,3 +503,15 @@ snapshot_utc,event_id,commence_time_utc,home,away,book,market,selection,line,odd
 2026-09-03T22:37:52.771283Z,823907,2026-09-04T02:10:00Z,Los Angeles Dodgers,St. Louis Cardinals,Production consensus,spreads,St. Louis Cardinals,1.5,110,2.1
 2026-09-03T22:37:52.771283Z,823907,2026-09-04T02:10:00Z,Los Angeles Dodgers,St. Louis Cardinals,Production consensus,totals,Over,7.5,-108,1.93
 2026-09-03T22:37:52.771283Z,823907,2026-09-04T02:10:00Z,Los Angeles Dodgers,St. Louis Cardinals,Production consensus,totals,Under,7.5,-112,1.89
+2026-09-04T01:01:50.460398Z,823095,2026-09-04T01:40:00Z,Seattle Mariners,Athletics,Production consensus,h2h,Athletics,,181,2.81
+2026-09-04T01:01:50.460398Z,823095,2026-09-04T01:40:00Z,Seattle Mariners,Athletics,Production consensus,h2h,Seattle Mariners,,-217,1.46
+2026-09-04T01:01:50.460398Z,823095,2026-09-04T01:40:00Z,Seattle Mariners,Athletics,Production consensus,spreads,Athletics,1.5,-125,1.8
+2026-09-04T01:01:50.460398Z,823095,2026-09-04T01:40:00Z,Seattle Mariners,Athletics,Production consensus,spreads,Seattle Mariners,-1.5,105,2.05
+2026-09-04T01:01:50.460398Z,823095,2026-09-04T01:40:00Z,Seattle Mariners,Athletics,Production consensus,totals,Over,7.5,-102,1.98
+2026-09-04T01:01:50.460398Z,823095,2026-09-04T01:40:00Z,Seattle Mariners,Athletics,Production consensus,totals,Under,7.5,-119,1.84
+2026-09-04T01:01:50.460398Z,823907,2026-09-04T02:10:00Z,Los Angeles Dodgers,St. Louis Cardinals,Production consensus,h2h,Los Angeles Dodgers,,-294,1.34
+2026-09-04T01:01:50.460398Z,823907,2026-09-04T02:10:00Z,Los Angeles Dodgers,St. Louis Cardinals,Production consensus,h2h,St. Louis Cardinals,,234,3.34
+2026-09-04T01:01:50.460398Z,823907,2026-09-04T02:10:00Z,Los Angeles Dodgers,St. Louis Cardinals,Production consensus,spreads,Los Angeles Dodgers,-1.5,-132,1.76
+2026-09-04T01:01:50.460398Z,823907,2026-09-04T02:10:00Z,Los Angeles Dodgers,St. Louis Cardinals,Production consensus,spreads,St. Louis Cardinals,1.5,110,2.1
+2026-09-04T01:01:50.460398Z,823907,2026-09-04T02:10:00Z,Los Angeles Dodgers,St. Louis Cardinals,Production consensus,totals,Over,7.5,-104,1.96
+2026-09-04T01:01:50.460398Z,823907,2026-09-04T02:10:00Z,Los Angeles Dodgers,St. Louis Cardinals,Production consensus,totals,Under,7.5,-115,1.87
