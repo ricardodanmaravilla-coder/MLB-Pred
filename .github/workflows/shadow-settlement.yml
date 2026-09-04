@@ -1,0 +1,60 @@
+name: Settle MLB Shadow Picks
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/shadow-settlement.yml'
+  schedule:
+    # Run independently from the candidate scanner. Scheduled runs may be delayed,
+    # so every invocation settles unconditionally instead of checking wall-clock minutes.
+    - cron: '*/30 * * * *'
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: settle-mlb-shadow-picks
+  cancel-in-progress: false
+
+jobs:
+  settle-shadow:
+    runs-on: ubuntu-latest
+    steps:
+      - id: auth
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_WIF_SERVICE_ACCOUNT }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v3
+
+      - name: Resolve isolated Shadow Cloud Run URL
+        id: cloudrun
+        shell: bash
+        run: |
+          URL=$(gcloud run services describe mlb-pred-shadow \
+            --project "${{ secrets.GCP_PROJECT_ID }}" \
+            --region "${{ vars.GCP_REGION || 'us-central1' }}" \
+            --format='value(status.url)')
+          test -n "$URL"
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+
+      - name: Settle MLB_Candidate_Picks only
+        shell: bash
+        run: |
+          RESPONSE=$(curl -fsS --max-time 180 -X POST "${{ steps.cloudrun.outputs.url }}/api/candidate/settle")
+          echo "$RESPONSE"
+          printf '%s' "$RESPONSE" > /tmp/shadow-settle.json
+          python - <<'PY'
+          import json
+          d = json.load(open('/tmp/shadow-settle.json'))
+          assert d.get('production_write') is False, d
+          worksheet = d.get('worksheet') or (d.get('sheet') or {}).get('worksheet')
+          if worksheet is not None:
+              assert worksheet == 'MLB_Candidate_Picks', d
+          assert d.get('ok', True) is True, d
+          print('Shadow settlement isolated from production:', d)
+          PY
