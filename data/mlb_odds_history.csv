@@ -773,3 +773,15 @@ snapshot_utc,event_id,commence_time_utc,home,away,book,market,selection,line,odd
 2026-09-05T01:00:45.130485Z,823905,2026-09-05T02:10:00Z,Los Angeles Dodgers,Washington Nationals,Production consensus,spreads,Washington Nationals,1.5,102,2.02
 2026-09-05T01:00:45.130485Z,823905,2026-09-05T02:10:00Z,Los Angeles Dodgers,Washington Nationals,Production consensus,totals,Over,8.0,-108,1.93
 2026-09-05T01:00:45.130485Z,823905,2026-09-05T02:10:00Z,Los Angeles Dodgers,Washington Nationals,Production consensus,totals,Under,8.0,-112,1.89
+2026-09-05T13:53:43.944732Z,823577,2026-09-05T20:10:00Z,New York Mets,San Francisco Giants,Production consensus,h2h,New York Mets,,-185,1.54
+2026-09-05T13:53:43.944732Z,823577,2026-09-05T20:10:00Z,New York Mets,San Francisco Giants,Production consensus,h2h,San Francisco Giants,,154,2.54
+2026-09-05T13:53:43.944732Z,823577,2026-09-05T20:10:00Z,New York Mets,San Francisco Giants,Production consensus,spreads,New York Mets,-1.5,118,2.18
+2026-09-05T13:53:43.944732Z,823577,2026-09-05T20:10:00Z,New York Mets,San Francisco Giants,Production consensus,spreads,San Francisco Giants,1.5,-141,1.71
+2026-09-05T13:53:43.944732Z,823577,2026-09-05T20:10:00Z,New York Mets,San Francisco Giants,Production consensus,totals,Over,8.0,-105,1.95
+2026-09-05T13:53:43.944732Z,823577,2026-09-05T20:10:00Z,New York Mets,San Francisco Giants,Production consensus,totals,Under,8.0,-115,1.87
+2026-09-05T13:53:43.944732Z,823823,2026-09-05T20:10:00Z,Miami Marlins,Chicago Cubs,Production consensus,h2h,Chicago Cubs,,-139,1.72
+2026-09-05T13:53:43.944732Z,823823,2026-09-05T20:10:00Z,Miami Marlins,Chicago Cubs,Production consensus,h2h,Miami Marlins,,118,2.18
+2026-09-05T13:53:43.944732Z,823823,2026-09-05T20:10:00Z,Miami Marlins,Chicago Cubs,Production consensus,spreads,Chicago Cubs,-1.5,125,2.25
+2026-09-05T13:53:43.944732Z,823823,2026-09-05T20:10:00Z,Miami Marlins,Chicago Cubs,Production consensus,spreads,Miami Marlins,1.5,-145,1.69
+2026-09-05T13:53:43.944732Z,823823,2026-09-05T20:10:00Z,Miami Marlins,Chicago Cubs,Production consensus,totals,Over,8.5,-102,1.98
+2026-09-05T13:53:43.944732Z,823823,2026-09-05T20:10:00Z,Miami Marlins,Chicago Cubs,Production consensus,totals,Under,8.5,-118,1.85
