@@ -755,3 +755,21 @@ snapshot_utc,event_id,commence_time_utc,home,away,book,market,selection,line,odd
 2026-09-04T22:23:23.401350Z,823905,2026-09-05T02:10:00Z,Los Angeles Dodgers,Washington Nationals,Production consensus,spreads,Washington Nationals,1.5,100,2.0
 2026-09-04T22:23:23.401350Z,823905,2026-09-05T02:10:00Z,Los Angeles Dodgers,Washington Nationals,Production consensus,totals,Over,8.0,-109,1.92
 2026-09-04T22:23:23.401350Z,823905,2026-09-05T02:10:00Z,Los Angeles Dodgers,Washington Nationals,Production consensus,totals,Under,8.0,-110,1.91
+2026-09-05T01:00:45.130485Z,823256,2026-09-05T01:40:00Z,San Diego Padres,New York Yankees,Production consensus,h2h,New York Yankees,,-110,1.91
+2026-09-05T01:00:45.130485Z,823256,2026-09-05T01:40:00Z,San Diego Padres,New York Yankees,Production consensus,h2h,San Diego Padres,,-105,1.95
+2026-09-05T01:00:45.130485Z,823256,2026-09-05T01:40:00Z,San Diego Padres,New York Yankees,Production consensus,spreads,New York Yankees,-1.5,152,2.52
+2026-09-05T01:00:45.130485Z,823256,2026-09-05T01:40:00Z,San Diego Padres,New York Yankees,Production consensus,spreads,San Diego Padres,1.5,-182,1.55
+2026-09-05T01:00:45.130485Z,823256,2026-09-05T01:40:00Z,San Diego Padres,New York Yankees,Production consensus,totals,Over,7.5,100,2.0
+2026-09-05T01:00:45.130485Z,823256,2026-09-05T01:40:00Z,San Diego Padres,New York Yankees,Production consensus,totals,Under,7.5,-120,1.83
+2026-09-05T01:00:45.130485Z,823093,2026-09-05T02:10:00Z,Seattle Mariners,Athletics,Production consensus,h2h,Athletics,,192,2.92
+2026-09-05T01:00:45.130485Z,823093,2026-09-05T02:10:00Z,Seattle Mariners,Athletics,Production consensus,h2h,Seattle Mariners,,-233,1.43
+2026-09-05T01:00:45.130485Z,823093,2026-09-05T02:10:00Z,Seattle Mariners,Athletics,Production consensus,spreads,Athletics,1.5,-125,1.8
+2026-09-05T01:00:45.130485Z,823093,2026-09-05T02:10:00Z,Seattle Mariners,Athletics,Production consensus,spreads,Seattle Mariners,-1.5,104,2.04
+2026-09-05T01:00:45.130485Z,823093,2026-09-05T02:10:00Z,Seattle Mariners,Athletics,Production consensus,totals,Over,7.0,-120,1.83
+2026-09-05T01:00:45.130485Z,823093,2026-09-05T02:10:00Z,Seattle Mariners,Athletics,Production consensus,totals,Under,7.0,-102,1.98
+2026-09-05T01:00:45.130485Z,823905,2026-09-05T02:10:00Z,Los Angeles Dodgers,Washington Nationals,Production consensus,h2h,Los Angeles Dodgers,,-263,1.38
+2026-09-05T01:00:45.130485Z,823905,2026-09-05T02:10:00Z,Los Angeles Dodgers,Washington Nationals,Production consensus,h2h,Washington Nationals,,222,3.22
+2026-09-05T01:00:45.130485Z,823905,2026-09-05T02:10:00Z,Los Angeles Dodgers,Washington Nationals,Production consensus,spreads,Los Angeles Dodgers,-1.5,-122,1.82
+2026-09-05T01:00:45.130485Z,823905,2026-09-05T02:10:00Z,Los Angeles Dodgers,Washington Nationals,Production consensus,spreads,Washington Nationals,1.5,102,2.02
+2026-09-05T01:00:45.130485Z,823905,2026-09-05T02:10:00Z,Los Angeles Dodgers,Washington Nationals,Production consensus,totals,Over,8.0,-108,1.93
+2026-09-05T01:00:45.130485Z,823905,2026-09-05T02:10:00Z,Los Angeles Dodgers,Washington Nationals,Production consensus,totals,Under,8.0,-112,1.89
