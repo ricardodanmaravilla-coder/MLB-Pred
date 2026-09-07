@@ -74,6 +74,7 @@ def scan_production(service, persist: bool = True) -> dict[str, Any]:
     return {
         "date": slate_date().isoformat(),
         "mode": "production_v7_only",
+        "games_seen": len(games),
         "recommendations": accepted,
         "diagnostics": sorted(diagnostics, key=_score, reverse=True)[:12],
         "errors": errors,
@@ -129,6 +130,7 @@ def scan_candidate(service, persist: bool = True) -> dict[str, Any]:
     return {
         "date": slate_date().isoformat(),
         "mode": "shadow_candidate_only",
+        "games_seen": len(games),
         "ready": True,
         "model": shadow_metadata(),
         "worksheet": "MLB_Candidate_Picks",
