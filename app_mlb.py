@@ -254,7 +254,7 @@ def calcular_criterio_kelly(probabilidad_real, cuota_decimal, fraccion=0.25, pro
         if b <= 0 or decisions <= 0:
             return 0.0
         kelly = (b * p - q) / (b * decisions)
-        return round(max(0.0, kelly * fraccion) * 100.0, 2)
+        return float(round(max(0.0, kelly * fraccion) * 100.0))
     except Exception:
         return 0.0
 
