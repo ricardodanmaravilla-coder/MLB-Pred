@@ -9,8 +9,16 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from modules import multi_odds
+from modules.therundown_odds import _fetch_therundown, install_therundown_provider
+
+# Activate all configured odds providers before importing the production service.
+# This is important when TheRundown is the only configured provider because it
+# opens the legacy ODDS_API_KEY gate with the multi-source sentinel before
+# modules.web_service captures its environment configuration at import time.
+install_therundown_provider()
+multi_odds.install_requests_bridge()
+
 from modules.game_context import market_from_event, match_odds_game
-from modules.therundown_odds import _fetch_therundown
 from modules.enriched_web_service import EnrichedMLBWebService
 from modules.web_service import american_to_decimal
 from modules.live_sheet_settlement import settle_pending_sheet
