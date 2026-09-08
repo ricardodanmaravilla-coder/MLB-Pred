@@ -14,6 +14,37 @@ def _score(row: dict[str, Any]) -> float:
         return -999.0
 
 
+def _diagnostic_rows(diagnostics: list[dict[str, Any]], accepted: list[dict[str, Any]], max_rejected: int = 12) -> list[dict[str, Any]]:
+    """Always expose every accepted pick, then append the best rejected rows.
+
+    Previously diagnostics were globally truncated to the top 12 scores. A rejected
+    candidate could therefore displace an accepted wager from the diagnostics table,
+    making the number of PICK rows disagree with the recommendations list.
+    """
+    accepted_keys = {
+        (
+            row.get("game_pk"), row.get("mercado"), row.get("apuesta"),
+            row.get("linea"), row.get("cuota"),
+        )
+        for row in accepted
+    }
+    accepted_diag = []
+    rejected_diag = []
+    for row in diagnostics:
+        key = (
+            row.get("game_pk"), row.get("mercado"), row.get("apuesta"),
+            row.get("linea"), row.get("cuota"),
+        )
+        if bool(row.get("accepted")) or key in accepted_keys:
+            accepted_diag.append(row)
+        else:
+            rejected_diag.append(row)
+
+    accepted_diag = sorted(accepted_diag, key=_score, reverse=True)
+    rejected_diag = sorted(rejected_diag, key=_score, reverse=True)[:max_rejected]
+    return accepted_diag + rejected_diag
+
+
 def _ledger_row(row: dict[str, Any], model_version: str) -> dict[str, Any]:
     away, home = str(row.get("partido") or " @ ").split(" @ ", 1)
     return {
@@ -62,17 +93,12 @@ def scan_production(service, persist: bool = True) -> dict[str, Any]:
             })
 
     # Keep every wager that actually passed the calibrated acceptance filters.
-    # The old [:3] truncation caused diagnostics to show more PICK rows than the
-    # recommendations list and silently prevented qualified picks from being persisted.
     accepted = sorted(accepted, key=_score, reverse=True)
     ledger_status = None
     if persist and accepted:
         rows = [_ledger_row(row, "v7-cloudrun") for row in accepted]
         try:
             append_snapshot(rows)
-            # append_snapshot intentionally treats Google Sheets as a secondary sink
-            # and historically hid its status. Run an idempotent sync here as well so
-            # the API can report the real Sheets result to the dashboard/operator.
             google_status = sync_google_snapshot(rows, worksheet="MLB_Picks")
             ledger_status = {
                 "ok": bool(google_status.get("ok")),
@@ -93,7 +119,7 @@ def scan_production(service, persist: bool = True) -> dict[str, Any]:
         "mode": "production_v7_only",
         "games_seen": len(games),
         "recommendations": accepted,
-        "diagnostics": sorted(diagnostics, key=_score, reverse=True)[:12],
+        "diagnostics": _diagnostic_rows(diagnostics, accepted),
         "errors": errors,
         "persisted": bool(persist),
         "ledger": ledger_status,
@@ -152,7 +178,7 @@ def scan_candidate(service, persist: bool = True) -> dict[str, Any]:
         "model": shadow_metadata(),
         "worksheet": "MLB_Candidate_Picks",
         "recommendations": accepted,
-        "diagnostics": sorted(diagnostics, key=_score, reverse=True)[:12],
+        "diagnostics": _diagnostic_rows(diagnostics, accepted),
         "errors": errors,
         "persisted": bool(persist),
         "sheet": sheet_status,
