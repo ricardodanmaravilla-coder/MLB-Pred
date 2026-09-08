@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from .game_context import slate_date
-from .pick_ledger import append_snapshot, append_shadow_snapshot
+from .pick_ledger import append_snapshot, append_shadow_snapshot, sync_google_snapshot
 from .shadow_candidate import available as shadow_available, metadata as shadow_metadata
 
 
@@ -61,15 +61,32 @@ def scan_production(service, persist: bool = True) -> dict[str, Any]:
                 "error": str(exc)[:200],
             })
 
-    accepted = sorted(accepted, key=_score, reverse=True)[:3]
+    # Keep every wager that actually passed the calibrated acceptance filters.
+    # The old [:3] truncation caused diagnostics to show more PICK rows than the
+    # recommendations list and silently prevented qualified picks from being persisted.
+    accepted = sorted(accepted, key=_score, reverse=True)
     ledger_status = None
     if persist and accepted:
         rows = [_ledger_row(row, "v7-cloudrun") for row in accepted]
         try:
             append_snapshot(rows)
-            ledger_status = {"ok": True, "rows": len(rows), "worksheet": "MLB_Picks"}
+            # append_snapshot intentionally treats Google Sheets as a secondary sink
+            # and historically hid its status. Run an idempotent sync here as well so
+            # the API can report the real Sheets result to the dashboard/operator.
+            google_status = sync_google_snapshot(rows, worksheet="MLB_Picks")
+            ledger_status = {
+                "ok": bool(google_status.get("ok")),
+                "rows": len(rows),
+                "worksheet": google_status.get("worksheet") or "MLB_Picks",
+                "google_sheets": google_status,
+            }
         except Exception as exc:
-            ledger_status = {"ok": False, "rows": 0, "worksheet": "MLB_Picks", "message": str(exc)[:240]}
+            ledger_status = {
+                "ok": False,
+                "rows": 0,
+                "worksheet": "MLB_Picks",
+                "message": str(exc)[:240],
+            }
 
     return {
         "date": slate_date().isoformat(),
@@ -118,7 +135,7 @@ def scan_candidate(service, persist: bool = True) -> dict[str, Any]:
                 "error": str(exc)[:200],
             })
 
-    accepted = sorted(accepted, key=_score, reverse=True)[:3]
+    accepted = sorted(accepted, key=_score, reverse=True)
     sheet_status = None
     if persist and accepted:
         rows = [
