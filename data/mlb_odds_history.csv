@@ -1871,3 +1871,21 @@ snapshot_utc,event_id,commence_time_utc,home,away,book,market,selection,line,odd
 2026-09-10T16:28:02.505255Z,824550,2026-09-10T23:40:00Z,Chicago White Sox,Pittsburgh Pirates,Production consensus,spreads,Pittsburgh Pirates,-1.5,155,2.55
 2026-09-10T16:28:02.505255Z,824550,2026-09-10T23:40:00Z,Chicago White Sox,Pittsburgh Pirates,Production consensus,totals,Over,7.5,-120,1.83
 2026-09-10T16:28:02.505255Z,824550,2026-09-10T23:40:00Z,Chicago White Sox,Pittsburgh Pirates,Production consensus,totals,Under,7.5,-102,1.98
+2026-09-10T19:45:26.320695Z,823088,2026-09-10T20:10:00Z,Seattle Mariners,Texas Rangers,Production consensus,h2h,Seattle Mariners,,-120,1.83
+2026-09-10T19:45:26.320695Z,823088,2026-09-10T20:10:00Z,Seattle Mariners,Texas Rangers,Production consensus,h2h,Texas Rangers,,102,2.02
+2026-09-10T19:45:26.320695Z,823088,2026-09-10T20:10:00Z,Seattle Mariners,Texas Rangers,Production consensus,spreads,Seattle Mariners,-1.5,183,2.83
+2026-09-10T19:45:26.320695Z,823088,2026-09-10T20:10:00Z,Seattle Mariners,Texas Rangers,Production consensus,spreads,Texas Rangers,1.5,-217,1.46
+2026-09-10T19:45:26.320695Z,823088,2026-09-10T20:10:00Z,Seattle Mariners,Texas Rangers,Production consensus,totals,Over,7.0,100,2.0
+2026-09-10T19:45:26.320695Z,823088,2026-09-10T20:10:00Z,Seattle Mariners,Texas Rangers,Production consensus,totals,Under,7.0,-120,1.83
+2026-09-10T19:45:26.320695Z,823499,2026-09-10T23:05:00Z,New York Yankees,Colorado Rockies,Production consensus,h2h,Colorado Rockies,,235,3.35
+2026-09-10T19:45:26.320695Z,823499,2026-09-10T23:05:00Z,New York Yankees,Colorado Rockies,Production consensus,h2h,New York Yankees,,-286,1.35
+2026-09-10T19:45:26.320695Z,823499,2026-09-10T23:05:00Z,New York Yankees,Colorado Rockies,Production consensus,spreads,Colorado Rockies,1.5,110,2.1
+2026-09-10T19:45:26.320695Z,823499,2026-09-10T23:05:00Z,New York Yankees,Colorado Rockies,Production consensus,spreads,New York Yankees,-1.5,-130,1.77
+2026-09-10T19:45:26.320695Z,823499,2026-09-10T23:05:00Z,New York Yankees,Colorado Rockies,Production consensus,totals,Over,8.5,-103,1.97
+2026-09-10T19:45:26.320695Z,823499,2026-09-10T23:05:00Z,New York Yankees,Colorado Rockies,Production consensus,totals,Under,8.5,-118,1.85
+2026-09-10T19:45:26.320695Z,824550,2026-09-10T23:40:00Z,Chicago White Sox,Pittsburgh Pirates,Production consensus,h2h,Chicago White Sox,,-108,1.93
+2026-09-10T19:45:26.320695Z,824550,2026-09-10T23:40:00Z,Chicago White Sox,Pittsburgh Pirates,Production consensus,h2h,Pittsburgh Pirates,,-108,1.93
+2026-09-10T19:45:26.320695Z,824550,2026-09-10T23:40:00Z,Chicago White Sox,Pittsburgh Pirates,Production consensus,spreads,Chicago White Sox,1.5,-189,1.53
+2026-09-10T19:45:26.320695Z,824550,2026-09-10T23:40:00Z,Chicago White Sox,Pittsburgh Pirates,Production consensus,spreads,Pittsburgh Pirates,-1.5,155,2.55
+2026-09-10T19:45:26.320695Z,824550,2026-09-10T23:40:00Z,Chicago White Sox,Pittsburgh Pirates,Production consensus,totals,Over,7.5,-118,1.85
+2026-09-10T19:45:26.320695Z,824550,2026-09-10T23:40:00Z,Chicago White Sox,Pittsburgh Pirates,Production consensus,totals,Under,7.5,-102,1.98
