@@ -1829,3 +1829,9 @@ snapshot_utc,event_id,commence_time_utc,home,away,book,market,selection,line,odd
 2026-09-09T22:35:37.592817Z,823900,2026-09-10T02:10:00Z,Los Angeles Dodgers,Cincinnati Reds,Production consensus,spreads,Los Angeles Dodgers,-1.5,-127,1.79
 2026-09-09T22:35:37.592817Z,823900,2026-09-10T02:10:00Z,Los Angeles Dodgers,Cincinnati Reds,Production consensus,totals,Over,8.5,-106,1.94
 2026-09-09T22:35:37.592817Z,823900,2026-09-10T02:10:00Z,Los Angeles Dodgers,Cincinnati Reds,Production consensus,totals,Under,8.5,-114,1.88
+2026-09-10T01:07:21.788254Z,823900,2026-09-10T02:10:00Z,Los Angeles Dodgers,Cincinnati Reds,Production consensus,h2h,Cincinnati Reds,,233,3.33
+2026-09-10T01:07:21.788254Z,823900,2026-09-10T02:10:00Z,Los Angeles Dodgers,Cincinnati Reds,Production consensus,h2h,Los Angeles Dodgers,,-286,1.35
+2026-09-10T01:07:21.788254Z,823900,2026-09-10T02:10:00Z,Los Angeles Dodgers,Cincinnati Reds,Production consensus,spreads,Cincinnati Reds,1.5,106,2.06
+2026-09-10T01:07:21.788254Z,823900,2026-09-10T02:10:00Z,Los Angeles Dodgers,Cincinnati Reds,Production consensus,spreads,Los Angeles Dodgers,-1.5,-128,1.78
+2026-09-10T01:07:21.788254Z,823900,2026-09-10T02:10:00Z,Los Angeles Dodgers,Cincinnati Reds,Production consensus,totals,Over,8.0,-114,1.88
+2026-09-10T01:07:21.788254Z,823900,2026-09-10T02:10:00Z,Los Angeles Dodgers,Cincinnati Reds,Production consensus,totals,Under,8.0,-108,1.93
