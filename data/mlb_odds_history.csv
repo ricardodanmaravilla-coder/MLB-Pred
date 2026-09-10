@@ -1847,3 +1847,27 @@ snapshot_utc,event_id,commence_time_utc,home,away,book,market,selection,line,odd
 2026-09-10T11:25:12.287850Z,823413,2026-09-10T17:05:00Z,Philadelphia Phillies,Houston Astros,Production consensus,spreads,Philadelphia Phillies,-1.5,108,2.08
 2026-09-10T11:25:12.287850Z,823413,2026-09-10T17:05:00Z,Philadelphia Phillies,Houston Astros,Production consensus,totals,Over,8.5,-110,1.91
 2026-09-10T11:25:12.287850Z,823413,2026-09-10T17:05:00Z,Philadelphia Phillies,Houston Astros,Production consensus,totals,Under,8.5,-110,1.91
+2026-09-10T16:28:02.505255Z,823413,2026-09-10T17:05:00Z,Philadelphia Phillies,Houston Astros,Production consensus,h2h,Houston Astros,,155,2.55
+2026-09-10T16:28:02.505255Z,823413,2026-09-10T17:05:00Z,Philadelphia Phillies,Houston Astros,Production consensus,h2h,Philadelphia Phillies,,-185,1.54
+2026-09-10T16:28:02.505255Z,823413,2026-09-10T17:05:00Z,Philadelphia Phillies,Houston Astros,Production consensus,spreads,Houston Astros,1.5,-133,1.75
+2026-09-10T16:28:02.505255Z,823413,2026-09-10T17:05:00Z,Philadelphia Phillies,Houston Astros,Production consensus,spreads,Philadelphia Phillies,-1.5,113,2.13
+2026-09-10T16:28:02.505255Z,823413,2026-09-10T17:05:00Z,Philadelphia Phillies,Houston Astros,Production consensus,totals,Over,8.5,-114,1.88
+2026-09-10T16:28:02.505255Z,823413,2026-09-10T17:05:00Z,Philadelphia Phillies,Houston Astros,Production consensus,totals,Under,8.5,-108,1.93
+2026-09-10T16:28:02.505255Z,823088,2026-09-10T20:10:00Z,Seattle Mariners,Texas Rangers,Production consensus,h2h,Seattle Mariners,,-127,1.79
+2026-09-10T16:28:02.505255Z,823088,2026-09-10T20:10:00Z,Seattle Mariners,Texas Rangers,Production consensus,h2h,Texas Rangers,,108,2.08
+2026-09-10T16:28:02.505255Z,823088,2026-09-10T20:10:00Z,Seattle Mariners,Texas Rangers,Production consensus,spreads,Seattle Mariners,-1.5,177,2.77
+2026-09-10T16:28:02.505255Z,823088,2026-09-10T20:10:00Z,Seattle Mariners,Texas Rangers,Production consensus,spreads,Texas Rangers,1.5,-208,1.48
+2026-09-10T16:28:02.505255Z,823088,2026-09-10T20:10:00Z,Seattle Mariners,Texas Rangers,Production consensus,totals,Over,6.5,-112,1.89
+2026-09-10T16:28:02.505255Z,823088,2026-09-10T20:10:00Z,Seattle Mariners,Texas Rangers,Production consensus,totals,Under,6.5,-108,1.93
+2026-09-10T16:28:02.505255Z,823499,2026-09-10T23:05:00Z,New York Yankees,Colorado Rockies,Production consensus,h2h,Colorado Rockies,,240,3.4
+2026-09-10T16:28:02.505255Z,823499,2026-09-10T23:05:00Z,New York Yankees,Colorado Rockies,Production consensus,h2h,New York Yankees,,-294,1.34
+2026-09-10T16:28:02.505255Z,823499,2026-09-10T23:05:00Z,New York Yankees,Colorado Rockies,Production consensus,spreads,Colorado Rockies,1.5,110,2.1
+2026-09-10T16:28:02.505255Z,823499,2026-09-10T23:05:00Z,New York Yankees,Colorado Rockies,Production consensus,spreads,New York Yankees,-1.5,-130,1.77
+2026-09-10T16:28:02.505255Z,823499,2026-09-10T23:05:00Z,New York Yankees,Colorado Rockies,Production consensus,totals,Over,8.5,-108,1.93
+2026-09-10T16:28:02.505255Z,823499,2026-09-10T23:05:00Z,New York Yankees,Colorado Rockies,Production consensus,totals,Under,8.5,-112,1.89
+2026-09-10T16:28:02.505255Z,824550,2026-09-10T23:40:00Z,Chicago White Sox,Pittsburgh Pirates,Production consensus,h2h,Chicago White Sox,,-110,1.91
+2026-09-10T16:28:02.505255Z,824550,2026-09-10T23:40:00Z,Chicago White Sox,Pittsburgh Pirates,Production consensus,h2h,Pittsburgh Pirates,,-108,1.93
+2026-09-10T16:28:02.505255Z,824550,2026-09-10T23:40:00Z,Chicago White Sox,Pittsburgh Pirates,Production consensus,spreads,Chicago White Sox,1.5,-189,1.53
+2026-09-10T16:28:02.505255Z,824550,2026-09-10T23:40:00Z,Chicago White Sox,Pittsburgh Pirates,Production consensus,spreads,Pittsburgh Pirates,-1.5,155,2.55
+2026-09-10T16:28:02.505255Z,824550,2026-09-10T23:40:00Z,Chicago White Sox,Pittsburgh Pirates,Production consensus,totals,Over,7.5,-120,1.83
+2026-09-10T16:28:02.505255Z,824550,2026-09-10T23:40:00Z,Chicago White Sox,Pittsburgh Pirates,Production consensus,totals,Under,7.5,-102,1.98
