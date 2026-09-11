@@ -1979,3 +1979,87 @@ snapshot_utc,event_id,commence_time_utc,home,away,book,market,selection,line,odd
 2026-09-11T16:32:36.943176Z,823012,2026-09-12T00:15:00Z,St. Louis Cardinals,Chicago White Sox,Production consensus,spreads,St. Louis Cardinals,1.5,-182,1.55
 2026-09-11T16:32:36.943176Z,823012,2026-09-12T00:15:00Z,St. Louis Cardinals,Chicago White Sox,Production consensus,totals,Over,8.0,-115,1.87
 2026-09-11T16:32:36.943176Z,823012,2026-09-12T00:15:00Z,St. Louis Cardinals,Chicago White Sox,Production consensus,totals,Under,8.0,-105,1.95
+2026-09-11T19:46:11.268256Z,824227,2026-09-11T22:40:00Z,Detroit Tigers,Colorado Rockies,Production consensus,h2h,Colorado Rockies,,155,2.55
+2026-09-11T19:46:11.268256Z,824227,2026-09-11T22:40:00Z,Detroit Tigers,Colorado Rockies,Production consensus,h2h,Detroit Tigers,,-185,1.54
+2026-09-11T19:46:11.268256Z,824227,2026-09-11T22:40:00Z,Detroit Tigers,Colorado Rockies,Production consensus,spreads,Colorado Rockies,1.5,-141,1.71
+2026-09-11T19:46:11.268256Z,824227,2026-09-11T22:40:00Z,Detroit Tigers,Colorado Rockies,Production consensus,spreads,Detroit Tigers,-1.5,118,2.18
+2026-09-11T19:46:11.268256Z,824227,2026-09-11T22:40:00Z,Detroit Tigers,Colorado Rockies,Production consensus,totals,Over,8.0,-108,1.93
+2026-09-11T19:46:11.268256Z,824227,2026-09-11T22:40:00Z,Detroit Tigers,Colorado Rockies,Production consensus,totals,Under,8.0,-112,1.89
+2026-09-11T19:46:11.268256Z,822684,2026-09-11T22:45:00Z,Washington Nationals,Los Angeles Angels,Production consensus,h2h,Los Angeles Angels,,129,2.29
+2026-09-11T19:46:11.268256Z,822684,2026-09-11T22:45:00Z,Washington Nationals,Los Angeles Angels,Production consensus,h2h,Washington Nationals,,-152,1.66
+2026-09-11T19:46:11.268256Z,822684,2026-09-11T22:45:00Z,Washington Nationals,Los Angeles Angels,Production consensus,spreads,Los Angeles Angels,1.5,-164,1.61
+2026-09-11T19:46:11.268256Z,822684,2026-09-11T22:45:00Z,Washington Nationals,Los Angeles Angels,Production consensus,spreads,Washington Nationals,-1.5,140,2.4
+2026-09-11T19:46:11.268256Z,822684,2026-09-11T22:45:00Z,Washington Nationals,Los Angeles Angels,Production consensus,totals,Over,7.5,-115,1.87
+2026-09-11T19:46:11.268256Z,822684,2026-09-11T22:45:00Z,Washington Nationals,Los Angeles Angels,Production consensus,totals,Under,7.5,-105,1.95
+2026-09-11T19:46:11.268256Z,823498,2026-09-11T23:05:00Z,New York Yankees,New York Mets,Production consensus,h2h,New York Mets,,114,2.14
+2026-09-11T19:46:11.268256Z,823498,2026-09-11T23:05:00Z,New York Yankees,New York Mets,Production consensus,h2h,New York Yankees,,-135,1.74
+2026-09-11T19:46:11.268256Z,823498,2026-09-11T23:05:00Z,New York Yankees,New York Mets,Production consensus,spreads,New York Mets,1.5,-179,1.56
+2026-09-11T19:46:11.268256Z,823498,2026-09-11T23:05:00Z,New York Yankees,New York Mets,Production consensus,spreads,New York Yankees,-1.5,152,2.52
+2026-09-11T19:46:11.268256Z,823498,2026-09-11T23:05:00Z,New York Yankees,New York Mets,Production consensus,totals,Over,8.0,-115,1.87
+2026-09-11T19:46:11.268256Z,823498,2026-09-11T23:05:00Z,New York Yankees,New York Mets,Production consensus,totals,Under,8.0,-105,1.95
+2026-09-11T19:46:11.268256Z,822767,2026-09-11T23:07:00Z,Toronto Blue Jays,Baltimore Orioles,Production consensus,h2h,Baltimore Orioles,,116,2.16
+2026-09-11T19:46:11.268256Z,822767,2026-09-11T23:07:00Z,Toronto Blue Jays,Baltimore Orioles,Production consensus,h2h,Toronto Blue Jays,,-137,1.73
+2026-09-11T19:46:11.268256Z,822767,2026-09-11T23:07:00Z,Toronto Blue Jays,Baltimore Orioles,Production consensus,spreads,Baltimore Orioles,1.5,-185,1.54
+2026-09-11T19:46:11.268256Z,822767,2026-09-11T23:07:00Z,Toronto Blue Jays,Baltimore Orioles,Production consensus,spreads,Toronto Blue Jays,-1.5,156,2.56
+2026-09-11T19:46:11.268256Z,822767,2026-09-11T23:07:00Z,Toronto Blue Jays,Baltimore Orioles,Production consensus,totals,Over,7.5,-120,1.83
+2026-09-11T19:46:11.268256Z,822767,2026-09-11T23:07:00Z,Toronto Blue Jays,Baltimore Orioles,Production consensus,totals,Under,7.5,100,2.0
+2026-09-11T19:46:11.268256Z,822930,2026-09-11T23:10:00Z,Tampa Bay Rays,Houston Astros,Production consensus,h2h,Houston Astros,,144,2.44
+2026-09-11T19:46:11.268256Z,822930,2026-09-11T23:10:00Z,Tampa Bay Rays,Houston Astros,Production consensus,h2h,Tampa Bay Rays,,-169,1.59
+2026-09-11T19:46:11.268256Z,822930,2026-09-11T23:10:00Z,Tampa Bay Rays,Houston Astros,Production consensus,spreads,Houston Astros,1.5,-145,1.69
+2026-09-11T19:46:11.268256Z,822930,2026-09-11T23:10:00Z,Tampa Bay Rays,Houston Astros,Production consensus,spreads,Tampa Bay Rays,-1.5,122,2.22
+2026-09-11T19:46:11.268256Z,822930,2026-09-11T23:10:00Z,Tampa Bay Rays,Houston Astros,Production consensus,totals,Over,8.0,-108,1.93
+2026-09-11T19:46:11.268256Z,822930,2026-09-11T23:10:00Z,Tampa Bay Rays,Houston Astros,Production consensus,totals,Under,8.0,-118,1.85
+2026-09-11T19:46:11.268256Z,823817,2026-09-11T23:10:00Z,Miami Marlins,Los Angeles Dodgers,Production consensus,h2h,Los Angeles Dodgers,,-208,1.48
+2026-09-11T19:46:11.268256Z,823817,2026-09-11T23:10:00Z,Miami Marlins,Los Angeles Dodgers,Production consensus,h2h,Miami Marlins,,174,2.74
+2026-09-11T19:46:11.268256Z,823817,2026-09-11T23:10:00Z,Miami Marlins,Los Angeles Dodgers,Production consensus,spreads,Los Angeles Dodgers,-1.5,-120,1.83
+2026-09-11T19:46:11.268256Z,823817,2026-09-11T23:10:00Z,Miami Marlins,Los Angeles Dodgers,Production consensus,spreads,Miami Marlins,1.5,100,2.0
+2026-09-11T19:46:11.268256Z,823817,2026-09-11T23:10:00Z,Miami Marlins,Los Angeles Dodgers,Production consensus,totals,Over,7.5,-102,1.98
+2026-09-11T19:46:11.268256Z,823817,2026-09-11T23:10:00Z,Miami Marlins,Los Angeles Dodgers,Production consensus,totals,Under,7.5,-119,1.84
+2026-09-11T19:46:11.268256Z,824711,2026-09-11T23:10:00Z,Boston Red Sox,Kansas City Royals,Production consensus,h2h,Boston Red Sox,,-200,1.5
+2026-09-11T19:46:11.268256Z,824711,2026-09-11T23:10:00Z,Boston Red Sox,Kansas City Royals,Production consensus,h2h,Kansas City Royals,,168,2.68
+2026-09-11T19:46:11.268256Z,824711,2026-09-11T23:10:00Z,Boston Red Sox,Kansas City Royals,Production consensus,spreads,Boston Red Sox,-1.5,105,2.05
+2026-09-11T19:46:11.268256Z,824711,2026-09-11T23:10:00Z,Boston Red Sox,Kansas City Royals,Production consensus,spreads,Kansas City Royals,1.5,-125,1.8
+2026-09-11T19:46:11.268256Z,824711,2026-09-11T23:10:00Z,Boston Red Sox,Kansas City Royals,Production consensus,totals,Over,8.5,-104,1.96
+2026-09-11T19:46:11.268256Z,824711,2026-09-11T23:10:00Z,Boston Red Sox,Kansas City Royals,Production consensus,totals,Under,8.5,-115,1.87
+2026-09-11T19:46:11.268256Z,824873,2026-09-11T23:15:00Z,Atlanta Braves,Philadelphia Phillies,Production consensus,h2h,Atlanta Braves,,-182,1.55
+2026-09-11T19:46:11.268256Z,824873,2026-09-11T23:15:00Z,Atlanta Braves,Philadelphia Phillies,Production consensus,h2h,Philadelphia Phillies,,155,2.55
+2026-09-11T19:46:11.268256Z,824873,2026-09-11T23:15:00Z,Atlanta Braves,Philadelphia Phillies,Production consensus,spreads,Atlanta Braves,-1.5,119,2.19
+2026-09-11T19:46:11.268256Z,824873,2026-09-11T23:15:00Z,Atlanta Braves,Philadelphia Phillies,Production consensus,spreads,Philadelphia Phillies,1.5,-141,1.71
+2026-09-11T19:46:11.268256Z,824873,2026-09-11T23:15:00Z,Atlanta Braves,Philadelphia Phillies,Production consensus,totals,Over,7.0,-118,1.85
+2026-09-11T19:46:11.268256Z,824873,2026-09-11T23:15:00Z,Atlanta Braves,Philadelphia Phillies,Production consensus,totals,Under,7.0,-102,1.98
+2026-09-11T19:46:11.268256Z,823736,2026-09-11T23:45:00Z,Milwaukee Brewers,Cincinnati Reds,Production consensus,h2h,Cincinnati Reds,,169,2.69
+2026-09-11T19:46:11.268256Z,823736,2026-09-11T23:45:00Z,Milwaukee Brewers,Cincinnati Reds,Production consensus,h2h,Milwaukee Brewers,,-200,1.5
+2026-09-11T19:46:11.268256Z,823736,2026-09-11T23:45:00Z,Milwaukee Brewers,Cincinnati Reds,Production consensus,spreads,Cincinnati Reds,1.5,-127,1.79
+2026-09-11T19:46:11.268256Z,823736,2026-09-11T23:45:00Z,Milwaukee Brewers,Cincinnati Reds,Production consensus,spreads,Milwaukee Brewers,-1.5,105,2.05
+2026-09-11T19:46:11.268256Z,823736,2026-09-11T23:45:00Z,Milwaukee Brewers,Cincinnati Reds,Production consensus,totals,Over,8.0,-105,1.95
+2026-09-11T19:46:11.268256Z,823736,2026-09-11T23:45:00Z,Milwaukee Brewers,Cincinnati Reds,Production consensus,totals,Under,8.0,-115,1.87
+2026-09-11T19:46:11.268256Z,823659,2026-09-12T00:10:00Z,Minnesota Twins,Cleveland Guardians,Production consensus,h2h,Cleveland Guardians,,-118,1.85
+2026-09-11T19:46:11.268256Z,823659,2026-09-12T00:10:00Z,Minnesota Twins,Cleveland Guardians,Production consensus,h2h,Minnesota Twins,,-102,1.98
+2026-09-11T19:46:11.268256Z,823659,2026-09-12T00:10:00Z,Minnesota Twins,Cleveland Guardians,Production consensus,spreads,Cleveland Guardians,-1.5,144,2.44
+2026-09-11T19:46:11.268256Z,823659,2026-09-12T00:10:00Z,Minnesota Twins,Cleveland Guardians,Production consensus,spreads,Minnesota Twins,1.5,-172,1.58
+2026-09-11T19:46:11.268256Z,823659,2026-09-12T00:10:00Z,Minnesota Twins,Cleveland Guardians,Production consensus,totals,Over,7.5,-114,1.88
+2026-09-11T19:46:11.268256Z,823659,2026-09-12T00:10:00Z,Minnesota Twins,Cleveland Guardians,Production consensus,totals,Under,7.5,-105,1.95
+2026-09-11T19:46:11.268256Z,823012,2026-09-12T00:15:00Z,St. Louis Cardinals,Chicago White Sox,Production consensus,h2h,Chicago White Sox,,-110,1.91
+2026-09-11T19:46:11.268256Z,823012,2026-09-12T00:15:00Z,St. Louis Cardinals,Chicago White Sox,Production consensus,h2h,St. Louis Cardinals,,-108,1.93
+2026-09-11T19:46:11.268256Z,823012,2026-09-12T00:15:00Z,St. Louis Cardinals,Chicago White Sox,Production consensus,spreads,Chicago White Sox,-1.5,150,2.5
+2026-09-11T19:46:11.268256Z,823012,2026-09-12T00:15:00Z,St. Louis Cardinals,Chicago White Sox,Production consensus,spreads,St. Louis Cardinals,1.5,-182,1.55
+2026-09-11T19:46:11.268256Z,823012,2026-09-12T00:15:00Z,St. Louis Cardinals,Chicago White Sox,Production consensus,totals,Over,8.0,100,2.0
+2026-09-11T19:46:11.268256Z,823012,2026-09-12T00:15:00Z,St. Louis Cardinals,Chicago White Sox,Production consensus,totals,Under,8.0,-118,1.85
+2026-09-11T19:46:11.268256Z,824954,2026-09-12T01:40:00Z,Athletics,Seattle Mariners,Production consensus,h2h,Athletics,,140,2.4
+2026-09-11T19:46:11.268256Z,824954,2026-09-12T01:40:00Z,Athletics,Seattle Mariners,Production consensus,h2h,Seattle Mariners,,-164,1.61
+2026-09-11T19:46:11.268256Z,824954,2026-09-12T01:40:00Z,Athletics,Seattle Mariners,Production consensus,spreads,Athletics,1.5,-114,1.88
+2026-09-11T19:46:11.268256Z,824954,2026-09-12T01:40:00Z,Athletics,Seattle Mariners,Production consensus,spreads,Seattle Mariners,-1.5,-105,1.95
+2026-09-11T19:46:11.268256Z,824954,2026-09-12T01:40:00Z,Athletics,Seattle Mariners,Production consensus,totals,Over,10.5,-105,1.95
+2026-09-11T19:46:11.268256Z,824954,2026-09-12T01:40:00Z,Athletics,Seattle Mariners,Production consensus,totals,Under,10.5,-115,1.87
+2026-09-11T19:46:11.268256Z,825036,2026-09-12T01:40:00Z,Arizona Diamondbacks,Texas Rangers,Production consensus,h2h,Arizona Diamondbacks,,-118,1.85
+2026-09-11T19:46:11.268256Z,825036,2026-09-12T01:40:00Z,Arizona Diamondbacks,Texas Rangers,Production consensus,h2h,Texas Rangers,,102,2.02
+2026-09-11T19:46:11.268256Z,825036,2026-09-12T01:40:00Z,Arizona Diamondbacks,Texas Rangers,Production consensus,spreads,Arizona Diamondbacks,1.5,-192,1.52
+2026-09-11T19:46:11.268256Z,825036,2026-09-12T01:40:00Z,Arizona Diamondbacks,Texas Rangers,Production consensus,spreads,Texas Rangers,-1.5,159,2.59
+2026-09-11T19:46:11.268256Z,825036,2026-09-12T01:40:00Z,Arizona Diamondbacks,Texas Rangers,Production consensus,totals,Over,8.5,-115,1.87
+2026-09-11T19:46:11.268256Z,825036,2026-09-12T01:40:00Z,Arizona Diamondbacks,Texas Rangers,Production consensus,totals,Under,8.5,-103,1.97
+2026-09-11T19:46:11.268256Z,823173,2026-09-12T02:15:00Z,San Francisco Giants,San Diego Padres,Production consensus,h2h,San Diego Padres,,-147,1.68
+2026-09-11T19:46:11.268256Z,823173,2026-09-12T02:15:00Z,San Francisco Giants,San Diego Padres,Production consensus,h2h,San Francisco Giants,,125,2.25
+2026-09-11T19:46:11.268256Z,823173,2026-09-12T02:15:00Z,San Francisco Giants,San Diego Padres,Production consensus,spreads,San Diego Padres,-1.5,118,2.18
+2026-09-11T19:46:11.268256Z,823173,2026-09-12T02:15:00Z,San Francisco Giants,San Diego Padres,Production consensus,spreads,San Francisco Giants,1.5,-143,1.7
+2026-09-11T19:46:11.268256Z,823173,2026-09-12T02:15:00Z,San Francisco Giants,San Diego Padres,Production consensus,totals,Over,7.5,-115,1.87
+2026-09-11T19:46:11.268256Z,823173,2026-09-12T02:15:00Z,San Francisco Giants,San Diego Padres,Production consensus,totals,Under,7.5,-103,1.97
