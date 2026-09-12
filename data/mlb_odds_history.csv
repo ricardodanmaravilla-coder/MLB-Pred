@@ -2147,3 +2147,21 @@ snapshot_utc,event_id,commence_time_utc,home,away,book,market,selection,line,odd
 2026-09-11T22:38:16.832460Z,823173,2026-09-12T02:15:00Z,San Francisco Giants,San Diego Padres,Production consensus,spreads,San Francisco Giants,1.5,-130,1.77
 2026-09-11T22:38:16.832460Z,823173,2026-09-12T02:15:00Z,San Francisco Giants,San Diego Padres,Production consensus,totals,Over,7.5,-115,1.87
 2026-09-11T22:38:16.832460Z,823173,2026-09-12T02:15:00Z,San Francisco Giants,San Diego Padres,Production consensus,totals,Under,7.5,-105,1.95
+2026-09-12T01:10:19.406427Z,824954,2026-09-12T01:40:00Z,Athletics,Seattle Mariners,Production consensus,h2h,Athletics,,141,2.41
+2026-09-12T01:10:19.406427Z,824954,2026-09-12T01:40:00Z,Athletics,Seattle Mariners,Production consensus,h2h,Seattle Mariners,,-164,1.61
+2026-09-12T01:10:19.406427Z,824954,2026-09-12T01:40:00Z,Athletics,Seattle Mariners,Production consensus,spreads,Athletics,1.5,-114,1.88
+2026-09-12T01:10:19.406427Z,824954,2026-09-12T01:40:00Z,Athletics,Seattle Mariners,Production consensus,spreads,Seattle Mariners,-1.5,-106,1.94
+2026-09-12T01:10:19.406427Z,824954,2026-09-12T01:40:00Z,Athletics,Seattle Mariners,Production consensus,totals,Over,10.5,-105,1.95
+2026-09-12T01:10:19.406427Z,824954,2026-09-12T01:40:00Z,Athletics,Seattle Mariners,Production consensus,totals,Under,10.5,-114,1.88
+2026-09-12T01:10:19.406427Z,825036,2026-09-12T01:40:00Z,Arizona Diamondbacks,Texas Rangers,Production consensus,h2h,Arizona Diamondbacks,,-118,1.85
+2026-09-12T01:10:19.406427Z,825036,2026-09-12T01:40:00Z,Arizona Diamondbacks,Texas Rangers,Production consensus,h2h,Texas Rangers,,101,2.01
+2026-09-12T01:10:19.406427Z,825036,2026-09-12T01:40:00Z,Arizona Diamondbacks,Texas Rangers,Production consensus,spreads,Arizona Diamondbacks,-1.5,161,2.61
+2026-09-12T01:10:19.406427Z,825036,2026-09-12T01:40:00Z,Arizona Diamondbacks,Texas Rangers,Production consensus,spreads,Texas Rangers,1.5,-189,1.53
+2026-09-12T01:10:19.406427Z,825036,2026-09-12T01:40:00Z,Arizona Diamondbacks,Texas Rangers,Production consensus,totals,Over,8.5,-118,1.85
+2026-09-12T01:10:19.406427Z,825036,2026-09-12T01:40:00Z,Arizona Diamondbacks,Texas Rangers,Production consensus,totals,Under,8.5,-102,1.98
+2026-09-12T01:10:19.406427Z,823173,2026-09-12T02:15:00Z,San Francisco Giants,San Diego Padres,Production consensus,h2h,San Diego Padres,,-161,1.62
+2026-09-12T01:10:19.406427Z,823173,2026-09-12T02:15:00Z,San Francisco Giants,San Diego Padres,Production consensus,h2h,San Francisco Giants,,134,2.34
+2026-09-12T01:10:19.406427Z,823173,2026-09-12T02:15:00Z,San Francisco Giants,San Diego Padres,Production consensus,spreads,San Diego Padres,-1.5,109,2.09
+2026-09-12T01:10:19.406427Z,823173,2026-09-12T02:15:00Z,San Francisco Giants,San Diego Padres,Production consensus,spreads,San Francisco Giants,1.5,-130,1.77
+2026-09-12T01:10:19.406427Z,823173,2026-09-12T02:15:00Z,San Francisco Giants,San Diego Padres,Production consensus,totals,Over,7.5,-115,1.87
+2026-09-12T01:10:19.406427Z,823173,2026-09-12T02:15:00Z,San Francisco Giants,San Diego Padres,Production consensus,totals,Under,7.5,-105,1.95
