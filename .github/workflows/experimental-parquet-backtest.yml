@@ -8,6 +8,7 @@ on:
     branches: [main]
     paths:
       - 'modules/experimental_parquet.py'
+      - 'modules/shadow_bigdata_features.py'
       - 'backtest_experimental_parquet.py'
       - 'backtest_experimental_daynight.py'
       - 'backtest_experimental_ablation.py'
@@ -60,10 +61,11 @@ jobs:
           python - <<'PY'
           from pathlib import Path
           forbidden = (
-              'experimental_parquet','prepare_experimental_starters','build_starter_performance_history',
-              'prepare_experimental_bullpen','enrich_experimental_context','enrich_experimental_daynight',
-              'backtest_experimental_daynight','backtest_experimental_ablation','backtest_experimental_walkforward',
-              'prepare_experimental_statcast',
+              'experimental_parquet','shadow_bigdata_features','prepare_experimental_starters',
+              'build_starter_performance_history','prepare_experimental_bullpen',
+              'enrich_experimental_context','enrich_experimental_daynight',
+              'backtest_experimental_daynight','backtest_experimental_ablation',
+              'backtest_experimental_walkforward','prepare_experimental_statcast',
           )
           for p in ('modules/web_service.py','modules/ml_mlb.py','web_app.py'):
               text=Path(p).read_text(encoding='utf-8')
@@ -75,7 +77,7 @@ jobs:
         run: python backtest_experimental_ablation.py
       - name: Run multi-season walk-forward
         run: python backtest_experimental_walkforward.py
-      - name: Print robustness gates
+      - name: Print research robustness diagnostics
         run: |
           python - <<'PY'
           import json
@@ -86,38 +88,38 @@ jobs:
           print('WALKFORWARD_PROMOTE=',w['PROMOTE_TO_INTEGRATION_REVIEW'])
           print('robust_candidates=',w['robust_candidates'])
           PY
-      - name: Train frozen shadow candidate
-        run: |
-          python - <<'PY'
-          import json, subprocess
-          from pathlib import Path
-          w=json.loads(Path('artifacts/experimental_walkforward_backtest.json').read_text())
-          if 'ablation_best' not in w.get('robust_candidates', []):
-              raise SystemExit('Frozen starter_day_night+team_context candidate did not pass walk-forward gate')
-          subprocess.check_call(['python','train_shadow_candidate.py'])
-          PY
-      - name: Verify deployable Shadow bundle
+      - name: Train isolated Shadow Big Data v3
+        run: python train_shadow_candidate.py
+      - name: Verify deployable Shadow Big Data bundle
         run: |
           test -s models/shadow_candidate.joblib
           test -s models/shadow_candidate.json
           test -s data/shadow/starter_performance_history.csv
+          test -s data/shadow/bullpen_usage_history.csv
+          test -s data/shadow/statcast_team_daily_real.csv
           python - <<'PY'
           from modules.shadow_candidate import available, metadata
-          assert available(), 'Shadow bundle was built but is not loadable'
+          assert available(), 'Shadow Big Data bundle was built but is not loadable'
           m = metadata()
-          assert m.get('version'), 'Shadow model version missing'
-          assert m.get('training_rows'), 'Shadow training row count missing'
-          print('Deployable isolated Shadow bundle OK:', m)
+          assert m.get('version') == 'shadow-bigdata-v3', m
+          assert int(m.get('feature_count') or 0) >= 40, m
+          assert m.get('validation'), m
+          print('Deployable isolated Shadow Big Data bundle OK:', m)
           PY
-      - name: Commit shadow candidate artifact and starter history
+      - name: Commit Shadow Big Data artifact and runtime histories
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -f models/shadow_candidate.joblib models/shadow_candidate.json data/shadow/starter_performance_history.csv
+          git add -f \
+            models/shadow_candidate.joblib \
+            models/shadow_candidate.json \
+            data/shadow/starter_performance_history.csv \
+            data/shadow/bullpen_usage_history.csv \
+            data/shadow/statcast_team_daily_real.csv
           if git diff --cached --quiet; then
-            echo "Shadow candidate artifacts unchanged"
+            echo "Shadow Big Data artifacts unchanged"
           else
-            git commit -m "Refresh validated MLB shadow candidate"
+            git commit -m "Refresh MLB Shadow Big Data v3 artifact"
             git push
           fi
       - name: Upload research artifacts
