@@ -108,34 +108,63 @@ jobs:
           PY
       - name: Commit Shadow Big Data artifact and runtime histories
         run: |
+          set -euo pipefail
+          SOURCE_ROOT="$GITHUB_WORKSPACE"
+          PUBLISH_DIR="$RUNNER_TEMP/shadow-bigdata-publish"
+          ARTIFACTS=(
+            "models/shadow_candidate.joblib"
+            "models/shadow_candidate.json"
+            "data/shadow/starter_performance_history.csv"
+            "data/shadow/bullpen_usage_history.csv"
+            "data/shadow/statcast_team_daily_real.csv"
+          )
+
+          copy_shadow_artifacts() {
+            mkdir -p "$PUBLISH_DIR/models" "$PUBLISH_DIR/data/shadow"
+            for artifact in "${ARTIFACTS[@]}"; do
+              test -s "$SOURCE_ROOT/$artifact"
+              cp -f "$SOURCE_ROOT/$artifact" "$PUBLISH_DIR/$artifact"
+            done
+          }
+
+          # Publish from a clean checkout of the latest main instead of rebasing the
+          # long-running research workspace. That workspace contains many generated
+          # research files and can legitimately be dirty after the Big Data build.
+          rm -rf "$PUBLISH_DIR"
+          git fetch origin main
+          git worktree add --detach "$PUBLISH_DIR" origin/main
+          copy_shadow_artifacts
+
+          cd "$PUBLISH_DIR"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -f \
-            models/shadow_candidate.joblib \
-            models/shadow_candidate.json \
-            data/shadow/starter_performance_history.csv \
-            data/shadow/bullpen_usage_history.csv \
-            data/shadow/statcast_team_daily_real.csv
-          if git diff --cached --quiet; then
-            echo "Shadow Big Data artifacts unchanged"
-          else
+
+          for attempt in 1 2 3 4 5; do
+            git add -f "${ARTIFACTS[@]}"
+            if git diff --cached --quiet; then
+              echo "Shadow Big Data artifacts already match latest main"
+              exit 0
+            fi
+
             git commit -m "Refresh MLB Shadow Big Data v3 artifact"
-            # Other isolated jobs archive odds/history to main while this long research
-            # workflow is running. Rebase the Shadow-only artifact commit and retry the
-            # push so an unrelated concurrent commit cannot make publication fail.
-            for attempt in 1 2 3 4 5; do
-              git pull --rebase origin main
-              if git push origin HEAD:main; then
-                echo "Shadow Big Data v3 artifacts published successfully"
-                break
-              fi
-              if [ "$attempt" -eq 5 ]; then
-                echo "Failed to publish Shadow Big Data v3 artifacts after 5 attempts"
-                exit 1
-              fi
-              sleep $((attempt * 3))
-            done
-          fi
+            if git push origin HEAD:main; then
+              echo "Shadow Big Data v3 artifacts published successfully"
+              exit 0
+            fi
+
+            if [ "$attempt" -eq 5 ]; then
+              echo "Failed to publish Shadow Big Data v3 artifacts after 5 clean-worktree attempts"
+              exit 1
+            fi
+
+            # main may move while this job is publishing odds/history. Rebuild the
+            # artifact commit on top of the new tip without touching V7 or carrying
+            # any unrelated generated files from the research workspace.
+            git fetch origin main
+            git reset --hard origin/main
+            copy_shadow_artifacts
+            sleep $((attempt * 3))
+          done
       - name: Upload research artifacts
         uses: actions/upload-artifact@v4
         with:
