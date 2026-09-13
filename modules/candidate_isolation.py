@@ -7,6 +7,16 @@ from .pick_ledger import append_snapshot, append_shadow_snapshot, sync_google_sn
 from .shadow_candidate import available as shadow_available, metadata as shadow_metadata
 
 
+SHADOW_V2_VERSION = "shadow-candidate-v2"
+SHADOW_V2_ALLOWED_MARKETS = {"Totales"}
+SHADOW_V2_MIN_PROB = 58.0
+SHADOW_V2_MIN_EDGE = 8.0
+SHADOW_V2_MAX_EDGE = 14.0
+SHADOW_V2_MIN_EV = 10.0
+SHADOW_V2_MAX_DISAGREEMENT = 8.0
+SHADOW_V2_KELLY_CAP = 5.0
+
+
 def _score(row: dict[str, Any]) -> float:
     try:
         return float(row.get("score", -999))
@@ -43,6 +53,68 @@ def _diagnostic_rows(diagnostics: list[dict[str, Any]], accepted: list[dict[str,
     accepted_diag = sorted(accepted_diag, key=_score, reverse=True)
     rejected_diag = sorted(rejected_diag, key=_score, reverse=True)[:max_rejected]
     return accepted_diag + rejected_diag
+
+
+def _shadow_v2_filter(row: dict[str, Any]) -> tuple[bool, str]:
+    """Independent shadow-only precision filter.
+
+    This intentionally does not change V7.  V2 narrows the experimental stream to
+    totals where the first shadow sample showed the most stable behaviour, rejects
+    implausibly large model edges, and caps staking rather than allowing aggressive
+    Kelly sizing to dominate the experiment.
+    """
+    failures: list[str] = []
+    if not bool(row.get("accepted")):
+        failures.append(str(row.get("reason") or "base shadow filter"))
+
+    market = str(row.get("mercado") or "")
+    if market not in SHADOW_V2_ALLOWED_MARKETS:
+        failures.append("shadow v2: mercado pausado")
+
+    try:
+        prob = float(row.get("probabilidad"))
+    except Exception:
+        prob = -999.0
+    try:
+        edge = float(row.get("edge_pp"))
+    except Exception:
+        edge = -999.0
+    try:
+        ev = float(row.get("ev_pct"))
+    except Exception:
+        ev = -999.0
+    try:
+        disagreement = float(row.get("desacuerdo_pp"))
+    except Exception:
+        disagreement = 999.0
+
+    if prob < SHADOW_V2_MIN_PROB:
+        failures.append(f"shadow v2: prob<{SHADOW_V2_MIN_PROB:.0f}%")
+    if edge < SHADOW_V2_MIN_EDGE:
+        failures.append(f"shadow v2: edge<{SHADOW_V2_MIN_EDGE:.0f}pp")
+    if edge > SHADOW_V2_MAX_EDGE:
+        failures.append(f"shadow v2: edge>{SHADOW_V2_MAX_EDGE:.0f}pp")
+    if ev < SHADOW_V2_MIN_EV:
+        failures.append(f"shadow v2: EV<{SHADOW_V2_MIN_EV:.0f}%")
+    if disagreement > SHADOW_V2_MAX_DISAGREEMENT:
+        failures.append(f"shadow v2: desacuerdo>{SHADOW_V2_MAX_DISAGREEMENT:.0f}pp")
+
+    return not failures, "Cumple filtros Shadow V2" if not failures else "; ".join(failures)
+
+
+def _apply_shadow_v2(row: dict[str, Any]) -> dict[str, Any]:
+    out = dict(row)
+    accepted, reason = _shadow_v2_filter(out)
+    out["accepted"] = accepted
+    out["reason"] = reason
+    out["candidate_version"] = SHADOW_V2_VERSION
+    try:
+        raw_kelly = max(0.0, float(out.get("kelly_pct") or 0.0))
+        out["kelly_raw_pct"] = raw_kelly
+        out["kelly_pct"] = min(raw_kelly, SHADOW_V2_KELLY_CAP)
+    except Exception:
+        pass
+    return out
 
 
 def _ledger_row(row: dict[str, Any], model_version: str) -> dict[str, Any]:
@@ -127,7 +199,7 @@ def scan_production(service, persist: bool = True) -> dict[str, Any]:
 
 
 def scan_candidate(service, persist: bool = True) -> dict[str, Any]:
-    """Run the shadow candidate only and write exclusively to MLB_Candidate_Picks.
+    """Run isolated Shadow V2 and write exclusively to MLB_Candidate_Picks.
 
     V7 is evaluated internally only to obtain the already-existing Monte Carlo market
     distribution required by the candidate scorer. No V7 recommendation is persisted.
@@ -146,8 +218,9 @@ def scan_candidate(service, persist: bool = True) -> dict[str, Any]:
         try:
             baseline_result = service._evaluate_game(game)
             shadow = service._evaluate_shadow(game, baseline_result)
-            accepted.extend(shadow.get("accepted", []))
-            diagnostics.extend(shadow.get("diagnostics", []))
+            filtered_diagnostics = [_apply_shadow_v2(row) for row in shadow.get("diagnostics", [])]
+            diagnostics.extend(filtered_diagnostics)
+            accepted.extend(row for row in filtered_diagnostics if row.get("accepted"))
             if shadow.get("error"):
                 errors.append({
                     "game_pk": game.get("game_pk"),
@@ -164,18 +237,26 @@ def scan_candidate(service, persist: bool = True) -> dict[str, Any]:
     accepted = sorted(accepted, key=_score, reverse=True)
     sheet_status = None
     if persist and accepted:
-        rows = [
-            _ledger_row(row, str(row.get("candidate_version") or "shadow-candidate-v1"))
-            for row in accepted
-        ]
+        rows = [_ledger_row(row, SHADOW_V2_VERSION) for row in accepted]
         sheet_status = append_shadow_snapshot(rows, worksheet="MLB_Candidate_Picks")
+
+    model = dict(shadow_metadata() or {})
+    model.update({
+        "filter_version": SHADOW_V2_VERSION,
+        "markets": sorted(SHADOW_V2_ALLOWED_MARKETS),
+        "min_probability": SHADOW_V2_MIN_PROB,
+        "edge_range_pp": [SHADOW_V2_MIN_EDGE, SHADOW_V2_MAX_EDGE],
+        "min_ev_pct": SHADOW_V2_MIN_EV,
+        "max_disagreement_pp": SHADOW_V2_MAX_DISAGREEMENT,
+        "kelly_cap_pct": SHADOW_V2_KELLY_CAP,
+    })
 
     return {
         "date": slate_date().isoformat(),
-        "mode": "shadow_candidate_only",
+        "mode": "shadow_candidate_v2_only",
         "games_seen": len(games),
         "ready": True,
-        "model": shadow_metadata(),
+        "model": model,
         "worksheet": "MLB_Candidate_Picks",
         "recommendations": accepted,
         "diagnostics": _diagnostic_rows(diagnostics, accepted),
