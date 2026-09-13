@@ -2417,3 +2417,9 @@ snapshot_utc,event_id,commence_time_utc,home,away,book,market,selection,line,odd
 2026-09-12T22:21:14.362783Z,824955,2026-09-13T01:40:00Z,Athletics,Seattle Mariners,Production consensus,spreads,Seattle Mariners,-1.5,101,2.01
 2026-09-12T22:21:14.362783Z,824955,2026-09-13T01:40:00Z,Athletics,Seattle Mariners,Production consensus,totals,Over,9.5,-112,1.89
 2026-09-12T22:21:14.362783Z,824955,2026-09-13T01:40:00Z,Athletics,Seattle Mariners,Production consensus,totals,Under,9.5,-108,1.93
+2026-09-13T01:04:09.202740Z,824955,2026-09-13T01:40:00Z,Athletics,Seattle Mariners,Production consensus,h2h,Athletics,,128,2.28
+2026-09-13T01:04:09.202740Z,824955,2026-09-13T01:40:00Z,Athletics,Seattle Mariners,Production consensus,h2h,Seattle Mariners,,-149,1.67
+2026-09-13T01:04:09.202740Z,824955,2026-09-13T01:40:00Z,Athletics,Seattle Mariners,Production consensus,spreads,Athletics,1.5,-128,1.78
+2026-09-13T01:04:09.202740Z,824955,2026-09-13T01:40:00Z,Athletics,Seattle Mariners,Production consensus,spreads,Seattle Mariners,-1.5,108,2.08
+2026-09-13T01:04:09.202740Z,824955,2026-09-13T01:40:00Z,Athletics,Seattle Mariners,Production consensus,totals,Over,9.5,-110,1.91
+2026-09-13T01:04:09.202740Z,824955,2026-09-13T01:40:00Z,Athletics,Seattle Mariners,Production consensus,totals,Under,9.5,-110,1.91
