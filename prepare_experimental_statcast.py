@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import json
+import random
 import time
 
 import numpy as np
@@ -33,32 +34,92 @@ START_DATE = pd.Timestamp("2021-03-15")
 CHUNK_DAYS = 35
 MIN_XWOBA_PA = 25
 MIN_BBE = 15
+FETCH_RETRIES = 6
+FETCH_BACKOFF_BASE_SECONDS = 4.0
+FAILED_FETCHES: list[dict[str, str]] = []
 
 
 def _num(s):
-    """Return a plain float64 Series, never pandas nullable integer dtype.
-
-    pybaseball's post-processing can yield nullable Int64/Float64 extension
-    arrays depending on the date chunk. Explicit float64 normalization keeps
-    later `where`/arithmetic operations stable across pandas versions while
-    preserving missing values as np.nan.
-    """
+    """Return a plain float64 Series, never pandas nullable integer dtype."""
     if isinstance(s, pd.Series):
         return pd.Series(pd.to_numeric(s, errors="coerce").to_numpy(dtype="float64", na_value=np.nan), index=s.index)
     return pd.Series(pd.to_numeric(pd.Series(s), errors="coerce").to_numpy(dtype="float64", na_value=np.nan))
 
 
-def _fetch_chunk(start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
+def _fetch_chunk_once(start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
+    """Fetch one date range with retry/backoff and a serial fallback.
+
+    Baseball Savant occasionally answers with 5xx/502 errors. We retry with
+    exponential backoff plus jitter. Later attempts disable pybaseball's
+    parallel mode because smaller/serial requests are often more reliable when
+    Savant is under load.
+    """
     err = None
-    for attempt in range(3):
+    for attempt in range(FETCH_RETRIES):
+        parallel = attempt < 3
         try:
-            print(f"Statcast {start.date()} -> {end.date()} intento={attempt+1}")
-            df = statcast(start_dt=start.date().isoformat(), end_dt=end.date().isoformat(), verbose=False, parallel=True)
+            print(
+                f"Statcast {start.date()} -> {end.date()} "
+                f"intento={attempt + 1}/{FETCH_RETRIES} parallel={parallel}"
+            )
+            df = statcast(
+                start_dt=start.date().isoformat(),
+                end_dt=end.date().isoformat(),
+                verbose=False,
+                parallel=parallel,
+            )
             return df if isinstance(df, pd.DataFrame) else pd.DataFrame()
         except Exception as exc:
             err = exc
-            time.sleep(3 * (attempt + 1))
+            if attempt + 1 < FETCH_RETRIES:
+                delay = FETCH_BACKOFF_BASE_SECONDS * (2 ** attempt) + random.uniform(0.0, 2.0)
+                delay = min(delay, 75.0)
+                print(
+                    f"WARN Statcast temporal {start.date()}..{end.date()}: {exc}. "
+                    f"Reintento en {delay:.1f}s"
+                )
+                time.sleep(delay)
     raise RuntimeError(f"Statcast falló {start.date()}..{end.date()}: {err}")
+
+
+def _fetch_chunk(start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
+    """Fetch robustly, recursively reducing a failed range.
+
+    A persistent failure for a large chunk is split in half. If even a single
+    day remains unavailable after all retries, that day is recorded and skipped
+    rather than fabricating data or aborting the entire Shadow research build.
+    The resulting missing historical coverage therefore remains NaN downstream.
+    """
+    try:
+        return _fetch_chunk_once(start, end)
+    except Exception as exc:
+        if start < end:
+            span_days = int((end - start).days)
+            mid = start + pd.Timedelta(days=span_days // 2)
+            print(
+                f"WARN Statcast rango persistente {start.date()}..{end.date()}; "
+                f"dividiendo en {start.date()}..{mid.date()} y "
+                f"{(mid + pd.Timedelta(days=1)).date()}..{end.date()}"
+            )
+            left = _fetch_chunk(start, mid)
+            right = _fetch_chunk(mid + pd.Timedelta(days=1), end)
+            if left.empty:
+                return right
+            if right.empty:
+                return left
+            return pd.concat([left, right], ignore_index=True)
+
+        failure = {
+            "start": str(start.date()),
+            "end": str(end.date()),
+            "error": str(exc),
+        }
+        FAILED_FETCHES.append(failure)
+        print(
+            f"WARN Statcast indisponible para {start.date()} tras todos los reintentos; "
+            "se conserva como cobertura faltante, sin datos inventados."
+        )
+        return pd.DataFrame()
 
 
 def _daily_from_raw(raw: pd.DataFrame) -> pd.DataFrame:
@@ -74,8 +135,6 @@ def _daily_from_raw(raw: pd.DataFrame) -> pd.DataFrame:
     x["Team"] = np.where(top, x["away_team"], x["home_team"])
     x["Team"] = pd.Series(x["Team"], index=x.index).map(normalize_team)
 
-    # Terminal plate-appearance pitch only. Statcast stores `events` only on the
-    # terminal pitch, preventing one PA from being counted several times.
     events = x["events"] if "events" in x.columns else pd.Series(np.nan, index=x.index)
     pa = x[events.notna()].copy()
     if not pa.empty:
@@ -83,9 +142,6 @@ def _daily_from_raw(raw: pd.DataFrame) -> pd.DataFrame:
         actual = _num(pa["woba_value"]) if "woba_value" in pa.columns else pd.Series(np.nan, index=pa.index, dtype="float64")
         est = _num(pa["estimated_woba_using_speedangle"]) if "estimated_woba_using_speedangle" in pa.columns else pd.Series(np.nan, index=pa.index, dtype="float64")
         pa["_woba_den"] = denom.where(denom > 0, 0.0).fillna(0.0).astype("float64")
-        # For balls in play use Statcast expected contact value. For walks/HBP/K,
-        # where speed-angle expectation is undefined, the deterministic wOBA event
-        # value is the correct non-contact component of the PA.
         component = est.combine_first(actual).astype("float64")
         pa["_xwoba_num"] = component.fillna(0.0) * pa["_woba_den"]
         pa_daily = pa.groupby(["Date", "Team"], as_index=False).agg(
@@ -94,7 +150,6 @@ def _daily_from_raw(raw: pd.DataFrame) -> pd.DataFrame:
     else:
         pa_daily = pd.DataFrame(columns=["Date", "Team", "xwoba_num", "woba_den"])
 
-    # Batted-ball events are the valid denominator for contact-quality metrics.
     ev = _num(x["launch_speed"]) if "launch_speed" in x.columns else pd.Series(np.nan, index=x.index, dtype="float64")
     bbe = x[ev.notna()].copy()
     if not bbe.empty:
@@ -122,6 +177,7 @@ def _daily_from_raw(raw: pd.DataFrame) -> pd.DataFrame:
 
 
 def build_daily(max_date: pd.Timestamp) -> pd.DataFrame:
+    FAILED_FETCHES.clear()
     parts = []
     start = START_DATE
     max_date = pd.Timestamp(max_date).normalize()
@@ -145,6 +201,8 @@ def build_daily(max_date: pd.Timestamp) -> pd.DataFrame:
     DAILY_OUT.parent.mkdir(parents=True, exist_ok=True)
     daily.to_csv(DAILY_OUT, index=False)
     print(f"OK real Statcast daily rows={len(daily)} teams={daily.Team.nunique()} dates={daily.Date.min().date()}..{daily.Date.max().date()}")
+    if FAILED_FETCHES:
+        print(f"WARN Statcast días/rangos omitidos por indisponibilidad persistente: {len(FAILED_FETCHES)}")
     return daily
 
 
@@ -152,8 +210,6 @@ def _rolling_map(daily: pd.DataFrame):
     maps = {}
     for team, g in daily.groupby("Team"):
         g = g.sort_values("Date").set_index("Date")
-        # Calendar-time rolling window. Shift one calendar day logically by
-        # querying only dates [game-30d, game-1d] below; no same-day values enter.
         maps[normalize_team(team)] = g
     return maps
 
@@ -207,9 +263,13 @@ def enrich_parquet(daily: pd.DataFrame) -> dict:
         "xwoba_note": "expected contact wOBA for BIP plus deterministic wOBA event values for non-contact PA",
         "xslg_note": "mean Statcast estimated SLG on contacted balls",
         "leakage_guard": "target game date and future dates excluded",
+        "fetch_retries": FETCH_RETRIES,
+        "persistent_fetch_failures": FAILED_FETCHES,
+        "persistent_fetch_failure_count": len(FAILED_FETCHES),
+        "missing_data_policy": "persistent unavailable source dates remain missing; no synthetic values",
     }
     REPORT.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
-    print(json.dumps({"rows": len(frame), "coverage": coverage}, indent=2))
+    print(json.dumps({"rows": len(frame), "coverage": coverage, "persistent_fetch_failures": len(FAILED_FETCHES)}, indent=2))
     return coverage
 
 
