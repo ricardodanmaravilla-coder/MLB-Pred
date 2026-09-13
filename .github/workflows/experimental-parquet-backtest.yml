@@ -120,7 +120,21 @@ jobs:
             echo "Shadow Big Data artifacts unchanged"
           else
             git commit -m "Refresh MLB Shadow Big Data v3 artifact"
-            git push
+            # Other isolated jobs archive odds/history to main while this long research
+            # workflow is running. Rebase the Shadow-only artifact commit and retry the
+            # push so an unrelated concurrent commit cannot make publication fail.
+            for attempt in 1 2 3 4 5; do
+              git pull --rebase origin main
+              if git push origin HEAD:main; then
+                echo "Shadow Big Data v3 artifacts published successfully"
+                break
+              fi
+              if [ "$attempt" -eq 5 ]; then
+                echo "Failed to publish Shadow Big Data v3 artifacts after 5 attempts"
+                exit 1
+              fi
+              sleep $((attempt * 3))
+            done
           fi
       - name: Upload research artifacts
         uses: actions/upload-artifact@v4
