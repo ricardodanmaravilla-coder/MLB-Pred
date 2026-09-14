@@ -10,6 +10,7 @@ Authentication order:
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import json
 import os
 from typing import Iterable, Mapping, Any
@@ -28,12 +29,26 @@ GOOGLE_SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive.file",
 ]
+DEFAULT_BANKROLL_MXN = 5000.0
+PROTECTED_TRACKING_FIELDS = ("snapshot_utc", "bankroll_mxn", "stake_mxn")
 
 
 def _clean(value: Any):
     if value is None:
         return ""
     return str(value).replace("\n", " ").strip()
+
+
+def _number(value: Any, default=None):
+    try:
+        if value is None:
+            return default
+        text = str(value).replace("%", "").replace("$", "").replace(",", "").strip()
+        if not text:
+            return default
+        return float(text)
+    except (TypeError, ValueError):
+        return default
 
 
 def _runtime_secret(name: str, default: Any = ""):
@@ -45,6 +60,30 @@ def _runtime_secret(name: str, default: Any = ""):
         return st.secrets.get(name, default)
     except Exception:
         return default
+
+
+def _default_bankroll() -> float:
+    value = _number(_runtime_secret("BANKROLL_MXN", DEFAULT_BANKROLL_MXN), DEFAULT_BANKROLL_MXN)
+    return float(value if value and value > 0 else DEFAULT_BANKROLL_MXN)
+
+
+def _ensure_tracking_fields(row: Mapping[str, Any]) -> dict[str, Any]:
+    """Guarantee tracking values exist even if a caller sends a partial ledger row."""
+    out = dict(row or {})
+    if not _clean(out.get("snapshot_utc")):
+        out["snapshot_utc"] = datetime.now(timezone.utc).isoformat()
+
+    bankroll = _number(out.get("bankroll_mxn"))
+    if bankroll is None or bankroll <= 0:
+        bankroll = _default_bankroll()
+        out["bankroll_mxn"] = round(bankroll, 2)
+
+    kelly = _number(out.get("kelly_pct"), 0.0) or 0.0
+    stake = _number(out.get("stake_mxn"))
+    if stake is None:
+        out["stake_mxn"] = round(bankroll * max(0.0, kelly) / 100.0, 2)
+
+    return out
 
 
 def record_key(row: Mapping[str, Any]) -> str:
@@ -177,9 +216,10 @@ def sync_rows(rows: Iterable[Mapping[str, Any]], config: Mapping[str, Any] | Non
     """Idempotently append new rows and update existing settled rows. Never raises.
 
     New pending recommendations are limited to one row per game+market. Exact existing
-    records can still be updated normally so settlement remains idempotent.
+    records can still be updated normally so settlement remains idempotent. Tracking
+    fields are completed here as a final safety net so no caller can create a blank stake.
     """
-    rows = [dict(r) for r in rows or []]
+    rows = [_ensure_tracking_fields(r) for r in (rows or [])]
     if not rows:
         return {"ok": True, "configured": configured(config), "inserted": 0, "updated": 0, "duplicates_skipped": 0, "message": "no rows"}
 
@@ -208,9 +248,11 @@ def sync_rows(rows: Iterable[Mapping[str, Any]], config: Mapping[str, Any] | Non
 
         key_to_row = {}
         slot_to_row = {}
+        row_cache = {}
         for idx, existing in enumerate(values[1:], start=2):
             padded = list(existing) + [""] * max(0, len(SHEET_HEADERS) - len(existing))
             existing_row = dict(zip(SHEET_HEADERS, padded[:len(SHEET_HEADERS)]))
+            row_cache[idx] = existing_row
             if existing_row.get("record_key"):
                 key_to_row[existing_row["record_key"]] = idx
             slot = market_slot_key(existing_row)
@@ -225,10 +267,14 @@ def sync_rows(rows: Iterable[Mapping[str, Any]], config: Mapping[str, Any] | Non
             key = record_key(row)
             enriched = dict(row)
             enriched["record_key"] = key
-            cells = [_clean(enriched.get(h)) for h in SHEET_HEADERS]
-            existing_row = key_to_row.get(key)
-            if existing_row:
-                update_payload.append({"range": f"A{existing_row}:{last_col}{existing_row}", "values": [cells]})
+            existing_row_num = key_to_row.get(key)
+            if existing_row_num:
+                previous = row_cache.get(existing_row_num, {})
+                for field in PROTECTED_TRACKING_FIELDS:
+                    if not _clean(enriched.get(field)) and _clean(previous.get(field)):
+                        enriched[field] = previous.get(field)
+                cells = [_clean(enriched.get(h)) for h in SHEET_HEADERS]
+                update_payload.append({"range": f"A{existing_row_num}:{last_col}{existing_row_num}", "values": [cells]})
                 continue
 
             status = _clean(enriched.get("result_status") or "pending").lower()
@@ -237,6 +283,7 @@ def sync_rows(rows: Iterable[Mapping[str, Any]], config: Mapping[str, Any] | Non
                 duplicates_skipped += 1
                 continue
 
+            cells = [_clean(enriched.get(h)) for h in SHEET_HEADERS]
             append_payload.append(cells)
             key_to_row[key] = -1
             if slot.strip("|"):
