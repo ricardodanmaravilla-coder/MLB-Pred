@@ -3113,3 +3113,15 @@ snapshot_utc,event_id,commence_time_utc,home,away,book,market,selection,line,odd
 2026-09-16T22:59:14.800086Z,825031,2026-09-17T01:40:00Z,Arizona Diamondbacks,Miami Marlins,Production consensus,spreads,Miami Marlins,1.5,-185,1.54
 2026-09-16T22:59:14.800086Z,825031,2026-09-17T01:40:00Z,Arizona Diamondbacks,Miami Marlins,Production consensus,totals,Over,8.5,-120,1.83
 2026-09-16T22:59:14.800086Z,825031,2026-09-17T01:40:00Z,Arizona Diamondbacks,Miami Marlins,Production consensus,totals,Under,8.5,100,2.0
+2026-09-17T01:28:47.122952Z,823979,2026-09-17T01:38:00Z,Los Angeles Angels,Seattle Mariners,Production consensus,h2h,Los Angeles Angels,,110,2.1
+2026-09-17T01:28:47.122952Z,823979,2026-09-17T01:38:00Z,Los Angeles Angels,Seattle Mariners,Production consensus,h2h,Seattle Mariners,,-135,1.74
+2026-09-17T01:28:47.122952Z,823979,2026-09-17T01:38:00Z,Los Angeles Angels,Seattle Mariners,Production consensus,spreads,Los Angeles Angels,1.5,-154,1.65
+2026-09-17T01:28:47.122952Z,823979,2026-09-17T01:38:00Z,Los Angeles Angels,Seattle Mariners,Production consensus,spreads,Seattle Mariners,-1.5,126,2.26
+2026-09-17T01:28:47.122952Z,823979,2026-09-17T01:38:00Z,Los Angeles Angels,Seattle Mariners,Production consensus,totals,Over,8.0,-106,1.94
+2026-09-17T01:28:47.122952Z,823979,2026-09-17T01:38:00Z,Los Angeles Angels,Seattle Mariners,Production consensus,totals,Under,8.0,-114,1.88
+2026-09-17T01:28:47.122952Z,825031,2026-09-17T01:40:00Z,Arizona Diamondbacks,Miami Marlins,Production consensus,h2h,Arizona Diamondbacks,,-139,1.72
+2026-09-17T01:28:47.122952Z,825031,2026-09-17T01:40:00Z,Arizona Diamondbacks,Miami Marlins,Production consensus,h2h,Miami Marlins,,116,2.16
+2026-09-17T01:28:47.122952Z,825031,2026-09-17T01:40:00Z,Arizona Diamondbacks,Miami Marlins,Production consensus,spreads,Arizona Diamondbacks,-1.5,150,2.5
+2026-09-17T01:28:47.122952Z,825031,2026-09-17T01:40:00Z,Arizona Diamondbacks,Miami Marlins,Production consensus,spreads,Miami Marlins,1.5,-182,1.55
+2026-09-17T01:28:47.122952Z,825031,2026-09-17T01:40:00Z,Arizona Diamondbacks,Miami Marlins,Production consensus,totals,Over,8.5,-132,1.76
+2026-09-17T01:28:47.122952Z,825031,2026-09-17T01:40:00Z,Arizona Diamondbacks,Miami Marlins,Production consensus,totals,Under,8.5,108,2.08
