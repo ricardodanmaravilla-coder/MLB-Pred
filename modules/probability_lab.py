@@ -1,12 +1,12 @@
 """Probability Lab v1 — isolated experimental selector cloned from V7 outputs.
 
-This module NEVER writes to the V7 production ledger. It evaluates the same V7
-per-game structure, but applies an independent experimental selection rule:
-both ML and Monte Carlo probabilities must be >= 60% for the same pick. EV and
-edge are recorded for analysis but never used as acceptance filters.
+V7 supplies the frozen evaluation structure (same inputs, ML and Monte Carlo), while
+this module owns the experimental acceptance and staking rules. It never calls the V7
+production writer and persists only to MLB_Probability_Lab.
 """
 from copy import deepcopy
 
+from .game_context import slate_date
 from .pick_ledger import append_shadow_snapshot
 
 LAB_VERSION = "v7-probability-lab-v1"
@@ -41,19 +41,43 @@ def _lab_row(row):
     out["model_version"] = LAB_VERSION
     out["filter_version"] = "probability-only-60-60-v1"
     out["kelly_pct"] = probability_stake(out.get("prob_ml"), out.get("prob_mc")) if out["accepted"] else 0.0
-    out["probabilidad"] = round((float(out.get("prob_ml")) + float(out.get("prob_mc"))) / 2.0, 2) if out["accepted"] else out.get("probabilidad")
+    if out["accepted"]:
+        out["probabilidad"] = round((float(out["prob_ml"]) + float(out["prob_mc"])) / 2.0, 2)
     return out
 
 
-def scan_probability_lab(service, persist=True):
-    """Run V7's game evaluator as a read-only clone, then apply isolated lab rules.
+def _ledger_row(row):
+    partido = str(row.get("partido") or "")
+    away, home = (partido.split(" @ ", 1) + [""])[:2] if " @ " in partido else ("", "")
+    return {
+        "game_date": row.get("game_date") or slate_date().isoformat(),
+        "game_pk": row.get("game_pk"),
+        "away": away,
+        "home": home,
+        "market": row.get("mercado") or row.get("market"),
+        "selection": row.get("apuesta") or row.get("selection"),
+        "line": row.get("linea") if row.get("linea") is not None else row.get("line"),
+        "odds": row.get("cuota") if row.get("cuota") is not None else row.get("odds"),
+        "prob_ml": row.get("prob_ml"),
+        "prob_mc": row.get("prob_mc"),
+        "prob_combined": row.get("probabilidad") if row.get("probabilidad") is not None else row.get("probability"),
+        "market_no_vig": row.get("no_vig") if row.get("no_vig") is not None else row.get("market_no_vig"),
+        "edge_pp": row.get("edge_pp"),
+        "ev_pct": row.get("ev_pct"),
+        "disagreement_pp": row.get("desacuerdo_pp") if row.get("desacuerdo_pp") is not None else row.get("disagreement_pp"),
+        "score": row.get("score"),
+        "model_version": LAB_VERSION,
+        "result_status": "pending",
+        "kelly_pct": row.get("kelly_pct"),
+    }
 
-    The experiment does not call append_snapshot and therefore cannot write to
-    MLB_Picks. Its only persistence destination is MLB_Probability_Lab.
-    """
+
+def scan_probability_lab(service, persist=True):
+    """Evaluate V7 diagnostics read-only and apply only the Lab's 60/60 rule."""
     diagnostics = []
     errors = []
-    for game in service.slate():
+    games = service.slate()
+    for game in games:
         try:
             result = service._evaluate_game(game)
             for row in result.get("diagnostics", []):
@@ -64,43 +88,18 @@ def scan_probability_lab(service, persist=True):
             errors.append({"game_pk": game.get("game_pk"), "error": str(exc)})
 
     accepted = [row for row in diagnostics if row.get("accepted")]
-    accepted.sort(key=lambda r: float(r.get("probabilidad") or 0.0), reverse=True)
+    accepted.sort(key=lambda r: float(r.get("probabilidad") or r.get("probability") or 0.0), reverse=True)
 
     sheet_status = None
     if persist and accepted:
-        rows = []
-        for row in accepted:
-            partido = str(row.get("partido") or "")
-            away, home = (partido.split(" @ ", 1) + [""])[:2] if " @ " in partido else ("", "")
-            rows.append({
-                "game_date": row.get("game_date"),
-                "game_pk": row.get("game_pk"),
-                "away": away,
-                "home": home,
-                "market": row.get("mercado"),
-                "selection": row.get("apuesta"),
-                "line": row.get("linea"),
-                "odds_decimal": row.get("cuota"),
-                "prob_ml": row.get("prob_ml"),
-                "prob_mc": row.get("prob_mc"),
-                "prob_final": row.get("probabilidad"),
-                "no_vig": row.get("no_vig"),
-                "edge_pp": row.get("edge_pp"),
-                "ev_pct": row.get("ev_pct"),
-                "disagreement_pp": row.get("desacuerdo_pp"),
-                "score": row.get("score"),
-                "model_version": LAB_VERSION,
-                "filter_version": row.get("filter_version"),
-                "kelly_pct": row.get("kelly_pct"),
-                "status": "Pendiente",
-            })
-        sheet_status = append_shadow_snapshot(rows, worksheet=LAB_WORKSHEET)
+        sheet_status = append_shadow_snapshot([_ledger_row(row) for row in accepted], worksheet=LAB_WORKSHEET)
 
     return {
         "version": LAB_VERSION,
         "worksheet": LAB_WORKSHEET,
         "rule": "prob_ml >= 60 AND prob_mc >= 60; EV/edge informational only",
         "stake_rule": "3% at 60% joint probability, linear to 10% at 80%, capped at 10%",
+        "games_seen": len(games),
         "accepted": accepted,
         "diagnostics": diagnostics,
         "errors": errors,
