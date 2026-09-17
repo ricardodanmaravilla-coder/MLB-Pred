@@ -1,0 +1,33 @@
+name: MLB Probability Lab
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probability-lab:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout isolated Probability Lab branch
+        uses: actions/checkout@v4
+        with:
+          ref: experiment/probability-lab-v1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run isolated Probability Lab
+        env:
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+          GOOGLE_SHEETS_ID: ${{ secrets.GOOGLE_SHEETS_ID }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          BANKROLL_MXN: ${{ secrets.BANKROLL_MXN }}
+        run: python run_probability_lab.py
