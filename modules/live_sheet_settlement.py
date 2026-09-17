@@ -28,6 +28,25 @@ def _effective_stake(row: dict[str, Any]) -> float:
     return 0.0
 
 
+def _settled_profit(row: dict[str, Any]):
+    """Rebuild profit for an already-settled row without changing its verdict."""
+    status = str(row.get("result_status") or "").strip().lower()
+    if status not in {"win", "loss", "push"}:
+        return None
+    stake = _effective_stake(row)
+    if stake <= 0:
+        return None
+    if status == "push":
+        return 0.0, 0.0, stake
+    if status == "loss":
+        return -1.0, round(-stake, 2), stake
+    odds = _f(row.get("odds"))
+    if odds is None or odds <= 1:
+        return None
+    units = round(odds - 1.0, 4)
+    return units, round(stake * units, 2), stake
+
+
 def _settle(row: dict[str, Any], home_runs: float, away_runs: float):
     market = str(row.get("market") or ""); selection = str(row.get("selection") or "")
     line = _f(row.get("line")); odds = _f(row.get("odds"))
@@ -100,23 +119,29 @@ def settle_pending_sheet(config=None, max_rows: int = 250):
                 updated["stake_mxn"] = effective_stake
             settled_rows.append(updated)
 
-        # Repair legacy settled losses that were previously written as $0 because stake_mxn
-        # was blank even though bankroll_mxn + kelly_pct identify the wager amount.
+        # Repair historical settled rows whose profit was left blank/zero by the old
+        # tracker. The existing win/loss/push verdict is preserved; only stake,
+        # profit_units and profit_mxn are reconstructed from bankroll/Kelly and odds.
         repaired_rows = []
         for row in rows:
             status_value = str(row.get("result_status") or "").strip().lower()
+            if status_value not in {"win", "loss", "push"}:
+                continue
+            raw_profit = str(row.get("profit_mxn") or "").strip()
             profit = _f(row.get("profit_mxn"))
-            if status_value != "loss" or profit is None and not str(row.get("profit_mxn") or "").strip():
+            needs_profit_repair = not raw_profit or profit is None or abs(profit) <= 1e-9
+            stake_now = _f(row.get("stake_mxn"), 0.0) or 0.0
+            needs_stake_repair = stake_now <= 0
+            if not needs_profit_repair and not needs_stake_repair:
                 continue
-            if abs(profit or 0.0) > 1e-9:
+            rebuilt = _settled_profit(row)
+            if rebuilt is None:
                 continue
-            stake = _effective_stake(row)
-            if stake <= 0:
-                continue
+            profit_units, profit_mxn, stake = rebuilt
             updated = dict(row)
             updated["stake_mxn"] = stake
-            updated["profit_units"] = -1.0
-            updated["profit_mxn"] = round(-stake, 2)
+            updated["profit_units"] = profit_units
+            updated["profit_mxn"] = profit_mxn
             repaired_rows.append(updated)
 
         rows_to_sync = settled_rows + repaired_rows
