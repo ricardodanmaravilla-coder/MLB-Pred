@@ -16,6 +16,18 @@ def _f(value: Any, default=None):
     except (TypeError, ValueError): return default
 
 
+def _effective_stake(row: dict[str, Any]) -> float:
+    """Return the wager amount, reconstructing legacy rows when stake_mxn is blank/zero."""
+    stake = _f(row.get("stake_mxn"))
+    if stake is not None and stake > 0:
+        return float(stake)
+    kelly = max(0.0, _f(row.get("kelly_pct"), 0.0) or 0.0)
+    bankroll = max(0.0, _f(row.get("bankroll_mxn"), 0.0) or 0.0)
+    if kelly > 0 and bankroll > 0:
+        return round(bankroll * kelly / 100.0, 2)
+    return 0.0
+
+
 def _settle(row: dict[str, Any], home_runs: float, away_runs: float):
     market = str(row.get("market") or ""); selection = str(row.get("selection") or "")
     line = _f(row.get("line")); odds = _f(row.get("odds"))
@@ -35,8 +47,8 @@ def _settle(row: dict[str, Any], home_runs: float, away_runs: float):
         result = "push" if math.isclose(margin, 0.0) else ("win" if margin > 0 else "loss")
     if result is None: return None
     profit_units = round(odds - 1.0, 4) if result == "win" else (-1.0 if result == "loss" else 0.0)
-    stake = max(0.0, _f(row.get("stake_mxn"), 0.0) or 0.0)
-    return result, profit_units, f"{int(home_runs)}-{int(away_runs)}", round(stake * profit_units, 2)
+    stake = _effective_stake(row)
+    return result, profit_units, f"{int(home_runs)}-{int(away_runs)}", round(stake * profit_units, 2), stake
 
 
 def _official_final_score(game_pk: int, timeout: int = 12):
@@ -82,10 +94,34 @@ def settle_pending_sheet(config=None, max_rows: int = 250):
             if score is None: continue
             settled = _settle(row, score[0], score[1])
             if settled is None: continue
-            result, profit_units, result_value, profit_mxn = settled; updated = dict(row)
-            updated["result_status"] = result; updated["profit_units"] = profit_units; updated["result_value"] = result_value; updated["profit_mxn"] = profit_mxn; settled_rows.append(updated)
-        sync_status = sync_rows(settled_rows, config) if settled_rows else {"ok": True, "configured": True, "inserted": 0, "updated": 0, "message": "nothing final yet"}
-        return {"ok": bool(sync_status.get("ok")), "configured": True, "checked": checked, "settled": len(settled_rows), "updated": int(sync_status.get("updated",0) or 0),
+            result, profit_units, result_value, profit_mxn, effective_stake = settled; updated = dict(row)
+            updated["result_status"] = result; updated["profit_units"] = profit_units; updated["result_value"] = result_value; updated["profit_mxn"] = profit_mxn
+            if effective_stake > 0 and (_f(updated.get("stake_mxn"), 0.0) or 0.0) <= 0:
+                updated["stake_mxn"] = effective_stake
+            settled_rows.append(updated)
+
+        # Repair legacy settled losses that were previously written as $0 because stake_mxn
+        # was blank even though bankroll_mxn + kelly_pct identify the wager amount.
+        repaired_rows = []
+        for row in rows:
+            status_value = str(row.get("result_status") or "").strip().lower()
+            profit = _f(row.get("profit_mxn"))
+            if status_value != "loss" or profit is None and not str(row.get("profit_mxn") or "").strip():
+                continue
+            if abs(profit or 0.0) > 1e-9:
+                continue
+            stake = _effective_stake(row)
+            if stake <= 0:
+                continue
+            updated = dict(row)
+            updated["stake_mxn"] = stake
+            updated["profit_units"] = -1.0
+            updated["profit_mxn"] = round(-stake, 2)
+            repaired_rows.append(updated)
+
+        rows_to_sync = settled_rows + repaired_rows
+        sync_status = sync_rows(rows_to_sync, config) if rows_to_sync else {"ok": True, "configured": True, "inserted": 0, "updated": 0, "message": "nothing final yet"}
+        return {"ok": bool(sync_status.get("ok")), "configured": True, "checked": checked, "settled": len(settled_rows), "repaired_profit_rows": len(repaired_rows), "updated": int(sync_status.get("updated",0) or 0),
                 "pending_seen":len(pending), "errors":errors[:10], "timestamp_utc":datetime.now(timezone.utc).isoformat(), "message":sync_status.get("message","")}
     except Exception as exc:
         return {"ok":False,"configured":bool(_sheet_id(config)),"checked":0,"settled":0,"updated":0,"message":f"{type(exc).__name__}: {str(exc)}"[:500]}
