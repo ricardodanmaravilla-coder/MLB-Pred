@@ -1,0 +1,87 @@
+name: MLB Probability Lab Manual
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: mlb-probability-lab-manual
+  cancel-in-progress: false
+
+jobs:
+  probability-lab:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout experiment branch
+        uses: actions/checkout@v4
+        with:
+          ref: experiment/probability-lab-v1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_WIF_SERVICE_ACCOUNT }}
+
+      - name: Resolve read-only V7 runtime configuration
+        env:
+          PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          REGION: ${{ vars.GCP_REGION || 'us-central1' }}
+        run: |
+          gcloud run services describe mlb-pred-v7 --project "$PROJECT_ID" --region "$REGION" --format=json > /tmp/v7.json
+          python - <<'PY' >> "$GITHUB_ENV"
+          import json
+          p=json.load(open('/tmp/v7.json'))
+          spec=p.get('spec',{}).get('template',{}).get('spec',{})
+          containers=spec.get('containers') or []
+          envs=(containers[0].get('env') or []) if containers else []
+          vals={e.get('name'):e.get('value','') for e in envs if isinstance(e,dict) and e.get('value') is not None}
+          print('GOOGLE_SHEETS_ID=' + str(vals.get('GOOGLE_SHEETS_ID') or '1VsB21QUsQL5EyXu7Sek5WVeNVznECiTuoIMMB4JXno4'))
+          print('BANKROLL_MXN=' + str(vals.get('BANKROLL_MXN') or '5000'))
+          PY
+
+      - name: Run isolated Probability Lab
+        env:
+          MLB_DATA_DIR: data
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+          THERUNDOWN_KEY: ${{ secrets.THERUNDOWN_KEY }}
+          ODDS_API_IO_KEY: ${{ secrets.ODDS_API_IO_KEY }}
+          SHARPAPI_KEY: ${{ secrets.SHARPAPI_KEY }}
+        run: |
+          python run_probability_lab.py | tee /tmp/probability-lab.json
+
+      - name: Validate experiment contract
+        run: |
+          python - <<'PY'
+          import json
+          raw=open('/tmp/probability-lab.json', encoding='utf-8').read()
+          start=raw.find('{')
+          assert start >= 0, 'Probability Lab returned no JSON'
+          d=json.loads(raw[start:])
+          assert d.get('version') == 'v7-probability-lab-v1'
+          assert d.get('worksheet') == 'MLB_Probability_Lab'
+          recs=d.get('accepted') or []
+          for r in recs:
+              assert float(r.get('prob_ml')) >= 60.0
+              assert float(r.get('prob_mc')) >= 60.0
+              k=float(r.get('kelly_pct'))
+              assert 3.0 <= k <= 10.0
+          sheet=d.get('sheet_status')
+          if recs:
+              assert isinstance(sheet, dict) and sheet.get('ok') is True, f'Lab Sheet write failed: {sheet}'
+              assert sheet.get('worksheet') == 'MLB_Probability_Lab', f'Wrong worksheet: {sheet}'
+          print('Probability Lab contract OK; accepted=',len(recs),'sheet=',sheet)
+          PY
