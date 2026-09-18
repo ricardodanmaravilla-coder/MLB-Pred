@@ -134,11 +134,21 @@ def _worksheet_name(config: Mapping[str, Any] | None = None) -> str:
 
 
 def _google_credentials(config: Mapping[str, Any] | None = None):
-    """Return (credentials, auth_source) using explicit JSON first, then ADC."""
+    """Return credentials without coupling the lab to V7 production persistence.
+
+    GitHub Actions can provide a short-lived OAuth token produced by its existing
+    Workload Identity Federation login. This avoids depending on the temporary ADC
+    credential file inside the isolated runner. Cloud Run keeps using ADC normally.
+    """
     payload = _credentials_payload(config)
     if payload:
         from google.oauth2.service_account import Credentials
         return Credentials.from_service_account_info(payload, scopes=GOOGLE_SCOPES), "service_account_json"
+
+    oauth_token = os.getenv("GOOGLE_OAUTH_ACCESS_TOKEN", "").strip()
+    if oauth_token:
+        from google.oauth2.credentials import Credentials
+        return Credentials(token=oauth_token, scopes=GOOGLE_SCOPES), "github_wif_access_token"
 
     import google.auth
     credentials, _ = google.auth.default(scopes=GOOGLE_SCOPES)
