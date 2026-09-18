@@ -57,6 +57,15 @@ jobs:
             --format='value(status.url)')
           test -n "$V7_URL"
           echo "MLB_PROD_URL=$V7_URL" >> "$GITHUB_ENV"
+          RUNTIME_SA=$(python - <<'PY'
+import json
+p=json.load(open('/tmp/v7.json'))
+spec=p.get('spec',{}).get('template',{}).get('spec',{})
+print(spec.get('serviceAccountName') or '')
+PY
+          )
+          test -n "$RUNTIME_SA"
+          echo "V7_RUNTIME_SERVICE_ACCOUNT=$RUNTIME_SA" >> "$GITHUB_ENV"
           python - <<'PY' >> "$GITHUB_ENV"
           import json
           p=json.load(open('/tmp/v7.json'))
@@ -84,7 +93,7 @@ jobs:
 
       - name: Export Google OAuth token for isolated Sheets writer
         run: |
-          TOKEN=$(gcloud auth print-access-token)
+          TOKEN=$(gcloud auth print-access-token --impersonate-service-account="$V7_RUNTIME_SERVICE_ACCOUNT")
           test -n "$TOKEN"
           echo "::add-mask::$TOKEN"
           echo "GOOGLE_OAUTH_ACCESS_TOKEN=$TOKEN" >> "$GITHUB_ENV"
