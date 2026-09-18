@@ -27,7 +27,6 @@ LEGACY_HEADERS = [
 SHEET_HEADERS = LEGACY_HEADERS + ["kelly_pct", "bankroll_mxn", "stake_mxn", "profit_mxn"]
 GOOGLE_SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive.file",
 ]
 DEFAULT_BANKROLL_MXN = 5000.0
 PROTECTED_TRACKING_FIELDS = ("snapshot_utc", "bankroll_mxn", "stake_mxn")
@@ -243,6 +242,9 @@ def sync_rows(rows: Iterable[Mapping[str, Any]], config: Mapping[str, Any] | Non
         import gspread
 
         client = gspread.authorize(credentials)
+        # Open directly through the Sheets API. Probability Lab only needs the
+        # spreadsheet scope; avoiding Drive discovery prevents false 403s when the
+        # service account was granted access to an existing Sheet rather than creating it.
         book = client.open_by_key(sheet_id)
         try:
             ws = book.worksheet(worksheet_name)
@@ -314,10 +316,17 @@ def sync_rows(rows: Iterable[Mapping[str, Any]], config: Mapping[str, Any] | Non
         exc_repr = repr(exc)
         exc_text = str(exc).strip()
         detail = exc_text or exc_repr or exc_type
+        # Preserve the selected auth source in diagnostics. Previously every failure
+        # was reported as "unknown", hiding whether the GitHub WIF token was actually used.
+        try:
+            failed_auth_source = auth_source
+        except UnboundLocalError:
+            failed_auth_source = "credentials_not_created"
         return {
             "ok": False, "configured": True, "inserted": 0, "updated": 0,
             "duplicates_skipped": 0,
             "message": f"{exc_type}: {detail}"[:500],
             "exception_type": exc_type,
-            "auth_source": "unknown",
+            "exception_repr": exc_repr[:500],
+            "auth_source": failed_auth_source,
         }
