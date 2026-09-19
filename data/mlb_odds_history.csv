@@ -3491,3 +3491,9 @@ snapshot_utc,event_id,commence_time_utc,home,away,book,market,selection,line,odd
 2026-09-19T01:13:33.295550Z,823898,2026-09-19T02:15:00Z,Los Angeles Dodgers,San Francisco Giants,Production consensus,spreads,San Francisco Giants,1.5,120,2.2
 2026-09-19T01:13:33.295550Z,823898,2026-09-19T02:15:00Z,Los Angeles Dodgers,San Francisco Giants,Production consensus,totals,Over,8.0,-114,1.88
 2026-09-19T01:13:33.295550Z,823898,2026-09-19T02:15:00Z,Los Angeles Dodgers,San Francisco Giants,Production consensus,totals,Under,8.0,-108,1.93
+2026-09-19T11:05:11.767057Z,824545,2026-09-19T18:10:00Z,Chicago White Sox,Detroit Tigers,Production consensus,h2h,Chicago White Sox,,-139,1.72
+2026-09-19T11:05:11.767057Z,824545,2026-09-19T18:10:00Z,Chicago White Sox,Detroit Tigers,Production consensus,h2h,Detroit Tigers,,116,2.16
+2026-09-19T11:05:11.767057Z,824545,2026-09-19T18:10:00Z,Chicago White Sox,Detroit Tigers,Production consensus,spreads,Chicago White Sox,-1.5,154,2.54
+2026-09-19T11:05:11.767057Z,824545,2026-09-19T18:10:00Z,Chicago White Sox,Detroit Tigers,Production consensus,spreads,Detroit Tigers,1.5,-189,1.53
+2026-09-19T11:05:11.767057Z,824545,2026-09-19T18:10:00Z,Chicago White Sox,Detroit Tigers,Production consensus,totals,Over,8.0,-118,1.85
+2026-09-19T11:05:11.767057Z,824545,2026-09-19T18:10:00Z,Chicago White Sox,Detroit Tigers,Production consensus,totals,Under,8.0,-102,1.98
