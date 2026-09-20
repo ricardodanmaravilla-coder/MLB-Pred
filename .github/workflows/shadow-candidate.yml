@@ -3,9 +3,11 @@ name: MLB Shadow Candidate
 on:
   workflow_dispatch:
   schedule:
-    # GitHub Actions schedules can be delayed. Check frequently and use the
-    # daily cache lock so Shadow runs once without ever touching V7 writes.
-    - cron: '2,7,12,17,22,27,32,37,42,47,52,57 * * * *'
+    # Staggered schedules improve reliability because GitHub scheduled events
+    # can be delayed or dropped under load. The daily lock still guarantees
+    # only one successful Shadow scan per UTC date.
+    - cron: '2,12,22,32,42,52 * * * *'
+    - cron: '7,17,27,37,47,57 * * * *'
 
 permissions:
   contents: read
