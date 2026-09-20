@@ -3717,3 +3717,9 @@ snapshot_utc,event_id,commence_time_utc,home,away,book,market,selection,line,odd
 2026-09-19T23:10:15.347315Z,823976,2026-09-20T01:38:00Z,Los Angeles Angels,Minnesota Twins,Production consensus,spreads,Minnesota Twins,-1.5,155,2.55
 2026-09-19T23:10:15.347315Z,823976,2026-09-20T01:38:00Z,Los Angeles Angels,Minnesota Twins,Production consensus,totals,Over,7.5,102,2.02
 2026-09-19T23:10:15.347315Z,823976,2026-09-20T01:38:00Z,Los Angeles Angels,Minnesota Twins,Production consensus,totals,Under,7.5,-123,1.81
+2026-09-20T01:14:00.002494Z,823976,2026-09-20T01:38:00Z,Los Angeles Angels,Minnesota Twins,Production consensus,h2h,Los Angeles Angels,,-127,1.79
+2026-09-20T01:14:00.002494Z,823976,2026-09-20T01:38:00Z,Los Angeles Angels,Minnesota Twins,Production consensus,h2h,Minnesota Twins,,105,2.05
+2026-09-20T01:14:00.002494Z,823976,2026-09-20T01:38:00Z,Los Angeles Angels,Minnesota Twins,Production consensus,spreads,Los Angeles Angels,-1.5,169,2.69
+2026-09-20T01:14:00.002494Z,823976,2026-09-20T01:38:00Z,Los Angeles Angels,Minnesota Twins,Production consensus,spreads,Minnesota Twins,1.5,-208,1.48
+2026-09-20T01:14:00.002494Z,823976,2026-09-20T01:38:00Z,Los Angeles Angels,Minnesota Twins,Production consensus,totals,Over,7.0,-123,1.81
+2026-09-20T01:14:00.002494Z,823976,2026-09-20T01:38:00Z,Los Angeles Angels,Minnesota Twins,Production consensus,totals,Under,7.0,103,2.03
