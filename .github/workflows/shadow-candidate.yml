@@ -5,7 +5,7 @@ on:
   schedule:
     # GitHub Actions schedules can be delayed. Check frequently and use the
     # daily cache lock so Shadow runs once without ever touching V7 writes.
-    - cron: '*/5 * * * *'
+    - cron: '2,7,12,17,22,27,32,37,42,47,52,57 * * * *'
 
 permissions:
   contents: read
