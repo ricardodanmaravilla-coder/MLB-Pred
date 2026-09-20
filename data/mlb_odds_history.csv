@@ -3927,3 +3927,9 @@ snapshot_utc,event_id,commence_time_utc,home,away,book,market,selection,line,odd
 2026-09-20T19:29:54.664662Z,824789,2026-09-20T23:20:00Z,Baltimore Orioles,Milwaukee Brewers,Production consensus,spreads,Milwaukee Brewers,-1.5,-118,1.85
 2026-09-20T19:29:54.664662Z,824789,2026-09-20T23:20:00Z,Baltimore Orioles,Milwaukee Brewers,Production consensus,totals,Over,7.5,-110,1.91
 2026-09-20T19:29:54.664662Z,824789,2026-09-20T23:20:00Z,Baltimore Orioles,Milwaukee Brewers,Production consensus,totals,Under,7.5,-110,1.91
+2026-09-20T22:29:43.754685Z,824789,2026-09-20T23:20:00Z,Baltimore Orioles,Milwaukee Brewers,Production consensus,h2h,Baltimore Orioles,,175,2.75
+2026-09-20T22:29:43.754685Z,824789,2026-09-20T23:20:00Z,Baltimore Orioles,Milwaukee Brewers,Production consensus,h2h,Milwaukee Brewers,,-208,1.48
+2026-09-20T22:29:43.754685Z,824789,2026-09-20T23:20:00Z,Baltimore Orioles,Milwaukee Brewers,Production consensus,spreads,Baltimore Orioles,1.5,-102,1.98
+2026-09-20T22:29:43.754685Z,824789,2026-09-20T23:20:00Z,Baltimore Orioles,Milwaukee Brewers,Production consensus,spreads,Milwaukee Brewers,-1.5,-118,1.85
+2026-09-20T22:29:43.754685Z,824789,2026-09-20T23:20:00Z,Baltimore Orioles,Milwaukee Brewers,Production consensus,totals,Over,7.5,-110,1.91
+2026-09-20T22:29:43.754685Z,824789,2026-09-20T23:20:00Z,Baltimore Orioles,Milwaukee Brewers,Production consensus,totals,Under,7.5,-110,1.91
