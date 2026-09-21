@@ -139,6 +139,36 @@ jobs:
             "${SA_ARG[@]}" \
             --update-env-vars="MLB_DATA_DIR=data,MLB_PROD_URL=$MLB_PROD_URL,GOOGLE_SHEETS_ID=$SHADOW_SHEET_ID,BANKROLL_MXN=$SHADOW_BANKROLL"
 
+      - name: Configure Cloud Scheduler every 15 minutes
+        env:
+          PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          REGION: ${{ vars.GCP_REGION || 'us-central1' }}
+        run: |
+          URL=$(gcloud run services describe mlb-pred-shadow \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --format='value(status.url)')
+          test -n "$URL"
+          JOB="mlb-shadow-bigdata-v3-15m"
+          if gcloud scheduler jobs describe "$JOB" --project "$PROJECT_ID" --location "$REGION" >/dev/null 2>&1; then
+            gcloud scheduler jobs update http "$JOB" \
+              --project "$PROJECT_ID" \
+              --location "$REGION" \
+              --schedule="*/15 * * * *" \
+              --uri="$URL/api/candidate/tick" \
+              --http-method=POST \
+              --attempt-deadline=600s
+          else
+            gcloud scheduler jobs create http "$JOB" \
+              --project "$PROJECT_ID" \
+              --location "$REGION" \
+              --schedule="*/15 * * * *" \
+              --uri="$URL/api/candidate/tick" \
+              --http-method=POST \
+              --attempt-deadline=600s
+          fi
+          gcloud scheduler jobs describe "$JOB" --project "$PROJECT_ID" --location "$REGION"
+
       - name: Verify isolated Shadow runtime and live dependencies
         env:
           PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
