@@ -82,12 +82,10 @@ jobs:
           assert usable > 0, 'V7 public slate has no usable live markets'
           PY
 
-      - name: Export Google OAuth token for isolated Sheets writer
+      - name: Use WIF ADC for isolated Sheets writer
         run: |
-          TOKEN=$(gcloud auth print-access-token --impersonate-service-account="712682147851-compute@developer.gserviceaccount.com")
-          test -n "$TOKEN"
-          echo "::add-mask::$TOKEN"
-          echo "GOOGLE_OAUTH_ACCESS_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+          test -n "$GOOGLE_APPLICATION_CREDENTIALS"
+          echo "Probability Lab will use Workload Identity ADC for Sheets"
 
       - name: Run isolated Probability Lab
         run: python run_probability_lab.py
