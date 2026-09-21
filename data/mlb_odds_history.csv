@@ -3951,3 +3951,9 @@ snapshot_utc,event_id,commence_time_utc,home,away,book,market,selection,line,odd
 2026-09-21T19:33:21.055600Z,823169,2026-09-22T01:45:00Z,San Francisco Giants,Minnesota Twins,Production consensus,spreads,San Francisco Giants,1.5,-164,1.61
 2026-09-21T19:33:21.055600Z,823169,2026-09-22T01:45:00Z,San Francisco Giants,Minnesota Twins,Production consensus,totals,Over,8.5,-102,1.98
 2026-09-21T19:33:21.055600Z,823169,2026-09-22T01:45:00Z,San Francisco Giants,Minnesota Twins,Production consensus,totals,Under,8.5,-118,1.85
+2026-09-21T23:20:54.694940Z,823169,2026-09-22T01:45:00Z,San Francisco Giants,Minnesota Twins,Production consensus,h2h,Minnesota Twins,,-127,1.79
+2026-09-21T23:20:54.694940Z,823169,2026-09-22T01:45:00Z,San Francisco Giants,Minnesota Twins,Production consensus,h2h,San Francisco Giants,,105,2.05
+2026-09-21T23:20:54.694940Z,823169,2026-09-22T01:45:00Z,San Francisco Giants,Minnesota Twins,Production consensus,spreads,Minnesota Twins,-1.5,135,2.35
+2026-09-21T23:20:54.694940Z,823169,2026-09-22T01:45:00Z,San Francisco Giants,Minnesota Twins,Production consensus,spreads,San Francisco Giants,1.5,-161,1.62
+2026-09-21T23:20:54.694940Z,823169,2026-09-22T01:45:00Z,San Francisco Giants,Minnesota Twins,Production consensus,totals,Over,8.0,-110,1.91
+2026-09-21T23:20:54.694940Z,823169,2026-09-22T01:45:00Z,San Francisco Giants,Minnesota Twins,Production consensus,totals,Under,8.0,-110,1.91
