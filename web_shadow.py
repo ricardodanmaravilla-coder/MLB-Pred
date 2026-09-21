@@ -151,8 +151,42 @@ def health():
         "worksheet": SHADOW_WORKSHEET,
         "scan_endpoint": "/api/candidate/scan",
         "settle_endpoint": "/api/candidate/settle",
+        "tick_endpoint": "/api/candidate/tick",
     })
     return data
+
+
+@app.post("/api/candidate/tick")
+def candidate_tick():
+    """Cheap 15-minute scheduler gate. Scan only inside the 45-minute pregame window."""
+    try:
+        games = get_shadow_service().slate()
+        now = datetime.now(timezone.utc)
+        starts = []
+        for game in games:
+            raw = game.get("start_time_utc")
+            if not raw:
+                continue
+            try:
+                start = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+                if start.tzinfo is None:
+                    start = start.replace(tzinfo=timezone.utc)
+                if start > now:
+                    starts.append(start)
+            except Exception:
+                continue
+        if not starts:
+            return {"ok": True, "scan_due": False, "reason": "no_unstarted_games", "service": "mlb-pred-shadow", "production_write": False}
+        next_game = min(starts)
+        minutes = (next_game - now).total_seconds() / 60.0
+        if not (0.0 < minutes <= 45.0):
+            return {"ok": True, "scan_due": False, "minutes_to_next": round(minutes, 2), "next_game_utc": next_game.isoformat(), "service": "mlb-pred-shadow", "production_write": False}
+        result = scan_candidate(get_shadow_service(), persist=True)
+        result.update({"ok": True, "scan_due": True, "minutes_to_next": round(minutes, 2), "next_game_utc": next_game.isoformat(), "service": "mlb-pred-shadow", "runtime_isolated_from_v7": True, "production_write": False, "worksheet": SHADOW_WORKSHEET})
+        result["settlement"] = settle_pending_sheet({"worksheet": SHADOW_WORKSHEET})
+        return result
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @app.post("/api/candidate/scan")
