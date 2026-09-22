@@ -3957,3 +3957,9 @@ snapshot_utc,event_id,commence_time_utc,home,away,book,market,selection,line,odd
 2026-09-21T23:20:54.694940Z,823169,2026-09-22T01:45:00Z,San Francisco Giants,Minnesota Twins,Production consensus,spreads,San Francisco Giants,1.5,-161,1.62
 2026-09-21T23:20:54.694940Z,823169,2026-09-22T01:45:00Z,San Francisco Giants,Minnesota Twins,Production consensus,totals,Over,8.0,-110,1.91
 2026-09-21T23:20:54.694940Z,823169,2026-09-22T01:45:00Z,San Francisco Giants,Minnesota Twins,Production consensus,totals,Under,8.0,-110,1.91
+2026-09-22T10:01:36.755386Z,823543,2026-09-22T17:05:00Z,New York Yankees,Tampa Bay Rays,Production consensus,h2h,New York Yankees,,-132,1.76
+2026-09-22T10:01:36.755386Z,823543,2026-09-22T17:05:00Z,New York Yankees,Tampa Bay Rays,Production consensus,h2h,Tampa Bay Rays,,108,2.08
+2026-09-22T10:01:36.755386Z,823543,2026-09-22T17:05:00Z,New York Yankees,Tampa Bay Rays,Production consensus,spreads,New York Yankees,-1.5,170,2.7
+2026-09-22T10:01:36.755386Z,823543,2026-09-22T17:05:00Z,New York Yankees,Tampa Bay Rays,Production consensus,spreads,Tampa Bay Rays,1.5,-208,1.48
+2026-09-22T10:01:36.755386Z,823543,2026-09-22T17:05:00Z,New York Yankees,Tampa Bay Rays,Production consensus,totals,Over,6.5,-120,1.83
+2026-09-22T10:01:36.755386Z,823543,2026-09-22T17:05:00Z,New York Yankees,Tampa Bay Rays,Production consensus,totals,Under,6.5,100,2.0
