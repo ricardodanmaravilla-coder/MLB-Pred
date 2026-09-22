@@ -91,7 +91,7 @@ jobs:
           echo "Probability Lab Sheets writer uses the same service account already shared as Editor"
           HTTP=$(curl -sS -o /tmp/sheet-smoke.json -w "%{http_code}" -H "Authorization: Bearer $TOKEN" "https://sheets.googleapis.com/v4/spreadsheets/$GOOGLE_SHEETS_ID?fields=spreadsheetId")
           echo "Sheets API smoke status=$HTTP"
-          test "$HTTP" = "200"
+          if [ "$HTTP" != "200" ]; then cat /tmp/sheet-smoke.json; exit 1; fi
 
       - name: Run isolated Probability Lab
         run: python run_probability_lab.py
