@@ -3963,3 +3963,39 @@ snapshot_utc,event_id,commence_time_utc,home,away,book,market,selection,line,odd
 2026-09-22T10:01:36.755386Z,823543,2026-09-22T17:05:00Z,New York Yankees,Tampa Bay Rays,Production consensus,spreads,Tampa Bay Rays,1.5,-208,1.48
 2026-09-22T10:01:36.755386Z,823543,2026-09-22T17:05:00Z,New York Yankees,Tampa Bay Rays,Production consensus,totals,Over,6.5,-120,1.83
 2026-09-22T10:01:36.755386Z,823543,2026-09-22T17:05:00Z,New York Yankees,Tampa Bay Rays,Production consensus,totals,Under,6.5,100,2.0
+2026-09-22T14:58:26.356789Z,823543,2026-09-22T17:05:00Z,New York Yankees,Tampa Bay Rays,Production consensus,h2h,New York Yankees,,-133,1.75
+2026-09-22T14:58:26.356789Z,823543,2026-09-22T17:05:00Z,New York Yankees,Tampa Bay Rays,Production consensus,h2h,Tampa Bay Rays,,111,2.11
+2026-09-22T14:58:26.356789Z,823543,2026-09-22T17:05:00Z,New York Yankees,Tampa Bay Rays,Production consensus,spreads,New York Yankees,-1.5,164,2.64
+2026-09-22T14:58:26.356789Z,823543,2026-09-22T17:05:00Z,New York Yankees,Tampa Bay Rays,Production consensus,spreads,Tampa Bay Rays,1.5,-200,1.5
+2026-09-22T14:58:26.356789Z,823543,2026-09-22T17:05:00Z,New York Yankees,Tampa Bay Rays,Production consensus,totals,Over,6.5,-108,1.93
+2026-09-22T14:58:26.356789Z,823543,2026-09-22T17:05:00Z,New York Yankees,Tampa Bay Rays,Production consensus,totals,Under,6.5,-112,1.89
+2026-09-22T14:58:26.356789Z,824785,2026-09-22T22:35:00Z,Baltimore Orioles,Toronto Blue Jays,Production consensus,h2h,Baltimore Orioles,,-120,1.83
+2026-09-22T14:58:26.356789Z,824785,2026-09-22T22:35:00Z,Baltimore Orioles,Toronto Blue Jays,Production consensus,h2h,Toronto Blue Jays,,102,2.02
+2026-09-22T14:58:26.356789Z,824785,2026-09-22T22:35:00Z,Baltimore Orioles,Toronto Blue Jays,Production consensus,spreads,Baltimore Orioles,-1.5,172,2.72
+2026-09-22T14:58:26.356789Z,824785,2026-09-22T22:35:00Z,Baltimore Orioles,Toronto Blue Jays,Production consensus,spreads,Toronto Blue Jays,1.5,-217,1.46
+2026-09-22T14:58:26.356789Z,824785,2026-09-22T22:35:00Z,Baltimore Orioles,Toronto Blue Jays,Production consensus,totals,Over,7.5,104,2.04
+2026-09-22T14:58:26.356789Z,824785,2026-09-22T22:35:00Z,Baltimore Orioles,Toronto Blue Jays,Production consensus,totals,Under,7.5,-127,1.79
+2026-09-22T14:58:26.356789Z,823328,2026-09-22T22:40:00Z,Pittsburgh Pirates,St. Louis Cardinals,Production consensus,h2h,Pittsburgh Pirates,,-172,1.58
+2026-09-22T14:58:26.356789Z,823328,2026-09-22T22:40:00Z,Pittsburgh Pirates,St. Louis Cardinals,Production consensus,h2h,St. Louis Cardinals,,144,2.44
+2026-09-22T14:58:26.356789Z,823328,2026-09-22T22:40:00Z,Pittsburgh Pirates,St. Louis Cardinals,Production consensus,spreads,Pittsburgh Pirates,-1.5,134,2.34
+2026-09-22T14:58:26.356789Z,823328,2026-09-22T22:40:00Z,Pittsburgh Pirates,St. Louis Cardinals,Production consensus,spreads,St. Louis Cardinals,1.5,-161,1.62
+2026-09-22T14:58:26.356789Z,823328,2026-09-22T22:40:00Z,Pittsburgh Pirates,St. Louis Cardinals,Production consensus,totals,Over,7.0,-123,1.81
+2026-09-22T14:58:26.356789Z,823328,2026-09-22T22:40:00Z,Pittsburgh Pirates,St. Louis Cardinals,Production consensus,totals,Under,7.0,-5000,1.02
+2026-09-22T14:58:26.356789Z,823412,2026-09-22T22:40:00Z,Philadelphia Phillies,Milwaukee Brewers,Production consensus,h2h,Milwaukee Brewers,,115,2.15
+2026-09-22T14:58:26.356789Z,823412,2026-09-22T22:40:00Z,Philadelphia Phillies,Milwaukee Brewers,Production consensus,h2h,Philadelphia Phillies,,-141,1.71
+2026-09-22T14:58:26.356789Z,823412,2026-09-22T22:40:00Z,Philadelphia Phillies,Milwaukee Brewers,Production consensus,spreads,Milwaukee Brewers,1.5,-189,1.53
+2026-09-22T14:58:26.356789Z,823412,2026-09-22T22:40:00Z,Philadelphia Phillies,Milwaukee Brewers,Production consensus,spreads,Philadelphia Phillies,-1.5,155,2.55
+2026-09-22T14:58:26.356789Z,823412,2026-09-22T22:40:00Z,Philadelphia Phillies,Milwaukee Brewers,Production consensus,totals,Over,7.5,104,2.04
+2026-09-22T14:58:26.356789Z,823412,2026-09-22T22:40:00Z,Philadelphia Phillies,Milwaukee Brewers,Production consensus,totals,Under,7.5,-127,1.79
+2026-09-22T14:58:26.356789Z,824222,2026-09-22T22:40:00Z,Detroit Tigers,Washington Nationals,Production consensus,h2h,Detroit Tigers,,-159,1.63
+2026-09-22T14:58:26.356789Z,824222,2026-09-22T22:40:00Z,Detroit Tigers,Washington Nationals,Production consensus,h2h,Washington Nationals,,134,2.34
+2026-09-22T14:58:26.356789Z,824222,2026-09-22T22:40:00Z,Detroit Tigers,Washington Nationals,Production consensus,spreads,Detroit Tigers,-1.5,134,2.34
+2026-09-22T14:58:26.356789Z,824222,2026-09-22T22:40:00Z,Detroit Tigers,Washington Nationals,Production consensus,spreads,Washington Nationals,1.5,-161,1.62
+2026-09-22T14:58:26.356789Z,824222,2026-09-22T22:40:00Z,Detroit Tigers,Washington Nationals,Production consensus,totals,Over,8.0,-118,1.85
+2026-09-22T14:58:26.356789Z,824222,2026-09-22T22:40:00Z,Detroit Tigers,Washington Nationals,Production consensus,totals,Under,8.0,-102,1.98
+2026-09-22T14:58:26.356789Z,824709,2026-09-22T22:45:00Z,Boston Red Sox,Cleveland Guardians,Production consensus,h2h,Boston Red Sox,,-130,1.77
+2026-09-22T14:58:26.356789Z,824709,2026-09-22T22:45:00Z,Boston Red Sox,Cleveland Guardians,Production consensus,h2h,Cleveland Guardians,,108,2.08
+2026-09-22T14:58:26.356789Z,824709,2026-09-22T22:45:00Z,Boston Red Sox,Cleveland Guardians,Production consensus,spreads,Boston Red Sox,-1.5,168,2.68
+2026-09-22T14:58:26.356789Z,824709,2026-09-22T22:45:00Z,Boston Red Sox,Cleveland Guardians,Production consensus,spreads,Cleveland Guardians,1.5,-204,1.49
+2026-09-22T14:58:26.356789Z,824709,2026-09-22T22:45:00Z,Boston Red Sox,Cleveland Guardians,Production consensus,totals,Over,6.5,-122,1.82
+2026-09-22T14:58:26.356789Z,824709,2026-09-22T22:45:00Z,Boston Red Sox,Cleveland Guardians,Production consensus,totals,Under,6.5,102,2.02
