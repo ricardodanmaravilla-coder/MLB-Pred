@@ -84,7 +84,7 @@ jobs:
 
       - name: Export Sheets token from authorized runtime service account
         run: |
-          TOKEN=$(gcloud auth print-access-token --impersonate-service-account="712682147851-compute@developer.gserviceaccount.com")
+          TOKEN=$(gcloud auth print-access-token --impersonate-service-account="712682147851-compute@developer.gserviceaccount.com" --scopes="https://www.googleapis.com/auth/spreadsheets,https://www.googleapis.com/auth/cloud-platform")
           test -n "$TOKEN"
           echo "::add-mask::$TOKEN"
           echo "GOOGLE_OAUTH_ACCESS_TOKEN=$TOKEN" >> "$GITHUB_ENV"
