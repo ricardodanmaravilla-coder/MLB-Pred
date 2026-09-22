@@ -30,7 +30,7 @@ GOOGLE_SCOPES = [
     "https://www.googleapis.com/auth/drive.file",
 ]
 DEFAULT_BANKROLL_MXN = 5000.0
-PROTECTED_TRACKING_FIELDS = ("snapshot_utc", "bankroll_mxn", "stake_mxn")
+PROTECTED_TRACKING_FIELDS = ("snapshot_utc", "bankroll_mxn", "stake_mxn", "profit_mxn")
 
 
 def _clean(value: Any):
