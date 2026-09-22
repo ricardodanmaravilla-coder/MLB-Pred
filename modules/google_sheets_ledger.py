@@ -273,6 +273,10 @@ def sync_rows(rows: Iterable[Mapping[str, Any]], config: Mapping[str, Any] | Non
                 for field in PROTECTED_TRACKING_FIELDS:
                     if not _clean(enriched.get(field)) and _clean(previous.get(field)):
                         enriched[field] = previous.get(field)
+                # Re-run the tracking safety net after merging the existing row.
+                # This guarantees bankroll/stake are backfilled on legacy or partial
+                # records instead of preserving blank tracking columns forever.
+                enriched = _ensure_tracking_fields(enriched)
                 cells = [_clean(enriched.get(h)) for h in SHEET_HEADERS]
                 update_payload.append({"range": f"A{existing_row_num}:{last_col}{existing_row_num}", "values": [cells]})
                 continue
