@@ -89,6 +89,9 @@ jobs:
           echo "::add-mask::$TOKEN"
           echo "GOOGLE_OAUTH_ACCESS_TOKEN=$TOKEN" >> "$GITHUB_ENV"
           echo "Probability Lab Sheets writer uses the same service account already shared as Editor"
+          HTTP=$(curl -sS -o /tmp/sheet-smoke.json -w "%{http_code}" -H "Authorization: Bearer $TOKEN" "https://sheets.googleapis.com/v4/spreadsheets/$GOOGLE_SHEETS_ID?fields=spreadsheetId")
+          echo "Sheets API smoke status=$HTTP"
+          test "$HTTP" = "200"
 
       - name: Run isolated Probability Lab
         run: python run_probability_lab.py
