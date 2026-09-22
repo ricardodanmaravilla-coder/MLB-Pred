@@ -166,6 +166,12 @@ def main():
         "errors": result["errors"],
     }, ensure_ascii=False, indent=2, default=str))
 
+    sheet_status = result.get("sheet_status") or {}
+    if result.get("accepted") and not sheet_status.get("ok"):
+        raise SystemExit("Probability Lab generated picks but failed to persist them to Google Sheets")
+    if not settlement.get("ok"):
+        raise SystemExit("Probability Lab settlement could not access Google Sheets")
+
 
 if __name__ == "__main__":
     main()
