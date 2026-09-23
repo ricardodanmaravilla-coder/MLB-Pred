@@ -77,12 +77,37 @@ def scan_probability_lab(service, persist=True):
     diagnostics = []
     errors = []
     games = service.slate()
+    target_date = slate_date().isoformat()
+
+    # Probability Lab is a same-day experiment: never persist tomorrow's slate.
+    # V7's public /api/slate can contain upcoming games around day boundaries,
+    # so filter explicitly by the MLB/New York slate date before evaluation.
+    same_day_games = []
+    for game in games:
+        raw_date = game.get("game_date")
+        if raw_date:
+            game_date = str(raw_date)[:10]
+        else:
+            start = game.get("start_time_utc") or game.get("commence_time")
+            try:
+                from .game_context import parse_utc
+                dt = parse_utc(start)
+                game_date = dt.astimezone(__import__("zoneinfo").ZoneInfo("America/New_York")).date().isoformat() if dt else target_date
+            except Exception:
+                game_date = target_date
+        if game_date == target_date:
+            game = dict(game)
+            game["game_date"] = target_date
+            same_day_games.append(game)
+
+    games = same_day_games
     for game in games:
         try:
             result = service._evaluate_game(game)
             for row in result.get("diagnostics", []):
                 lab = _lab_row(row)
                 lab["game_pk"] = game.get("game_pk")
+                lab["game_date"] = game.get("game_date") or target_date
                 diagnostics.append(lab)
         except Exception as exc:
             errors.append({"game_pk": game.get("game_pk"), "error": str(exc)})
