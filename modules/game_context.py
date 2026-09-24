@@ -10,6 +10,9 @@ from .team_utils import normalize_team
 from .multi_odds import install_requests_bridge
 from .therundown_odds import install_therundown_provider
 
+MIN_PLAUSIBLE_DECIMAL_ODDS = 1.20
+MAX_PLAUSIBLE_DECIMAL_ODDS = 6.00
+
 SLATE_TZ = ZoneInfo("America/New_York")
 ROOF_OR_DOME_TEAMS = {"AZ", "HOU", "MIA", "MIL", "SEA", "TB", "TEX", "TOR"}
 
@@ -147,6 +150,14 @@ def match_odds_game(odds_games, mlb_game, max_hours=2.0):
     return scored[0][1]
 
 
+def _plausible_decimal_odds(value):
+    try:
+        x = float(value)
+        return x if MIN_PLAUSIBLE_DECIMAL_ODDS <= x <= MAX_PLAUSIBLE_DECIMAL_ODDS else None
+    except (TypeError, ValueError):
+        return None
+
+
 def market_from_event(event, american_to_decimal):
     """Choose one bookmaker and keep all markets internally coherent.
 
@@ -175,9 +186,9 @@ def market_from_event(event, american_to_decimal):
                 for o in outcomes:
                     name = normalize_team(o.get('name'))
                     if name == normalize_team(home):
-                        snap['cuota_loc'] = american_to_decimal(o.get('price'))
+                        snap['cuota_loc'] = _plausible_decimal_odds(american_to_decimal(o.get('price')))
                     elif name == normalize_team(away):
-                        snap['cuota_vis'] = american_to_decimal(o.get('price'))
+                        snap['cuota_vis'] = _plausible_decimal_odds(american_to_decimal(o.get('price')))
                 if snap['cuota_loc'] and snap['cuota_vis']:
                     found.add('h2h')
             elif key == 'totals':
@@ -185,10 +196,10 @@ def market_from_event(event, american_to_decimal):
                 for o in outcomes:
                     if o.get('name') == 'Over':
                         over_point = o.get('point')
-                        snap['cuota_over'] = american_to_decimal(o.get('price'))
+                        snap['cuota_over'] = _plausible_decimal_odds(american_to_decimal(o.get('price')))
                     elif o.get('name') == 'Under':
                         under_point = o.get('point')
-                        snap['cuota_under'] = american_to_decimal(o.get('price'))
+                        snap['cuota_under'] = _plausible_decimal_odds(american_to_decimal(o.get('price')))
                 if over_point is not None and under_point is not None and float(over_point) == float(under_point) and snap['cuota_over'] and snap['cuota_under']:
                     snap['linea_carreras'] = float(over_point)
                     found.add('totals')
@@ -198,10 +209,10 @@ def market_from_event(event, american_to_decimal):
                     point = o.get('point')
                     if name == normalize_team(home) and point is not None:
                         snap['spread_loc'] = float(point)
-                        snap['cuota_spread_loc'] = american_to_decimal(o.get('price'))
+                        snap['cuota_spread_loc'] = _plausible_decimal_odds(american_to_decimal(o.get('price')))
                     elif name == normalize_team(away) and point is not None:
                         snap['spread_vis'] = float(point)
-                        snap['cuota_spread_vis'] = american_to_decimal(o.get('price'))
+                        snap['cuota_spread_vis'] = _plausible_decimal_odds(american_to_decimal(o.get('price')))
                 if (snap['spread_loc'] is not None and snap['spread_vis'] is not None
                         and abs(snap['spread_loc'] + snap['spread_vis']) < 1e-9
                         and snap['cuota_spread_loc'] and snap['cuota_spread_vis']):
