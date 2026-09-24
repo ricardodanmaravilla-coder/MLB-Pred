@@ -61,3 +61,11 @@ def test_implausible_market_odds_are_rejected():
     assert market['cuota_over'] is None and market['linea_carreras'] is None
     assert total_candidate('Over 7.5',65,65,51.0,.5) is None
 
+
+
+def test_totals_survive_when_book_has_no_moneyline():
+    event={'home_team':'Baltimore Orioles','away_team':'Toronto Blue Jays','bookmakers':[{'title':'totals-only','markets':[{'key':'totals','outcomes':[{'name':'Over','price':-110,'point':7.5},{'name':'Under','price':-110,'point':7.5}]}]}]}
+    market=market_from_event(event, american_to_decimal)
+    assert market['linea_carreras'] == 7.5
+    assert market['cuota_over'] is not None and market['cuota_under'] is not None
+
