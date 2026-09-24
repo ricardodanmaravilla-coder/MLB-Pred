@@ -52,7 +52,9 @@ def _candidate(market, selection, prob_ml, prob_mc, odds, market_no_vig,
         push = max(0.0, min(99.0, float(push_pct)))
     except (TypeError, ValueError):
         return None
-    if o <= 1.0:
+    # Provider/data guard: reject malformed or implausible MLB decimal prices before
+    # they can manufacture artificial EV/edge/Kelly. This does not cap pick volume.
+    if o < 1.20 or o > 6.00:
         return None
 
     combined = (pml + pmc) / 2.0
