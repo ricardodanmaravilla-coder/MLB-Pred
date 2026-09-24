@@ -28,7 +28,8 @@ def _v7_live_slate():
         raise RuntimeError("V7 public slate is empty")
     usable = [g for g in games if g.get("cuota_loc") is not None and g.get("cuota_vis") is not None and g.get("linea_carreras") is not None]
     if not usable:
-        raise RuntimeError("V7 public slate has no usable live markets")
+        print("WARNING: V7 public slate has no usable live markets; Probability Lab will use its isolated local odds providers")
+        return None
     print(f"Probability Lab read-only V7 slate: games={len(games)} usable_markets={len(usable)}")
     return games
 
