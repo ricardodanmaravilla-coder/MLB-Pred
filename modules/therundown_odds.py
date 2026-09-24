@@ -99,7 +99,7 @@ def _has_core_markets(events):
     return any(isinstance(m,dict) and _market_kind(m) in {"ml","spread","total"} for e in events if isinstance(e,dict) for m in (e.get("markets") or [])) if isinstance(events,list) else False
 
 def _request_payload(get_fn,url,headers,affiliate_ids):
-    narrow={"market_ids":"1,2,3","affiliate_ids":affiliate_ids,"main_line":"true","hide_closed":"true","offset":"300"}
+    narrow={"market_ids":"1,2,3","affiliate_ids":affiliate_ids,"main_line":"true","hide_closed":"true","include":"all_periods"}
     r=get_fn(url,params=narrow,headers=headers,timeout=12)
     if getattr(r,"status_code",0)==200:
         p=r.json(); ev=p.get("events",[]) if isinstance(p,dict) else []
@@ -111,7 +111,7 @@ def _request_payload(get_fn,url,headers,affiliate_ids):
 def _fetch_therundown(get_fn):
     key=_secret("THERUNDOWN_KEY")
     if not key:return []
-    slate_date=datetime.now(timezone.utc).astimezone(_CENTRAL).date().isoformat(); now=time.monotonic()
+    slate_date=datetime.now(timezone.utc).date().isoformat(); now=time.monotonic()
     if _CACHE.get("date")==slate_date and now-float(_CACHE.get("at") or 0)<_CACHE_TTL_SECONDS:return list(_CACHE.get("events") or [])
     affiliate_ids=_secret("THERUNDOWN_AFFILIATE_IDS","19,22,23"); preferred={x.strip() for x in affiliate_ids.split(",") if x.strip()}
     url=f"https://therundown.io/api/v2/sports/{_MLB_SPORT_ID}/events/{slate_date}"; headers={"X-TheRundown-Key":key,"Accept":"application/json"}
@@ -127,7 +127,7 @@ def _fetch_therundown(get_fn):
             for market in event.get("markets") or []:
                 if not isinstance(market,dict):continue
                 kind=_market_kind(market)
-                if kind is None or market.get("period_id") not in (None,"",0,"0"):continue
+                if kind is None:continue
                 market_rows+=1
                 for participant in market.get("participants") or []:
                     if not isinstance(participant,dict):continue
