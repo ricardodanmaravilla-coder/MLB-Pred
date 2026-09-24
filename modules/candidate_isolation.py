@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from .game_context import slate_date
+from .game_context import parse_utc, slate_date
+from zoneinfo import ZoneInfo
 from .pick_ledger import append_snapshot, append_shadow_snapshot
 from .shadow_candidate import available as shadow_available, metadata as shadow_metadata
 
@@ -83,10 +84,18 @@ def _apply_shadow_filter(row: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _game_date(game: dict[str, Any]) -> str:
+    raw = game.get("game_date")
+    if raw:
+        return str(raw)[:10]
+    dt = parse_utc(game.get("start_time_utc") or game.get("commence_time"))
+    return dt.astimezone(ZoneInfo("America/New_York")).date().isoformat() if dt else slate_date().isoformat()
+
+
 def _ledger_row(row: dict[str, Any], model_version: str) -> dict[str, Any]:
     away, home = str(row.get("partido") or " @ ").split(" @ ", 1)
     return {
-        "game_date": slate_date().isoformat(),
+        "game_date": row.get("game_date") or slate_date().isoformat(),
         "game_pk": row.get("game_pk"),
         "away": away,
         "home": home,
@@ -169,7 +178,12 @@ def scan_candidate(service, persist: bool = True) -> dict[str, Any]:
         try:
             baseline_result = service._evaluate_game(game)
             shadow = service._evaluate_shadow(game, baseline_result)
-            filtered = [_apply_shadow_filter(row) for row in shadow.get("diagnostics", [])]
+            game_date = _game_date(game)
+            filtered = []
+            for row in shadow.get("diagnostics", []):
+                enriched = dict(row)
+                enriched["game_date"] = game_date
+                filtered.append(_apply_shadow_filter(enriched))
             diagnostics.extend(filtered)
             accepted.extend(row for row in filtered if row.get("accepted"))
             if shadow.get("error"):
