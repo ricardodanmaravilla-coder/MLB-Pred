@@ -164,7 +164,7 @@ def _valid_two_way_prices(a, b):
     try:
         a, b = float(a), float(b)
         implied = (1.0 / a) + (1.0 / b)
-        return a >= MIN_PLAUSIBLE_DECIMAL_ODDS and b >= MIN_PLAUSIBLE_DECIMAL_ODDS and 1.0 <= implied <= 1.0 + MAX_TWO_WAY_HOLD
+        return a >= MIN_PLAUSIBLE_DECIMAL_ODDS and b >= MIN_PLAUSIBLE_DECIMAL_ODDS and 0.98 <= implied <= 1.0 + MAX_TWO_WAY_HOLD
     except (TypeError, ValueError, ZeroDivisionError):
         return False
 
