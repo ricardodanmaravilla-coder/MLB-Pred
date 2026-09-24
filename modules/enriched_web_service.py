@@ -166,7 +166,7 @@ class EnrichedMLBWebService(MLBWebService):
                 if shadow.get("error") and shadow.get("error") != "artifact_unavailable": errors.append({"game_pk":game.get("game_pk"),"partido":f"{game.get('away')} @ {game.get('home')}","shadow_error":shadow.get("error")})
             except Exception as exc:
                 errors.append({"game_pk": game.get("game_pk"), "partido": f"{game.get('away')} @ {game.get('home')}", "error": str(exc)[:200]})
-        accepted = sorted(accepted, key=lambda r: float(r.get("score", -999)), reverse=True)[:3]
+        accepted = sorted(accepted, key=lambda r: float(r.get("score", -999)), reverse=True)
         shadow_accepted = sorted(shadow_accepted, key=lambda r: float(r.get("score", -999)), reverse=True)[:3]
         shadow_sheet_status = None
         if persist and accepted:
