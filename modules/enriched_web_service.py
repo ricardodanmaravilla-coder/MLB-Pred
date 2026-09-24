@@ -156,6 +156,19 @@ class EnrichedMLBWebService(MLBWebService):
             if cand.accepted: accepted.append(row)
         return {"accepted": accepted, "diagnostics": diagnostics, "ml": ml, "error": None}
 
+    @staticmethod
+    def _official_game_date(game_pk):
+        """Resolve the ledger date from MLB's gamePk, avoiding timezone/date drift."""
+        try:
+            import requests
+            payload = requests.get(f"https://statsapi.mlb.com/api/v1.1/game/{int(game_pk)}/feed/live", timeout=8).json()
+            value = str(payload.get("gameData", {}).get("datetime", {}).get("officialDate") or "").strip()
+            if value:
+                return value
+        except Exception:
+            pass
+        return slate_date().isoformat()
+
     def scan(self, persist=True):
         if not self.model_ready: raise RuntimeError("Modelo ML no disponible")
         games = self.slate(); accepted = []; diagnostics = []; shadow_accepted = []; shadow_diagnostics = []; errors = []
@@ -172,7 +185,7 @@ class EnrichedMLBWebService(MLBWebService):
         if persist and accepted:
             rows=[]
             for r in accepted:
-                rows.append({'game_date':slate_date().isoformat(),'game_pk':r['game_pk'],'away':r['partido'].split(' @ ')[0],'home':r['partido'].split(' @ ')[1],
+                rows.append({'game_date':self._official_game_date(r['game_pk']),'game_pk':r['game_pk'],'away':r['partido'].split(' @ ')[0],'home':r['partido'].split(' @ ')[1],
                              'market':r['mercado'],'selection':r['apuesta'],'line':r['linea'],'odds':r['cuota'],'prob_ml':r['prob_ml'],'prob_mc':r['prob_mc'],
                              'prob_combined':r['probabilidad'],'market_no_vig':r['no_vig'],'edge_pp':r['edge_pp'],'ev_pct':r['ev_pct'],'disagreement_pp':r['desacuerdo_pp'],
                              'score':r['score'],'model_version':'v7-cloudrun','result_status':'pending'})
