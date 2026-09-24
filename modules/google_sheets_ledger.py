@@ -302,7 +302,7 @@ def sync_rows(rows: Iterable[Mapping[str, Any]], config: Mapping[str, Any] | Non
                 slot_to_row.setdefault(slot, -1)
 
         if update_payload:
-            ws.batch_update(update_payload, value_input_option="USER_ENTERED")
+            ws.batch_update(update_payload, value_input_option="RAW")
         if append_payload:
             ws.append_rows(append_payload, value_input_option="USER_ENTERED")
 
