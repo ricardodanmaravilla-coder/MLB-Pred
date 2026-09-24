@@ -238,7 +238,7 @@ def market_from_event(event, american_to_decimal):
                 else:
                     snap['spread_loc'] = snap['cuota_spread_loc'] = None
                     snap['spread_vis'] = snap['cuota_spread_vis'] = None
-        if 'h2h' in found:
+        if found:
             snap['bookmaker'] = bookmaker.get('title') or bookmaker.get('key')
             snapshots.append((len(found), snap))
     if not snapshots:
