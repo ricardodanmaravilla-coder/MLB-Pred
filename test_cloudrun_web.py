@@ -2,6 +2,8 @@ import os
 from pathlib import Path
 
 from modules.web_service import american_to_decimal, estimate_ml_probability, kelly_fraction_pct
+from modules.game_context import market_from_event
+from modules.scanner_engine import total_candidate
 from web_app import app
 
 
@@ -45,3 +47,17 @@ if __name__=='__main__':
     for test in tests:
         test(); print('PASS',test.__name__)
     print('Cloud Run web tests passed:',len(tests))
+
+
+def test_implausible_market_odds_are_rejected():
+    event={
+        'home_team':'Baltimore Orioles','away_team':'Toronto Blue Jays',
+        'bookmakers':[{'title':'bad-feed','markets':[
+            {'key':'h2h','outcomes':[{'name':'Baltimore Orioles','price':-110},{'name':'Toronto Blue Jays','price':-110}]},
+            {'key':'totals','outcomes':[{'name':'Over','price':5000,'point':7.5},{'name':'Under','price':-110,'point':7.5}]},
+        ]}]
+    }
+    market=market_from_event(event, american_to_decimal)
+    assert market['cuota_over'] is None and market['linea_carreras'] is None
+    assert total_candidate('Over 7.5',65,65,51.0,.5) is None
+
