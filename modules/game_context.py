@@ -10,6 +10,10 @@ from .team_utils import normalize_team
 from .multi_odds import install_requests_bridge
 from .therundown_odds import install_therundown_provider
 
+MIN_PLAUSIBLE_DECIMAL_ODDS = 1.20
+MAX_PLAUSIBLE_DECIMAL_ODDS = 4.00
+MAX_TWO_WAY_HOLD = 0.20
+
 SLATE_TZ = ZoneInfo("America/New_York")
 ROOF_OR_DOME_TEAMS = {"AZ", "HOU", "MIA", "MIL", "SEA", "TB", "TEX", "TOR"}
 
@@ -147,6 +151,24 @@ def match_odds_game(odds_games, mlb_game, max_hours=2.0):
     return scored[0][1]
 
 
+def _plausible_decimal_odds(value):
+    try:
+        x = float(value)
+        return x if MIN_PLAUSIBLE_DECIMAL_ODDS <= x <= MAX_PLAUSIBLE_DECIMAL_ODDS else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _valid_two_way_prices(a, b):
+    """Reject malformed two-way quotes before they can create fake EV/Kelly."""
+    try:
+        a, b = float(a), float(b)
+        implied = (1.0 / a) + (1.0 / b)
+        return a >= MIN_PLAUSIBLE_DECIMAL_ODDS and b >= MIN_PLAUSIBLE_DECIMAL_ODDS and 1.0 <= implied <= 1.0 + MAX_TWO_WAY_HOLD
+    except (TypeError, ValueError, ZeroDivisionError):
+        return False
+
+
 def market_from_event(event, american_to_decimal):
     """Choose one bookmaker and keep all markets internally coherent.
 
@@ -175,36 +197,43 @@ def market_from_event(event, american_to_decimal):
                 for o in outcomes:
                     name = normalize_team(o.get('name'))
                     if name == normalize_team(home):
-                        snap['cuota_loc'] = american_to_decimal(o.get('price'))
+                        snap['cuota_loc'] = _plausible_decimal_odds(american_to_decimal(o.get('price')))
                     elif name == normalize_team(away):
-                        snap['cuota_vis'] = american_to_decimal(o.get('price'))
-                if snap['cuota_loc'] and snap['cuota_vis']:
+                        snap['cuota_vis'] = _plausible_decimal_odds(american_to_decimal(o.get('price')))
+                if snap['cuota_loc'] and snap['cuota_vis'] and _valid_two_way_prices(snap['cuota_loc'], snap['cuota_vis']):
                     found.add('h2h')
+                else:
+                    snap['cuota_loc'] = snap['cuota_vis'] = None
             elif key == 'totals':
                 over_point = under_point = None
                 for o in outcomes:
                     if o.get('name') == 'Over':
                         over_point = o.get('point')
-                        snap['cuota_over'] = american_to_decimal(o.get('price'))
+                        snap['cuota_over'] = _plausible_decimal_odds(american_to_decimal(o.get('price')))
                     elif o.get('name') == 'Under':
                         under_point = o.get('point')
-                        snap['cuota_under'] = american_to_decimal(o.get('price'))
-                if over_point is not None and under_point is not None and float(over_point) == float(under_point) and snap['cuota_over'] and snap['cuota_under']:
+                        snap['cuota_under'] = _plausible_decimal_odds(american_to_decimal(o.get('price')))
+                if (over_point is not None and under_point is not None and float(over_point) == float(under_point)
+                        and snap['cuota_over'] and snap['cuota_under']
+                        and _valid_two_way_prices(snap['cuota_over'], snap['cuota_under'])):
                     snap['linea_carreras'] = float(over_point)
                     found.add('totals')
+                else:
+                    snap['linea_carreras'] = snap['cuota_over'] = snap['cuota_under'] = None
             elif key == 'spreads':
                 for o in outcomes:
                     name = normalize_team(o.get('name'))
                     point = o.get('point')
                     if name == normalize_team(home) and point is not None:
                         snap['spread_loc'] = float(point)
-                        snap['cuota_spread_loc'] = american_to_decimal(o.get('price'))
+                        snap['cuota_spread_loc'] = _plausible_decimal_odds(american_to_decimal(o.get('price')))
                     elif name == normalize_team(away) and point is not None:
                         snap['spread_vis'] = float(point)
-                        snap['cuota_spread_vis'] = american_to_decimal(o.get('price'))
+                        snap['cuota_spread_vis'] = _plausible_decimal_odds(american_to_decimal(o.get('price')))
                 if (snap['spread_loc'] is not None and snap['spread_vis'] is not None
                         and abs(snap['spread_loc'] + snap['spread_vis']) < 1e-9
-                        and snap['cuota_spread_loc'] and snap['cuota_spread_vis']):
+                        and snap['cuota_spread_loc'] and snap['cuota_spread_vis']
+                        and _valid_two_way_prices(snap['cuota_spread_loc'], snap['cuota_spread_vis'])):
                     found.add('spreads')
                 else:
                     snap['spread_loc'] = snap['cuota_spread_loc'] = None
