@@ -278,6 +278,8 @@ def sync_rows(rows: Iterable[Mapping[str, Any]], config: Mapping[str, Any] | Non
                 # records instead of preserving blank tracking columns forever.
                 enriched = _ensure_tracking_fields(enriched)
                 cells = [_clean(enriched.get(h)) for h in SHEET_HEADERS]
+                # Scores such as 5-3 must remain literal text, not Google Sheets date serials.
+                cells[SHEET_HEADERS.index("result_value")] = _clean(enriched.get("result_value"))
                 update_payload.append({"range": f"A{existing_row_num}:{last_col}{existing_row_num}", "values": [cells]})
                 continue
 
@@ -294,9 +296,9 @@ def sync_rows(rows: Iterable[Mapping[str, Any]], config: Mapping[str, Any] | Non
                 slot_to_row.setdefault(slot, -1)
 
         if update_payload:
-            ws.batch_update(update_payload, value_input_option="USER_ENTERED")
+            ws.batch_update(update_payload, value_input_option="RAW")
         if append_payload:
-            ws.append_rows(append_payload, value_input_option="USER_ENTERED")
+            ws.append_rows(append_payload, value_input_option="RAW")
 
         return {
             "ok": True, "configured": True, "inserted": len(append_payload),
