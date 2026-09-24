@@ -4185,3 +4185,9 @@ snapshot_utc,event_id,commence_time_utc,home,away,book,market,selection,line,odd
 2026-09-23T17:06:59.247988Z,824301,2026-09-24T00:40:00Z,Colorado Rockies,Arizona Diamondbacks,Production consensus,spreads,Colorado Rockies,1.5,-114,1.88
 2026-09-23T17:06:59.247988Z,824301,2026-09-24T00:40:00Z,Colorado Rockies,Arizona Diamondbacks,Production consensus,totals,Over,11.5,100,2.0
 2026-09-23T17:06:59.247988Z,824301,2026-09-24T00:40:00Z,Colorado Rockies,Arizona Diamondbacks,Production consensus,totals,Under,11.5,-120,1.83
+2026-09-24T10:05:39.290218Z,823326,2026-09-24T16:35:00Z,Pittsburgh Pirates,St. Louis Cardinals,Production consensus,h2h,Pittsburgh Pirates,,-161,1.62
+2026-09-24T10:05:39.290218Z,823326,2026-09-24T16:35:00Z,Pittsburgh Pirates,St. Louis Cardinals,Production consensus,h2h,St. Louis Cardinals,,135,2.35
+2026-09-24T10:05:39.290218Z,823326,2026-09-24T16:35:00Z,Pittsburgh Pirates,St. Louis Cardinals,Production consensus,spreads,Pittsburgh Pirates,-1.5,145,2.45
+2026-09-24T10:05:39.290218Z,823326,2026-09-24T16:35:00Z,Pittsburgh Pirates,St. Louis Cardinals,Production consensus,spreads,St. Louis Cardinals,1.5,-175,1.57
+2026-09-24T10:05:39.290218Z,823326,2026-09-24T16:35:00Z,Pittsburgh Pirates,St. Louis Cardinals,Production consensus,totals,Over,6.5,-123,1.81
+2026-09-24T10:05:39.290218Z,823326,2026-09-24T16:35:00Z,Pittsburgh Pirates,St. Louis Cardinals,Production consensus,totals,Under,6.5,102,2.02
