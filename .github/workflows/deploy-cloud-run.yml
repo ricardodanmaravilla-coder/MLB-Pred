@@ -28,6 +28,11 @@ on:
       - 'data/mlb_pitching_individual.csv'
       - 'data/mlb_bullpen.csv'
       - 'data/mlb_park_factors.csv'
+      - 'data/mlb_games.csv'
+      - 'data/mlb_batting.csv'
+      - 'data/mlb_pitching.csv'
+      - 'data/mlb_pitching_individual.csv'
+      - 'data/mlb_bullpen.csv'
       - '.github/workflows/deploy-cloud-run.yml'
 
 permissions:
