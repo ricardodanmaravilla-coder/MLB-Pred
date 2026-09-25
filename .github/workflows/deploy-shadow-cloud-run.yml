@@ -218,8 +218,10 @@ jobs:
           if odds_errors and len(odds_errors) >= max(1, len(errs)):
               print('WARNING: all current Shadow games lack odds; deployment remains healthy and isolated')
           sheet=d.get('sheet')
-          if recs:
-              assert isinstance(sheet,dict) and sheet.get('ok') is True, f'Shadow sheet write failed: {sheet}'
+          # This deployment smoke test intentionally uses persist=false, so
+          # recommendations are allowed while sheet remains null. Persistence
+          # is verified by the dedicated Shadow Candidate workflow.
+          assert d.get('persisted') is False, d
           print('Shadow scan OK recommendations=',len(recs),'diagnostics=',len(diag),'errors=',len(errs),'sheet=',sheet)
           PY
 
