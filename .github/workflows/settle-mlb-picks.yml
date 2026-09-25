@@ -10,7 +10,7 @@ on:
   schedule:
     # Run all day. West-coast and extra-inning games can finish after 06:30 UTC;
     # the previous window left a long gap until 18:00 UTC and stranded pending rows.
-    - cron: '*/30 * * * *'
+    - cron: '*/15 * * * *'
 
 permissions:
   contents: read
