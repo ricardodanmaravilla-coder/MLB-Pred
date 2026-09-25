@@ -6,6 +6,7 @@ on:
     branches: [main]
     paths:
       - 'web_app.py'
+      - 'static/index.html'
       - 'Dockerfile'
       - 'requirements.txt'
       - 'build_bigdata.py'
