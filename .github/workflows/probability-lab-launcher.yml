@@ -78,8 +78,10 @@ jobs:
           games=games or []
           usable=sum(1 for g in games if g.get('cuota_loc') is not None and g.get('cuota_vis') is not None and g.get('linea_carreras') is not None)
           print('V7 slate games=',len(games),'usable markets=',usable)
-          assert games, 'V7 slate is empty'
-          assert usable > 0, 'V7 public slate has no usable live markets'
+          if not games:
+              print('WARNING: V7 slate is empty; Probability Lab will fall back to its isolated local odds providers')
+          elif usable == 0:
+              print('WARNING: V7 has no usable live markets; Probability Lab will fall back to its isolated local odds providers')
           PY
 
       - name: Export Sheets token from authorized runtime service account
