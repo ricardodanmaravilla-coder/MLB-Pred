@@ -4239,3 +4239,21 @@ snapshot_utc,event_id,commence_time_utc,home,away,book,market,selection,line,odd
 2026-09-24T15:10:41.017209Z,823493,2026-09-24T23:05:00Z,New York Yankees,Tampa Bay Rays,Production consensus,spreads,Tampa Bay Rays,1.5,-185,1.54
 2026-09-24T15:10:41.017209Z,823493,2026-09-24T23:05:00Z,New York Yankees,Tampa Bay Rays,Production consensus,totals,Over,6.0,-112,1.89
 2026-09-24T15:10:41.017209Z,823493,2026-09-24T23:05:00Z,New York Yankees,Tampa Bay Rays,Production consensus,totals,Under,6.0,-108,1.93
+2026-09-25T01:34:06.058505Z,823087,2026-09-25T01:40:00Z,Seattle Mariners,Los Angeles Angels,Production consensus,h2h,Los Angeles Angels,,164,2.64
+2026-09-25T01:34:06.058505Z,823087,2026-09-25T01:40:00Z,Seattle Mariners,Los Angeles Angels,Production consensus,h2h,Seattle Mariners,,-196,1.51
+2026-09-25T01:34:06.058505Z,823087,2026-09-25T01:40:00Z,Seattle Mariners,Los Angeles Angels,Production consensus,spreads,Los Angeles Angels,1.5,-133,1.75
+2026-09-25T01:34:06.058505Z,823087,2026-09-25T01:40:00Z,Seattle Mariners,Los Angeles Angels,Production consensus,spreads,Seattle Mariners,-1.5,110,2.1
+2026-09-25T01:34:06.058505Z,823087,2026-09-25T01:40:00Z,Seattle Mariners,Los Angeles Angels,Production consensus,totals,Over,6.5,-141,1.71
+2026-09-25T01:34:06.058505Z,823087,2026-09-25T01:40:00Z,Seattle Mariners,Los Angeles Angels,Production consensus,totals,Under,6.5,114,2.14
+2026-09-25T01:34:06.058505Z,824950,2026-09-25T01:40:00Z,Athletics,Houston Astros,Production consensus,h2h,Athletics,,150,2.5
+2026-09-25T01:34:06.058505Z,824950,2026-09-25T01:40:00Z,Athletics,Houston Astros,Production consensus,h2h,Houston Astros,,-182,1.55
+2026-09-25T01:34:06.058505Z,824950,2026-09-25T01:40:00Z,Athletics,Houston Astros,Production consensus,spreads,Athletics,1.5,-104,1.96
+2026-09-25T01:34:06.058505Z,824950,2026-09-25T01:40:00Z,Athletics,Houston Astros,Production consensus,spreads,Houston Astros,-1.5,-116,1.86
+2026-09-25T01:34:06.058505Z,824950,2026-09-25T01:40:00Z,Athletics,Houston Astros,Production consensus,totals,Over,10.5,-130,1.77
+2026-09-25T01:34:06.058505Z,824950,2026-09-25T01:40:00Z,Athletics,Houston Astros,Production consensus,totals,Under,10.5,106,2.06
+2026-09-25T01:34:06.058505Z,823895,2026-09-25T02:10:00Z,Los Angeles Dodgers,San Diego Padres,Production consensus,h2h,Los Angeles Dodgers,,-172,1.58
+2026-09-25T01:34:06.058505Z,823895,2026-09-25T02:10:00Z,Los Angeles Dodgers,San Diego Padres,Production consensus,h2h,San Diego Padres,,144,2.44
+2026-09-25T01:34:06.058505Z,823895,2026-09-25T02:10:00Z,Los Angeles Dodgers,San Diego Padres,Production consensus,spreads,Los Angeles Dodgers,-1.5,126,2.26
+2026-09-25T01:34:06.058505Z,823895,2026-09-25T02:10:00Z,Los Angeles Dodgers,San Diego Padres,Production consensus,spreads,San Diego Padres,1.5,-152,1.66
+2026-09-25T01:34:06.058505Z,823895,2026-09-25T02:10:00Z,Los Angeles Dodgers,San Diego Padres,Production consensus,totals,Over,7.5,-120,1.83
+2026-09-25T01:34:06.058505Z,823895,2026-09-25T02:10:00Z,Los Angeles Dodgers,San Diego Padres,Production consensus,totals,Under,7.5,100,2.0
