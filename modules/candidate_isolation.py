@@ -18,6 +18,38 @@ SHADOW_MAX_DISAGREEMENT = 4.0
 SHADOW_KELLY_CAP = 5.0
 
 
+def _doubleheader_game_numbers(games: list[dict[str, Any]]) -> dict[str, int]:
+    """Return gamePk -> 1/2/... only for same-day repeated matchups.
+
+    MLB provides distinct gamePk/pitchers/markets for each game.  This helper is
+    display-only so recommendations can say Juego 1/Juego 2 without changing
+    settlement keys, teams, pitchers, or market matching.
+    """
+    groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for game in games or []:
+        key = (str(game.get("away") or ""), str(game.get("home") or ""))
+        groups.setdefault(key, []).append(game)
+    out: dict[str, int] = {}
+    for group in groups.values():
+        if len(group) < 2:
+            continue
+        ordered = sorted(group, key=lambda g: str(g.get("start_time_utc") or g.get("commence_time") or ""))
+        for idx, game in enumerate(ordered, 1):
+            pk = game.get("game_pk")
+            if pk is not None:
+                out[str(pk)] = idx
+    return out
+
+
+def _annotate_game_label(rows: list[dict[str, Any]], game: dict[str, Any], numbers: dict[str, int]) -> None:
+    n = numbers.get(str(game.get("game_pk")))
+    if not n:
+        return
+    for row in rows or []:
+        row["game_number"] = n
+        row["partido_display"] = f"{row.get('partido')} · Juego {n}"
+
+
 def _score(row: dict[str, Any]) -> float:
     try:
         return float(row.get("score", -999))
@@ -123,9 +155,12 @@ def scan_production(service, persist: bool = True) -> dict[str, Any]:
         raise RuntimeError("Modelo ML no disponible")
     accepted, diagnostics, errors = [], [], []
     games = service.slate()
+    doubleheader_numbers = _doubleheader_game_numbers(games)
     for game in games:
         try:
             result = service._evaluate_game(game)
+            _annotate_game_label(result.get("accepted", []), game, doubleheader_numbers)
+            _annotate_game_label(result.get("diagnostics", []), game, doubleheader_numbers)
             accepted.extend(result.get("accepted", []))
             diagnostics.extend(result.get("diagnostics", []))
         except Exception as exc:
@@ -174,6 +209,7 @@ def scan_candidate(service, persist: bool = True) -> dict[str, Any]:
 
     accepted, diagnostics, errors = [], [], []
     games = service.slate()
+    doubleheader_numbers = _doubleheader_game_numbers(games)
     for game in games:
         try:
             baseline_result = service._evaluate_game(game)
@@ -183,6 +219,10 @@ def scan_candidate(service, persist: bool = True) -> dict[str, Any]:
             for row in shadow.get("diagnostics", []):
                 enriched = dict(row)
                 enriched["game_date"] = game_date
+                n = doubleheader_numbers.get(str(game.get("game_pk")))
+                if n:
+                    enriched["game_number"] = n
+                    enriched["partido_display"] = f"{enriched.get('partido')} · Juego {n}"
                 filtered.append(_apply_shadow_filter(enriched))
             diagnostics.extend(filtered)
             accepted.extend(row for row in filtered if row.get("accepted"))
