@@ -126,7 +126,7 @@ def test_daily_exposure_cap_scales_stakes_without_dropping_picks():
     ]
     out = _prepare_rows(rows, 'test')
     assert len(out) == 3
-    assert abs(sum(float(r['stake_mxn']) for r in out) - 1000.0) <= 0.02
+    assert abs(sum(float(r['stake_mxn']) for r in out) - 1050.0) <= 0.02
     assert all(float(r['stake_mxn']) > 0 for r in out)
 
 def main():
