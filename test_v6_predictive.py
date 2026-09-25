@@ -5,6 +5,7 @@ from modules.advanced_stats import enrich_team_frames, enrich_pitcher_frame
 from modules.metric_quality import batting_metric, pitching_metric, row_pitching_value
 from modules.ml_mlb import PredictorMLMLB
 from modules.scanner_engine import moneyline_candidate, total_candidate, runline_candidate
+from modules.pick_ledger import _prepare_rows
 
 
 def test_metric_quality_prefers_real_sources_only_with_coverage():
@@ -112,6 +113,21 @@ def test_advanced_enrichment_is_fail_soft_with_empty_frames():
     a,b,c=enrich_team_frames(pd.DataFrame(),pd.DataFrame(),[2026])
     assert a.empty and b.empty and c.empty
 
+
+
+def test_daily_exposure_cap_scales_stakes_without_dropping_picks():
+    rows = [
+        {'game_date':'2026-09-25','game_pk':1,'market':'Totales','selection':'Over 8.5','odds':1.90,
+         'prob_combined':65,'ev_pct':20,'kelly_pct':8,'bankroll_mxn':5000,'stake_mxn':400},
+        {'game_date':'2026-09-25','game_pk':2,'market':'Totales','selection':'Over 7.5','odds':1.90,
+         'prob_combined':64,'ev_pct':18,'kelly_pct':7,'bankroll_mxn':5000,'stake_mxn':350},
+        {'game_date':'2026-09-25','game_pk':3,'market':'Hándicap','selection':'Away +1.5','odds':1.80,
+         'prob_combined':63,'ev_pct':12,'kelly_pct':6,'bankroll_mxn':5000,'stake_mxn':300},
+    ]
+    out = _prepare_rows(rows, 'test')
+    assert len(out) == 3
+    assert abs(sum(float(r['stake_mxn']) for r in out) - 1000.0) <= 0.02
+    assert all(float(r['stake_mxn']) > 0 for r in out)
 
 def main():
     tests=[v for k,v in sorted(globals().items()) if k.startswith('test_') and callable(v)]
