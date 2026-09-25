@@ -66,7 +66,10 @@ def american_to_decimal(value):
         x = float(value)
         if x == 0:
             return None
-        return round((x / 100.0) + 1.0, 2) if x > 0 else round((100.0 / abs(x)) + 1.0, 2)
+        dec = round((x / 100.0) + 1.0, 2) if x > 0 else round((100.0 / abs(x)) + 1.0, 2)
+        # Production MLB guard: reject malformed/extreme prices before they can
+        # inflate EV/Kelly. The live market parser uses the same 1.20-4.00 band.
+        return dec if 1.20 <= dec <= 4.00 else None
     except (TypeError, ValueError):
         return None
 
