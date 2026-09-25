@@ -93,8 +93,12 @@ def test_precision_first_market_abstention():
 
     weak_over=total_candidate('Over 8.5',55,58,1.95,.50)
     assert weak_over is not None and not weak_over.accepted
-    strong_over=total_candidate('Over 8.5',58,60,1.95,.50)
+    strong_over=total_candidate('Over 8.5',60,60,1.95,.50)
     assert strong_over is not None and strong_over.accepted
+    weak_combined_over=total_candidate('Over 8.5',58,60,1.95,.50)
+    assert weak_combined_over is not None and not weak_combined_over.accepted
+    disagreement_over=total_candidate('Over 8.5',63,58,1.95,.50)
+    assert disagreement_over is not None and not disagreement_over.accepted
     weak_under=total_candidate('Under 8.5',53,60,1.95,.50)
     assert weak_under is not None and not weak_under.accepted
 
