@@ -289,8 +289,12 @@ class MLBWebService:
         h, a = EQUIPOS_MAP.get(home_name, ''), EQUIPOS_MAP.get(away_name, '')
         if not h or not a:
             raise ValueError("Equipo no normalizable")
-        if game.get('cuota_loc') is None or game.get('cuota_vis') is None or game.get('linea_carreras') is None:
-            raise ValueError("Cuotas/total no disponibles")
+        # Totals are the primary production/Shadow market and must remain
+        # evaluable even when a provider has no same-event h2h quote.
+        # A total line is required for the Monte Carlo simulation; moneyline
+        # candidates are added only when both h2h prices are actually present.
+        if game.get('linea_carreras') is None:
+            raise ValueError("Total no disponible")
 
         off_h = self._current_offensive_index(h); off_a = self._current_offensive_index(a)
         pit_h = self._starter_metric(game.get('home_pitcher')) or self._team_pitching(h)
@@ -339,10 +343,12 @@ class MLBWebService:
         nv_h, nv_a = no_vig_two_way(game.get('cuota_loc'), game.get('cuota_vis'))
         nv_over, nv_under = no_vig_two_way(game.get('cuota_over'), game.get('cuota_under'))
         nv_sp_h, nv_sp_a = no_vig_two_way(game.get('cuota_spread_loc'), game.get('cuota_spread_vis'))
-        candidates = [
-            (moneyline_candidate(f"Gana Local ({home_name})", p_ml_h, p_mc_h, game.get('cuota_loc'), nv_h), None),
-            (moneyline_candidate(f"Gana Visita ({away_name})", p_ml_a, p_mc_a, game.get('cuota_vis'), nv_a), None),
-        ]
+        candidates = []
+        if game.get('cuota_loc') is not None and game.get('cuota_vis') is not None:
+            candidates.extend([
+                (moneyline_candidate(f"Gana Local ({home_name})", p_ml_h, p_mc_h, game.get('cuota_loc'), nv_h), None),
+                (moneyline_candidate(f"Gana Visita ({away_name})", p_ml_a, p_mc_a, game.get('cuota_vis'), nv_a), None),
+            ])
         if game.get('cuota_over') is not None:
             candidates.append((total_candidate(f"Over {line}", p_ml_over, p_mc_over, game.get('cuota_over'), nv_over, runs.get(f"Push {line}", 0.0)), line))
         if game.get('cuota_under') is not None:
