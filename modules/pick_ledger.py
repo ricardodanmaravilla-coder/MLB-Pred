@@ -186,7 +186,12 @@ def _prepare_rows(rows, default_version):
     """
     now = datetime.now(timezone.utc).isoformat(); clean = []
     for row in rows or []:
-        source = enrich_tracking_row(row); d = {c: source.get(c) for c in LEDGER_COLUMNS}
+        source = enrich_tracking_row(row)
+        odds = _number(source.get('odds'))
+        if odds is None or odds < 1.20 or odds > 4.00:
+            print(f"Rejected ledger row with implausible MLB odds: {source.get('game_pk')} {source.get('market')} {source.get('selection')} odds={source.get('odds')}")
+            continue
+        d = {c: source.get(c) for c in LEDGER_COLUMNS}
         d['snapshot_utc'] = d.get('snapshot_utc') or now
         d['model_version'] = d.get('model_version') or default_version
         d['result_status'] = d.get('result_status') or 'pending'
