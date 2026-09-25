@@ -54,7 +54,7 @@ def _candidate(market, selection, prob_ml, prob_mc, odds, market_no_vig,
         return None
     # Provider/data guard: reject malformed or implausible MLB decimal prices before
     # they can manufacture artificial EV/edge/Kelly. This does not cap pick volume.
-    if o < 1.20 or o > 6.00:
+    if o < 1.20 or o > 4.00:
         return None
 
     combined = (pml + pmc) / 2.0
