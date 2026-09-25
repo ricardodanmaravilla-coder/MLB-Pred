@@ -118,15 +118,15 @@ def test_advanced_enrichment_is_fail_soft_with_empty_frames():
 def test_daily_exposure_cap_scales_stakes_without_dropping_picks():
     rows = [
         {'game_date':'2026-09-25','game_pk':1,'market':'Totales','selection':'Over 8.5','odds':1.90,
-         'prob_combined':65,'ev_pct':20,'kelly_pct':8,'bankroll_mxn':5000,'stake_mxn':400},
+         'prob_combined':65,'ev_pct':20,'kelly_pct':18,'bankroll_mxn':5000,'stake_mxn':900},
         {'game_date':'2026-09-25','game_pk':2,'market':'Totales','selection':'Over 7.5','odds':1.90,
-         'prob_combined':64,'ev_pct':18,'kelly_pct':7,'bankroll_mxn':5000,'stake_mxn':350},
+         'prob_combined':64,'ev_pct':18,'kelly_pct':16,'bankroll_mxn':5000,'stake_mxn':800},
         {'game_date':'2026-09-25','game_pk':3,'market':'Hándicap','selection':'Away +1.5','odds':1.80,
-         'prob_combined':63,'ev_pct':12,'kelly_pct':6,'bankroll_mxn':5000,'stake_mxn':300},
+         'prob_combined':63,'ev_pct':12,'kelly_pct':14,'bankroll_mxn':5000,'stake_mxn':700},
     ]
     out = _prepare_rows(rows, 'test')
     assert len(out) == 3
-    assert abs(sum(float(r['stake_mxn']) for r in out) - 1050.0) <= 0.02
+    assert abs(sum(float(r['stake_mxn']) for r in out) - 2000.0) <= 0.02
     assert all(float(r['stake_mxn']) > 0 for r in out)
 
 def main():
