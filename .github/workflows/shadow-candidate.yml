@@ -2,6 +2,10 @@ name: MLB Shadow Candidate
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/shadow-candidate.yml'
   schedule:
     # Staggered schedules improve reliability because GitHub scheduled events
     # can be delayed or dropped under load. The daily lock still guarantees
@@ -71,7 +75,7 @@ jobs:
               minutes = (next_game - now).total_seconds() / 60.0
               # Catch-up safe: if the first game has already started, use the next
               # unstarted game. Shadow itself filters all started games from its slate.
-              due = 0.0 < minutes <= 45.0
+              due = 0.0 < minutes <= 120.0
               print(f"scan_due={'true' if due else 'false'}")
               print(f"scan_date={today}")
               print(f"next_game_utc={next_game.isoformat()}")
@@ -88,19 +92,11 @@ jobs:
           echo "Candidate scan due: ${{ steps.timing.outputs.scan_due }}"
           echo "Candidate settlement due: ${{ steps.timing.outputs.settle_due }}"
 
-      - name: Restore daily shadow scan lock
-        id: scan_lock
-        if: github.event_name == 'schedule' && steps.timing.outputs.scan_due == 'true'
-        uses: actions/cache/restore@v4
-        with:
-          path: .shadow_scan_marker
-          key: mlb-shadow-scan-${{ steps.timing.outputs.scan_date }}
-
       - id: auth
         if: >-
           github.event_name == 'workflow_dispatch' ||
           steps.timing.outputs.settle_due == 'true' ||
-          (steps.timing.outputs.scan_due == 'true' && steps.scan_lock.outputs.cache-hit != 'true')
+          steps.timing.outputs.scan_due == 'true'
         uses: google-github-actions/auth@v3
         with:
           workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
@@ -126,7 +122,7 @@ jobs:
         if: >-
           steps.cloudrun.outputs.url != '' &&
           (github.event_name == 'workflow_dispatch' ||
-          (steps.timing.outputs.scan_due == 'true' && steps.scan_lock.outputs.cache-hit != 'true'))
+          steps.timing.outputs.scan_due == 'true')
         shell: bash
         run: |
           HEALTH=$(curl -fsS --max-time 180 "${{ steps.cloudrun.outputs.url }}/api/health")
@@ -143,7 +139,7 @@ jobs:
         if: >-
           steps.cloudrun.outputs.url != '' &&
           (github.event_name == 'workflow_dispatch' ||
-          (steps.timing.outputs.scan_due == 'true' && steps.scan_lock.outputs.cache-hit != 'true'))
+          (steps.timing.outputs.scan_due == 'true' && true))
         shell: bash
         run: |
           RESPONSE=$(curl -fsS --max-time 600 -X POST "${{ steps.cloudrun.outputs.url }}/api/candidate/scan?persist=true")
@@ -168,17 +164,6 @@ jobs:
           PY
           mkdir -p .shadow_scan_marker
           printf '%s\n' "${{ steps.timing.outputs.scan_date }} ${{ steps.timing.outputs.next_game_utc }}" > .shadow_scan_marker/completed.txt
-
-      - name: Save daily shadow scan lock
-        if: >-
-          github.event_name == 'schedule' &&
-          steps.timing.outputs.scan_due == 'true' &&
-          steps.scan_lock.outputs.cache-hit != 'true' &&
-          success()
-        uses: actions/cache/save@v4
-        with:
-          path: .shadow_scan_marker
-          key: mlb-shadow-scan-${{ steps.timing.outputs.scan_date }}
 
       - name: Settle candidate picks only
         if: >-
