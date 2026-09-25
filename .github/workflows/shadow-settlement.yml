@@ -5,10 +5,11 @@ on:
   push:
     paths:
       - '.github/workflows/shadow-settlement.yml'
+      - 'modules/live_sheet_settlement.py'
   schedule:
     # Run independently from the candidate scanner. Scheduled runs may be delayed,
     # so every invocation settles unconditionally instead of checking wall-clock minutes.
-    - cron: '*/30 * * * *'
+    - cron: '*/15 * * * *'
 
 permissions:
   contents: read
