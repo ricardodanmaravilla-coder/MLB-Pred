@@ -72,7 +72,7 @@ def _american(value: Any, decimal: Any = None):
         if value not in (None, ""):
             v = float(value)
             if abs(v) >= 100:
-                return round(v)
+                return round(v) if abs(v) <= 1000 else None
             if v > 1:
                 return _american_from_decimal(v)
     except (TypeError, ValueError):
