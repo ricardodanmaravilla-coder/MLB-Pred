@@ -64,7 +64,7 @@ def rows_from_production_game(game, stamp_dt):
     def add(market, selection, odds, line=None):
         try: dec=float(odds)
         except Exception: return
-        if dec <= 1.0: return
+        if dec < 1.20 or dec > 4.00: return
         rows.append({'snapshot_utc':stamp,'event_id':event_id,'commence_time_utc':commence,'home':home,'away':away,'book':book,'market':market,'selection':selection,'line':line,'odds_american':_american_from_decimal(dec),'odds_decimal':dec})
     add('h2h',home,game.get('cuota_loc')); add('h2h',away,game.get('cuota_vis'))
     line=game.get('linea_carreras'); add('totals','Over',game.get('cuota_over'),line); add('totals','Under',game.get('cuota_under'),line)
