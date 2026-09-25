@@ -6,6 +6,7 @@ from modules.metric_quality import batting_metric, pitching_metric, row_pitching
 from modules.ml_mlb import PredictorMLMLB
 from modules.scanner_engine import moneyline_candidate, total_candidate, runline_candidate
 from modules.pick_ledger import _prepare_rows
+from modules.web_service import american_to_decimal
 
 
 def test_metric_quality_prefers_real_sources_only_with_coverage():
@@ -128,6 +129,19 @@ def test_daily_exposure_cap_scales_stakes_without_dropping_picks():
     assert len(out) == 3
     assert abs(sum(float(r['stake_mxn']) for r in out) - 2000.0) <= 0.02
     assert all(float(r['stake_mxn']) > 0 for r in out)
+
+
+def test_implausible_odds_are_rejected_everywhere():
+    assert american_to_decimal(10000) is None
+    assert american_to_decimal(-10000) is None
+    assert american_to_decimal(110) == 2.10
+    absurd = total_candidate('Over 7.5', 65, 64, 101.0, .50)
+    assert absurd is None
+    rows = _prepare_rows([
+        {'game_date':'2026-09-25','game_pk':999,'market':'Totales','selection':'Over 7.5','odds':101.0,
+         'prob_combined':65,'ev_pct':5000,'kelly_pct':20,'bankroll_mxn':5000,'stake_mxn':1000}
+    ], 'test')
+    assert rows == []
 
 def main():
     tests=[v for k,v in sorted(globals().items()) if k.startswith('test_') and callable(v)]
