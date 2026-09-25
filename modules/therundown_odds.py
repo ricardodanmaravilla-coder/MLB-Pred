@@ -28,7 +28,7 @@ def _float(v):
 def _price(v):
     try:
         x=float(v)
-        if abs(x-0.0001)<1e-9 or abs(x)<100: return None
+        if abs(x-0.0001)<1e-9 or abs(x)<100 or abs(x)>1000: return None
         return round(x)
     except (TypeError, ValueError): return None
 
