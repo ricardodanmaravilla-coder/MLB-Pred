@@ -19,7 +19,7 @@ from .bigdata_tracking import sync_snapshot_rows as sync_bigdata_rows
 
 
 DEFAULT_BANKROLL_MXN = 5000.0
-DEFAULT_DAILY_EXPOSURE_CAP_PCT = 20.0
+DEFAULT_DAILY_EXPOSURE_CAP_PCT = 40.0
 LEDGER_COLUMNS = [
     'snapshot_utc','game_date','game_pk','away','home','market','selection','line','odds',
     'prob_ml','prob_mc','prob_combined','market_no_vig','edge_pp','ev_pct',
