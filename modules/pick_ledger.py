@@ -19,6 +19,7 @@ from .bigdata_tracking import sync_snapshot_rows as sync_bigdata_rows
 
 
 DEFAULT_BANKROLL_MXN = 5000.0
+DEFAULT_DAILY_EXPOSURE_CAP_PCT = 20.0
 LEDGER_COLUMNS = [
     'snapshot_utc','game_date','game_pk','away','home','market','selection','line','odds',
     'prob_ml','prob_mc','prob_combined','market_no_vig','edge_pp','ev_pct',
@@ -175,10 +176,42 @@ def _show_google_status(status):
 
 
 def _prepare_rows(rows, default_version):
+    """Prepare a full recommendation batch and cap aggregate daily exposure.
+
+    All qualifying picks remain visible/persisted.  Only stake sizing is scaled
+    proportionally when the sum of independent Kelly stakes would exceed the
+    configured portfolio cap.  This prevents a cluster of correlated signals
+    (for example many Totals on the same slate) from risking an excessive share
+    of bankroll without silently deleting recommendations.
+    """
     now = datetime.now(timezone.utc).isoformat(); clean = []
     for row in rows or []:
         source = enrich_tracking_row(row); d = {c: source.get(c) for c in LEDGER_COLUMNS}
-        d['snapshot_utc'] = d.get('snapshot_utc') or now; d['model_version'] = d.get('model_version') or default_version; d['result_status'] = d.get('result_status') or 'pending'; clean.append(d)
+        d['snapshot_utc'] = d.get('snapshot_utc') or now
+        d['model_version'] = d.get('model_version') or default_version
+        d['result_status'] = d.get('result_status') or 'pending'
+        clean.append(d)
+
+    # Apply the cap per game date/bankroll so a batch spanning dates can never
+    # borrow exposure from another slate.  Default 20% mirrors the original
+    # portfolio exposure policy while preserving the per-pick Kelly signal.
+    cap_pct = _number(_secret('DAILY_EXPOSURE_CAP_PCT', DEFAULT_DAILY_EXPOSURE_CAP_PCT), DEFAULT_DAILY_EXPOSURE_CAP_PCT)
+    cap_pct = max(1.0, min(100.0, float(cap_pct)))
+    groups = {}
+    for d in clean:
+        key = (str(d.get('game_date') or '')[:10], float(_number(d.get('bankroll_mxn'), bankroll_mxn()) or bankroll_mxn()))
+        groups.setdefault(key, []).append(d)
+
+    for (_date, bank), group in groups.items():
+        raw_total = sum(max(0.0, float(_number(d.get('stake_mxn'), 0.0) or 0.0)) for d in group)
+        cap_mxn = max(0.0, bank * cap_pct / 100.0)
+        scale = min(1.0, cap_mxn / raw_total) if raw_total > 0 else 1.0
+        if scale < 1.0:
+            for d in group:
+                raw_stake = max(0.0, float(_number(d.get('stake_mxn'), 0.0) or 0.0))
+                scaled_stake = round(raw_stake * scale, 2)
+                d['stake_mxn'] = scaled_stake
+                d['kelly_pct'] = round((scaled_stake / bank) * 100.0, 2) if bank > 0 else 0.0
     return clean
 
 
