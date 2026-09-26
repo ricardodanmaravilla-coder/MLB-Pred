@@ -182,6 +182,17 @@ def scan_production(service, persist: bool = True) -> dict[str, Any]:
                 "partido": f"{game.get('away')} @ {game.get('home')}",
                 "error": str(exc)[:200],
             })
+    # Final production safety gate. Even if an upstream market rule is stale
+    # or a provider returns malformed data, Totales below 64% and implausible
+    # prices must never reach "Mejores oportunidades" or the production ledger.
+    accepted = [
+        row for row in accepted
+        if not (
+            str(row.get("mercado") or "") == "Totales"
+            and float(row.get("probabilidad") or -999.0) < 64.0
+        )
+        and 1.20 <= float(row.get("cuota") or 0.0) <= 4.00
+    ]
     accepted = sorted(accepted, key=_score, reverse=True)
     ledger_status = None
     if persist and accepted:
