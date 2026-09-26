@@ -63,6 +63,10 @@ def health():
     data["candidate_settle_endpoint"] = "/api/candidate/settle"
     data["candidate_isolation"] = True
     data["candidate_service_isolated"] = get_candidate_service() is not get_service()
+    data["build_commit"] = os.getenv("BUILD_COMMIT", "unknown")
+    data["service_revision"] = os.getenv("K_REVISION", "unknown")
+    data["totals_min_probability"] = 64.0
+    data["production_odds_range"] = [1.20, 4.00]
     return data
 
 
