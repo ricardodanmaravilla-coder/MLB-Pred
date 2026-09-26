@@ -10,7 +10,7 @@ from .shadow_candidate import available as shadow_available, metadata as shadow_
 
 SHADOW_FILTER_VERSION = "shadow-filter-v3"
 SHADOW_ALLOWED_MARKETS = {"Totales"}
-SHADOW_MIN_PROB = 60.0
+SHADOW_MIN_PROB = 64.0
 SHADOW_MIN_EDGE = 8.0
 SHADOW_MAX_EDGE = 14.0
 SHADOW_MIN_EV = 10.0
