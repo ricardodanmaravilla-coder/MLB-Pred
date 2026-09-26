@@ -73,11 +73,18 @@ def _american(value: Any, decimal: Any = None):
             v = float(value)
             if abs(v) >= 100:
                 return round(v) if abs(v) <= 1000 else None
+            # Values between 1 and 100 are treated as decimal odds only when
+            # they are plausible for MLB. This blocks malformed fields such as
+            # 26 from becoming +2500 and leaking downstream.
             if v > 1:
-                return _american_from_decimal(v)
+                return _american_from_decimal(v) if 1.20 <= v <= 4.00 else None
     except (TypeError, ValueError):
         pass
-    return _american_from_decimal(decimal)
+    try:
+        d = float(decimal)
+        return _american_from_decimal(d) if 1.20 <= d <= 4.00 else None
+    except (TypeError, ValueError):
+        return None
 
 
 def _iso(value: Any):
