@@ -6,7 +6,7 @@ import logging
 import os
 import time
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 
 from . import multi_odds
@@ -111,13 +111,30 @@ def _request_payload(get_fn,url,headers,affiliate_ids):
 def _fetch_therundown(get_fn):
     key=_secret("THERUNDOWN_KEY")
     if not key:return []
-    slate_date=datetime.now(timezone.utc).date().isoformat(); now=time.monotonic()
+    # MLB slate is defined in U.S. Eastern time. Late West Coast games can start
+    # after 00:00 UTC while still belonging to the same MLB slate. Query both
+    # UTC calendar dates that can contain the Eastern-time slate so those games
+    # do not lose odds/lines near the end of the day.
+    local_slate=datetime.now(timezone.utc).astimezone(ZoneInfo("America/New_York")).date()
+    slate_date=local_slate.isoformat(); now=time.monotonic()
     if _CACHE.get("date")==slate_date and now-float(_CACHE.get("at") or 0)<_CACHE_TTL_SECONDS:return list(_CACHE.get("events") or [])
     affiliate_ids=_secret("THERUNDOWN_AFFILIATE_IDS","19,22,23"); preferred={x.strip() for x in affiliate_ids.split(",") if x.strip()}
-    url=f"https://therundown.io/api/v2/sports/{_MLB_SPORT_ID}/events/{slate_date}"; headers={"X-TheRundown-Key":key,"Accept":"application/json"}
+    headers={"X-TheRundown-Key":key,"Accept":"application/json"}
     try:
-        payload=_request_payload(get_fn,url,headers,affiliate_ids); events=payload.get("events",[]) if isinstance(payload,dict) else []
-        if not isinstance(events,list):return []
+        events=[]
+        for query_date in (local_slate, local_slate + timedelta(days=1)):
+            url=f"https://therundown.io/api/v2/sports/{_MLB_SPORT_ID}/events/{query_date.isoformat()}"
+            payload=_request_payload(get_fn,url,headers,affiliate_ids)
+            day_events=payload.get("events",[]) if isinstance(payload,dict) else []
+            if isinstance(day_events,list):
+                events.extend(day_events)
+        # Deduplicate any provider overlap between the two date endpoints.
+        dedup={}
+        for event in events:
+            if not isinstance(event,dict):continue
+            eid=str(event.get("event_id") or event.get("id") or f"{event.get('event_date')}:{event.get('teams')}")
+            dedup[eid]=event
+        events=list(dedup.values())
         normalized=[]; market_rows=participant_rows=valid_price_rows=0
         for event in events:
             if not isinstance(event,dict):continue
@@ -162,7 +179,7 @@ def _fetch_therundown(get_fn):
                 if markets:books.append({"key":f"therundown_{book_id}","title":_AFFILIATE_NAMES.get(book_id,f"TheRundown {book_id}"),"markets":markets})
             if books:normalized.append(multi_odds._event(home,away,event.get("event_date"),event.get("event_id") or event.get("id"),books))
         _CACHE.update({"date":slate_date,"at":now,"events":normalized})
-        log.warning("TheRundown normalized %d of %d MLB events for %s (markets=%d participants=%d valid_prices=%d)",len(normalized),len(events),slate_date,market_rows,participant_rows,valid_price_rows)
+        log.warning("TheRundown normalized %d of %d MLB events for Eastern slate %s across UTC date boundary (markets=%d participants=%d valid_prices=%d)",len(normalized),len(events),slate_date,market_rows,participant_rows,valid_price_rows)
         return normalized
     except Exception:log.exception("TheRundown MLB odds normalization failed");return []
 
