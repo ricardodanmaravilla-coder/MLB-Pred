@@ -129,9 +129,19 @@ def match_odds_game(odds_games, mlb_game, max_hours=2.0):
         delta = abs((dt - target).total_seconds()) / 3600.0
         scored.append((delta, g))
     if not scored:
-        return None
+        # Some providers omit/garble commence_time while still exposing a
+        # unique, exact team matchup. Safe fallback only when there is a single
+        # candidate; doubleheaders remain ambiguous and are never guessed.
+        return candidates[0] if len(candidates) == 1 else None
     scored.sort(key=lambda x: x[0])
     if scored[0][0] > float(max_hours):
+        # Late West Coast games have occasionally arrived with provider
+        # timestamps shifted by timezone/calendar-boundary handling. If the
+        # matchup itself is unique, allow a bounded fallback instead of
+        # discarding otherwise valid odds. Doubleheaders still require strict
+        # time matching.
+        if len(candidates) == 1 and scored[0][0] <= 12.0:
+            return scored[0][1]
         return None
 
     # Provider duplicates usually have effectively the same start time. Merge
