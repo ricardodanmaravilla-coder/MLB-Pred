@@ -82,6 +82,19 @@ jobs:
           echo "$HEALTH"
           echo "$HEALTH" | grep -q '"candidate_isolation":true'
           curl -fsS --max-time 180 -X POST "$URL/api/settle"
+          PROD=$(curl -fsS --max-time 600 -X POST "$URL/api/scan?persist=false")
+          printf '%s' "$PROD" > /tmp/prod-scan.json
+          python - <<'PY'
+          import json
+          d=json.load(open('/tmp/prod-scan.json'))
+          assert d.get('mode') == 'production_v7_only', d
+          for row in d.get('recommendations') or []:
+              odds=float(row.get('cuota') or 0)
+              assert 1.20 <= odds <= 4.00, f"Implausible production odds: {row}"
+              if str(row.get('mercado') or '') == 'Totales':
+                  assert float(row.get('probabilidad') or -999) >= 64.0, f"Total below 64% leaked: {row}"
+          print('Production recommendation guards OK:', len(d.get('recommendations') or []))
+          PY
           if test -f models/shadow_candidate.joblib; then
             echo "$HEALTH" | grep -q '"shadow_candidate_ready":true'
             CANDIDATE=$(curl -fsS --max-time 600 -X POST "$URL/api/candidate/scan?persist=false")
