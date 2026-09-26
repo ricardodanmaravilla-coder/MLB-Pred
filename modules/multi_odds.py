@@ -285,26 +285,59 @@ def _match_key(ev: dict):
 
 
 def _merge_events(*event_lists: list[dict]) -> list[dict]:
-    merged = {}
+    """Merge provider duplicates without collapsing doubleheaders.
+
+    The old implementation keyed only on away/home, so two games between the
+    same clubs on the same day were fused into one synthetic market.  That can
+    attach Game 2 odds to Game 1's MLB gamePk and later settle against the wrong
+    final score.  Keep separate event buckets by matchup + start-time proximity.
+    """
+    merged: list[dict] = []
+
+    def start_dt(ev):
+        return _iso(ev.get("commence_time"))
+
+    def parsed(value):
+        try:
+            if not value:
+                return None
+            return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except Exception:
+            return None
+
     for events in event_lists:
         for ev in events or []:
             key = _match_key(ev)
             if not all(key):
                 continue
-            if key not in merged:
-                merged[key] = _event(ev.get("home_team"), ev.get("away_team"), ev.get("commence_time"), ev.get("id"), [])
-            target = merged[key]
-            if not target.get("commence_time") and ev.get("commence_time"):
-                target["commence_time"] = ev.get("commence_time")
+            ev_time = parsed(start_dt(ev))
+            target = None
+            best_delta = None
+            for existing in merged:
+                if _match_key(existing) != key:
+                    continue
+                ex_time = parsed(existing.get("commence_time"))
+                if ev_time is None or ex_time is None:
+                    continue
+                delta = abs((ev_time - ex_time).total_seconds())
+                # Provider timestamps for the same game can drift a bit, but
+                # distinct doubleheader games are normally hours apart.
+                if delta <= 75 * 60 and (best_delta is None or delta < best_delta):
+                    target = existing
+                    best_delta = delta
+            if target is None:
+                target = _event(ev.get("home_team"), ev.get("away_team"), ev.get("commence_time"), ev.get("id"), [])
+                merged.append(target)
             for book in ev.get("bookmakers", []) or []:
                 clone = dict(book)
                 clone["title"] = str(book.get("title") or book.get("key") or "Book")
                 target["bookmakers"].append(clone)
-    for ev in merged.values():
+
+    for ev in merged:
         consensus = _consensus_book(ev)
         if consensus:
             ev["bookmakers"].insert(0, consensus)
-    return list(merged.values())
+    return merged
 
 
 def _median_price(values):
