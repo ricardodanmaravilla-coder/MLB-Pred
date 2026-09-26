@@ -7,6 +7,7 @@ from modules.ml_mlb import PredictorMLMLB
 from modules.scanner_engine import moneyline_candidate, total_candidate, runline_candidate
 from modules.pick_ledger import _prepare_rows
 from modules.web_service import american_to_decimal
+from modules.multi_odds import _merge_events
 
 
 def test_metric_quality_prefers_real_sources_only_with_coverage():
@@ -142,6 +143,16 @@ def test_implausible_odds_are_rejected_everywhere():
          'prob_combined':65,'ev_pct':5000,'kelly_pct':20,'bankroll_mxn':5000,'stake_mxn':1000}
     ], 'test')
     assert rows == []
+
+
+def test_doubleheader_events_are_not_collapsed():
+    events = [
+        {'id':'g1','home_team':'New York Yankees','away_team':'Baltimore Orioles','commence_time':'2026-09-25T20:05:00Z','bookmakers':[{'title':'Book A','markets':[]}]},
+        {'id':'g2','home_team':'New York Yankees','away_team':'Baltimore Orioles','commence_time':'2026-09-26T00:10:00Z','bookmakers':[{'title':'Book A','markets':[]}]},
+    ]
+    merged = _merge_events(events)
+    assert len(merged) == 2
+    assert {str(x.get('id')) for x in merged} == {'g1','g2'}
 
 def main():
     tests=[v for k,v in sorted(globals().items()) if k.startswith('test_') and callable(v)]
