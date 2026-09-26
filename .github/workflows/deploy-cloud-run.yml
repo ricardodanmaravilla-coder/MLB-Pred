@@ -70,7 +70,7 @@ jobs:
             --timeout 900 \
             --min 0 \
             --max 3 \
-            --update-env-vars="MLB_DATA_DIR=data"
+            --update-env-vars="MLB_DATA_DIR=data,BUILD_COMMIT=${GITHUB_SHA}"
       - name: Verify production and isolated candidate endpoints
         run: |
           URL=$(gcloud run services describe mlb-pred-v7 \
@@ -94,6 +94,13 @@ jobs:
               if str(row.get('mercado') or '') == 'Totales':
                   assert float(row.get('probabilidad') or -999) >= 64.0, f"Total below 64% leaked: {row}"
           print('Production recommendation guards OK:', len(d.get('recommendations') or []))
+          print('PRODUCTION PICKS:')
+          for row in d.get('recommendations') or []:
+              print(row)
+          print('ROYALS DIAGNOSTICS:')
+          for row in d.get('diagnostics') or []:
+              if 'Royals' in str(row.get('partido')) or 'Royals' in str(row.get('apuesta')):
+                  print(row)
           PY
           if test -f models/shadow_candidate.joblib; then
             echo "$HEALTH" | grep -q '"shadow_candidate_ready":true'
