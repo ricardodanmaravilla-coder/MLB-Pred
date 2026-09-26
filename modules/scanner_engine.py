@@ -113,7 +113,7 @@ def total_candidate(selection, prob_ml, prob_mc, odds, market_no_vig=None, prob_
     is_over = str(selection).strip().lower().startswith('over')
     min_ml = 56.0 if is_over else 54.0
     return _candidate('Totales', selection, prob_ml, prob_mc, odds, market_no_vig,
-                      min_ml=min_ml, min_mc=54.0, min_combined=60.0,
+                      min_ml=min_ml, min_mc=54.0, min_combined=64.0,
                       max_disagreement=4.0, min_edge_pp=5.0, min_ev_pct=5.0,
                       push_pct=prob_push_mc)
 
