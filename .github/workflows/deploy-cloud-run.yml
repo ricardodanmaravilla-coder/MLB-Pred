@@ -14,6 +14,7 @@ on:
       - 'modules/bigdata_mlb.py'
       - 'modules/bigdata_tracking.py'
       - 'modules/web_service.py'
+      - 'modules/scanner_engine.py'
       - 'modules/game_context.py'
       - 'modules/multi_odds.py'
       - 'modules/therundown_odds.py'
