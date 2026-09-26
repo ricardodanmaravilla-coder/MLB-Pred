@@ -5,7 +5,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from modules import multi_odds
@@ -51,7 +51,7 @@ def get_candidate_service() -> EnrichedMLBWebService:
 
 @app.get("/")
 def index():
-    return FileResponse(STATIC_DIR / "index.html")
+    return FileResponse(STATIC_DIR / "index.html", headers={"Cache-Control":"no-store, no-cache, must-revalidate, max-age=0"})
 
 
 @app.get("/api/health")
@@ -74,7 +74,8 @@ def health():
 def slate():
     try:
         service = get_service()
-        return {"date": service.health()["slate_date"], "games": service.slate(), "model": service.health()}
+        payload = {"date": service.health()["slate_date"], "games": service.slate(), "model": service.health()}
+        return JSONResponse(payload, headers={"Cache-Control":"no-store, no-cache, must-revalidate, max-age=0"})
     except Exception as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
