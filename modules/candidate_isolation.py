@@ -18,6 +18,18 @@ SHADOW_MAX_DISAGREEMENT = 4.0
 SHADOW_KELLY_CAP = 5.0
 
 
+def _unstarted_games(games: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Scanner-only guard: never recommend a game after first pitch."""
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+    out = []
+    for game in games or []:
+        start = parse_utc(game.get("start_time_utc") or game.get("commence_time"))
+        if start is None or start > now:
+            out.append(game)
+    return out
+
+
 def _doubleheader_game_numbers(games: list[dict[str, Any]]) -> dict[str, int]:
     """Return gamePk -> 1/2/... only for same-day repeated matchups.
 
@@ -154,8 +166,9 @@ def scan_production(service, persist: bool = True) -> dict[str, Any]:
     if not service.model_ready:
         raise RuntimeError("Modelo ML no disponible")
     accepted, diagnostics, errors = [], [], []
-    games = service.slate()
-    doubleheader_numbers = _doubleheader_game_numbers(games)
+    all_games = service.slate()
+    doubleheader_numbers = _doubleheader_game_numbers(all_games)
+    games = _unstarted_games(all_games)
     for game in games:
         try:
             result = service._evaluate_game(game)
@@ -208,8 +221,9 @@ def scan_candidate(service, persist: bool = True) -> dict[str, Any]:
         raise RuntimeError("Shadow candidate artifact unavailable")
 
     accepted, diagnostics, errors = [], [], []
-    games = service.slate()
-    doubleheader_numbers = _doubleheader_game_numbers(games)
+    all_games = service.slate()
+    doubleheader_numbers = _doubleheader_game_numbers(all_games)
+    games = _unstarted_games(all_games)
     for game in games:
         try:
             baseline_result = service._evaluate_game(game)
